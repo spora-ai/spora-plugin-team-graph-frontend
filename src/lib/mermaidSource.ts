@@ -39,7 +39,10 @@ export function buildMermaidSource(graph: GraphPayload): string {
     lines.push('  classDef status-awaiting fill:#fef3c7,stroke:#f59e0b,color:#92400e')
     lines.push('  classDef status-failed fill:#fee2e2,stroke:#ef4444,color:#991b1b')
     lines.push('  classDef status-completed fill:#f1f5f9,stroke:#94a3b8,color:#475569')
-    lines.push('  classDef status-aborted fill:#f5f3ff,stroke:#a855f7,color:#6b21a8')
+    /* Fuchsia instead of purple — the host's app accent is violet, so two near-blue
+       ABORTED swatches on the same canvas read as duplicates. Fuchsia lands far
+       enough down the spectrum to remain distinct under both light/dark. */
+    lines.push('  classDef status-aborted fill:#fdf4ff,stroke:#d946ef,color:#a21caf')
 
     for (const node of graph.nodes) {
         const name = escapeAttr(node.name)

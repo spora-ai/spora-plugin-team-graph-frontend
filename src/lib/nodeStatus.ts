@@ -76,6 +76,13 @@ export function statusLabel(status: AgentStatus): string {
 /**
  * Background colour for the panel's avatar / pill dots. Mirrors the
  * `STATUS_PILL_BG` map in Prototype E.
+ *
+ * `ABORTED` uses fuchsia-500 instead of the original purple (#a855f7):
+ * the host's app accent is violet, so two near-blue swatches on the
+ * same canvas read as duplicates and the operator can't tell at a
+ * glance whether an aborted node belongs to the same colour family
+ * as the brand. Fuchsia lives far enough down the spectrum to remain
+ * distinct under both light/dark and never collides with our accent.
  */
 export function statusColor(status: AgentStatus): string {
     switch (status) {
@@ -92,7 +99,7 @@ export function statusColor(status: AgentStatus): string {
         case 'FAILED':
             return '#ef4444'
         case 'ABORTED':
-            return '#a855f7'
+            return '#d946ef'
         case 'COMPLETED':
         case 'CANCELLED':
             return '#94a3b8'

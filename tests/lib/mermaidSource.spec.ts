@@ -81,7 +81,7 @@ describe('buildMermaidSource', () => {
             '  classDef status-awaiting fill:#fef3c7,stroke:#f59e0b,color:#92400e',
             '  classDef status-failed fill:#fee2e2,stroke:#ef4444,color:#991b1b',
             '  classDef status-completed fill:#f1f5f9,stroke:#94a3b8,color:#475569',
-            '  classDef status-aborted fill:#f5f3ff,stroke:#a855f7,color:#6b21a8',
+            '  classDef status-aborted fill:#fdf4ff,stroke:#d946ef,color:#a21caf',
             '  n1["<div class=\'tg-node\'><div class=\'tg-node-name\'>Alex</div><div class=\'tg-node-role\'>#1 · Marketing Lead</div><span class=\'tg-status-pill tg-status-running\'><span class=\'dot\'></span>running</span><div class=\'tg-node-stats\'><span><strong>1</strong> active · <strong>4</strong>/24h</span></div></div>"]:::status-running',
             '  n2["<div class=\'tg-node\'><div class=\'tg-node-name\'>Blake</div><div class=\'tg-node-role\'>#2 · Content Writer</div><span class=\'tg-status-pill tg-status-running\'><span class=\'dot\'></span>running</span><div class=\'tg-node-stats\'><span><strong>1</strong> active · <strong>3</strong>/24h</span></div></div>"]:::status-running',
             '  n3["<div class=\'tg-node\'><div class=\'tg-node-name\'>Casey</div><div class=\'tg-node-role\'>#3 · Translator</div><span class=\'tg-status-pill tg-status-completed\'><span class=\'dot\'></span>idle</span><div class=\'tg-node-stats\'><span><strong>0</strong> active · <strong>1</strong>/24h</span></div></div>"]:::status-completed',
