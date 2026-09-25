@@ -35,9 +35,9 @@ export function useTeamGraph(principalId: Ref<number | null>): UseTeamGraph {
     const refreshTick = ref(0)
 
     let timer: ReturnType<typeof setInterval> | null = null
-    // Monotonic request token — a slow earlier response that no longer
-    // matches the latest principalId must not commit, otherwise
-    // rapid selector changes surface the previous principal's data.
+    /* Monotonic request token — a slow earlier response that no longer
+     * matches the latest principalId must not commit, otherwise
+     * rapid sidebar clicks surface the previous principal's data. */
     let requestToken = 0
 
     async function loadNow(): Promise<void> {

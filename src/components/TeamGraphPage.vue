@@ -1,33 +1,45 @@
 <script setup lang="ts">
 /**
- * TeamGraphPage — top-level layout.
+ * TeamGraphPage — three-column layout.
  *
- * Toolbar (title + principal selector + refresh) → legend →
- * canvas + (lg+) sidebar / (<lg) centred modal.
+ *   ┌─────────────┬────────────────────────┬──────────────────┐
+ *   │ Left list   │ Centre graph canvas     │ Right detail      │
+ *   │ (principals │                        │ (selected agent)  │
+ *   │ the user is │                        │                   │
+ *   │ a member of)│                        │                   │
+ *   └─────────────┴────────────────────────┴──────────────────┘
  *
- * Source switch:
- *   - When the API response carries `fixtures`, the toolbar
- *     selector switches between in-memory demo principals
- *     (`FixtureKey`). No backend call is made.
- *   - Otherwise, the selector is fed by `GET /api/v1/principals`
- *     and each switch triggers `fetchGraph(principalId)` via
- *     `useTeamGraph`.
+ * One graph per principal. The left column is a sidebar that lists
+ * the user's own user-principal ("My Agents") plus every group they're
+ * a member of. The right column is the agent-detail sidebar — it now
+ * renders as a sidebar at every viewport size, never as a centred
+ * modal (the modal-on-mobile variant is gone: the right column just
+ * collapses to a smaller fixed width on narrow screens).
  *
- * Selection lives in Pinia so the canvas (left) and the panel /
- * modal (right) stay in lockstep.
+ * Data flow:
+ *   - usePrincipalList → loads `/api/v1/principals` on mount, exposes
+ *     `principals`, `selectedPrincipalId`, `select(id)`, `reload()`.
+ *   - useTeamGraph → fetches the live `/plugins/team-graph/graph` for
+ *     the selected principal id, 5-second polling, refetch button.
+ *
+ * Selection (which agent is highlighted in the canvas) lives in the
+ * Pinia store so the canvas (centre) and the detail panel (right) stay
+ * in lockstep across re-renders.
+ *
+ * Switching principals clears the agent selection — agent ids are
+ * principal-local, so an id from the previous principal is meaningless
+ * in the new principal's graph.
  */
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useSelectionStore } from '../stores/selection'
+import { usePrincipalList } from '../composables/usePrincipalList'
 import { useTeamGraph } from '../composables/useTeamGraph'
-import { fixtureByKey } from '../api/fixtures'
-import { fetchPrincipals } from '../api/teamGraph'
+import { principalLabel, type PrincipalSummary } from '../api/principals'
 import TeamGraphCanvas from './TeamGraphCanvas.vue'
 import AgentDetailPanel from './AgentDetailPanel.vue'
-import AgentDetailModal from './AgentDetailModal.vue'
-import PrincipalSelector from './PrincipalSelector.vue'
+import PrincipalListSidebar from './PrincipalListSidebar.vue'
 import Legend from './Legend.vue'
 import GraphErrorFallback from './GraphErrorFallback.vue'
-import type { GraphPayload } from '../types'
 
 defineProps<{
     hostContext: import('../shims').PluginHostContext
@@ -35,59 +47,66 @@ defineProps<{
 
 const selection = useSelectionStore()
 
-const principalId = ref<number | null>(null)
-const fixtureKey = ref<string>('tinyStartup')
-const fixtureGraph = ref<GraphPayload | null>(null)
-const principals = ref<{ id: number; name: string }[]>([])
+const principalList = usePrincipalList()
+const { graph, loading, error, refetch, refreshTick } = useTeamGraph(principalList.selectedPrincipalId)
+
 const shouldFit = ref(false)
+const principalError = computed<{ list: string | null; graph: string | null }>(() => ({
+    list: principalList.error.value,
+    graph: error.value,
+}))
 
-const inFixtureMode = computed<boolean>(() => fixtureGraph.value !== null && fixtureGraph.value.fixtures.length > 0)
+interface PrincipalHeadline {
+    label: string
+    badge: 'MY' | 'GROUP'
+}
 
-const { graph: liveGraph, loading, error, refetch, refreshTick } = useTeamGraph(principalId)
-
-const graph = computed<GraphPayload | null>(() => {
-    if (inFixtureMode.value) return fixtureGraph.value
-    return liveGraph.value
+const activePrincipal = computed<PrincipalSummary | null>(() => {
+    const id = principalList.selectedPrincipalId.value
+    if (id === null) return null
+    return principalList.principals.value.find((p) => p.id === id) ?? null
 })
 
-const summary = computed<{ nodes: number; edges: number; bidirectional: number }>(() => {
-    if (graph.value === null) return { nodes: 0, edges: 0, bidirectional: 0 }
-    const bidirectional = (() => {
-        const seen = new Set<string>()
-        let n = 0
-        for (const e of graph.value.edges) {
-            const key = [e.source, e.target].sort((a, b) => a - b).join('-')
-            if (seen.has(key)) continue
-            seen.add(key)
-            if (graph.value.edges.some((o) => o.source === e.target && o.target === e.source)) n++
-        }
-        return n
-    })()
-    return { nodes: graph.value.nodes.length, edges: graph.value.edges.length, bidirectional }
+const headline = computed<PrincipalHeadline | null>(() => {
+    const p = activePrincipal.value
+    if (p === null) return null
+    return {
+        label: principalLabel(p),
+        badge: p.type === 'user' && p.is_current_user_owned ? 'MY' : 'GROUP',
+    }
+})
+
+interface GraphStats {
+    nodes: number
+    edges: number
+    bidirectional: number
+}
+
+const stats = computed<GraphStats>(() => {
+    const g = graph.value
+    if (g === null) return { nodes: 0, edges: 0, bidirectional: 0 }
+    const seen = new Set<string>()
+    let bidirectional = 0
+    for (const e of g.edges) {
+        const key = [e.source, e.target].sort((a, b) => a - b).join('-')
+        if (seen.has(key)) continue
+        seen.add(key)
+        if (g.edges.some((o) => o.source === e.target && o.target === e.source)) bidirectional++
+    }
+    return { nodes: g.nodes.length, edges: g.edges.length, bidirectional }
 })
 
 async function refresh(): Promise<void> {
-    if (inFixtureMode.value) {
-        const bundle = fixtureByKey(fixtureKey.value)
-        if (bundle !== null) fixtureGraph.value = bundle.graph
-    } else {
-        await refetch()
-    }
+    await refetch()
     shouldFit.value = true
 }
 
-watch(fixtureKey, (next) => {
+function onSelectPrincipal(id: number): void {
     selection.clear()
-    if (inFixtureMode.value) {
-        const bundle = fixtureByKey(next)
-        if (bundle !== null) {
-            fixtureGraph.value = bundle.graph
-            shouldFit.value = true
-        }
-    }
-})
+    principalList.select(id)
+}
 
-watch(principalId, () => {
+watch(() => principalList.selectedPrincipalId.value, () => {
     selection.clear()
     shouldFit.value = true
 })
@@ -96,59 +115,43 @@ watch(refreshTick, () => {
     selection.clear()
 })
 
-onMounted(async () => {
-    try {
-        const list = await fetchPrincipals()
-        principals.value = list
-        if (list.length > 0 && principalId.value === null) {
-            const first = list[0]
-            if (first !== undefined) principalId.value = first.id
-        }
-    } catch {
-        principals.value = []
-    }
-    if (fixtureGraph.value === null) {
-        const bundle = fixtureByKey(fixtureKey.value)
-        if (bundle !== null) fixtureGraph.value = bundle.graph
-    }
-})
-
 function onTapEmptyCanvas(): void {
-    selection.clear()
-}
-
-function onModalClose(): void {
     selection.clear()
 }
 </script>
 
 <template>
-    <div class="p-4 lg:p-6 max-w-7xl mx-auto w-full">
+    <div class="p-4 lg:p-6 max-w-7xl mx-auto w-full" data-testid="tg-page">
         <header class="mb-4 flex flex-wrap items-end justify-between gap-4">
             <div class="min-w-0">
                 <h1 class="text-2xl font-semibold tracking-tight">Team Graph</h1>
                 <p
-                    v-if="graph !== null"
+                    v-if="headline !== null && graph !== null"
                     class="text-sm text-muted-foreground mt-1"
                     data-testid="tg-summary"
                 >
-                    {{ summary.nodes }} agents · {{ summary.edges }} edge{{ summary.edges === 1 ? '' : 's' }}
-                    <span v-if="summary.bidirectional > 0"> · {{ summary.bidirectional }} bidirectional</span>
+                    <span class="text-foreground font-medium">{{ headline.label }}</span>
+                    ·
+                    {{ stats.nodes }} agent{{ stats.nodes === 1 ? '' : 's' }} ·
+                    {{ stats.edges }} edge{{ stats.edges === 1 ? '' : 's' }}
+                    <span v-if="stats.bidirectional > 0">
+                        · {{ stats.bidirectional }} bidirectional
+                    </span>
+                </p>
+                <p
+                    v-else-if="principalList.loading.value"
+                    class="text-sm text-muted-foreground mt-1"
+                >
+                    Loading teams…
                 </p>
                 <p
                     v-else
                     class="text-sm text-muted-foreground mt-1"
                 >
-                    Loading the team graph…
+                    Select a team on the left to view its agent graph.
                 </p>
             </div>
-            <div class="flex items-center gap-2 flex-wrap">
-                <PrincipalSelector
-                    :fixtures="inFixtureMode && graph !== null ? graph.fixtures : []"
-                    :principals="principals"
-                    @update:fixture-key="fixtureKey = $event"
-                    @update:principal-id="principalId = $event"
-                />
+            <div class="flex items-center gap-2">
                 <button
                     type="button"
                     class="h-9 inline-flex items-center gap-1.5 rounded-lg border border-border bg-background text-muted-foreground hover:text-foreground hover:bg-muted/50 px-3 transition-colors"
@@ -173,40 +176,53 @@ function onModalClose(): void {
 
         <Legend />
 
-        <div
-            v-if="error !== null && graph === null"
-            class="surface-card border border-border rounded-xl bg-card text-card-foreground"
-            style="height: 620px;"
-        >
-            <GraphErrorFallback :message="error">
-                <button
-                    type="button"
-                    class="mt-4 text-[11px] font-medium text-primary hover:underline"
-                    @click="refresh"
-                >
-                    Retry
-                </button>
-            </GraphErrorFallback>
-        </div>
-        <div
-            v-else
-            class="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_360px] gap-4"
-        >
-            <TeamGraphCanvas
-                :graph="graph"
-                :should-fit="shouldFit"
-                @tap-empty-canvas="onTapEmptyCanvas"
+        <div class="grid grid-cols-1 lg:grid-cols-[240px_minmax(0,1fr)_340px] gap-4 items-start">
+            <PrincipalListSidebar
+                :principals="principalList.principals.value"
+                :selected-id="principalList.selectedPrincipalId.value"
+                :loading="principalList.loading.value"
+                @select="onSelectPrincipal"
             />
-            <aside class="hidden lg:block">
+
+            <div class="min-w-0">
+                <div
+                    v-if="principalError.graph !== null && graph === null"
+                    class="surface-card border border-border rounded-xl bg-card text-card-foreground"
+                    style="height: 620px;"
+                    data-testid="tg-graph-error"
+                >
+                    <GraphErrorFallback :message="principalError.graph ?? ''">
+                        <button
+                            type="button"
+                            class="mt-4 text-[11px] font-medium text-primary hover:underline"
+                            @click="refresh"
+                        >
+                            Retry
+                        </button>
+                    </GraphErrorFallback>
+                </div>
+                <TeamGraphCanvas
+                    v-else
+                    :graph="graph"
+                    :should-fit="shouldFit"
+                    @tap-empty-canvas="onTapEmptyCanvas"
+                />
+            </div>
+
+            <aside class="min-w-0">
                 <AgentDetailPanel v-if="graph !== null" :graph="graph" />
+                <div
+                    v-else
+                    class="surface-card border border-border rounded-xl bg-card text-card-foreground p-6 text-center"
+                    data-testid="tg-detail-placeholder"
+                >
+                    <p class="text-sm font-medium">No agent selected</p>
+                    <p class="text-xs text-muted-foreground mt-1">
+                        Click any node in the diagram to see its inbound and outbound relations,
+                        plus recent chats.
+                    </p>
+                </div>
             </aside>
         </div>
-
-        <AgentDetailModal
-            v-if="graph !== null"
-            :graph="graph"
-            :open="selection.selectedId !== null"
-            @close="onModalClose"
-        />
     </div>
 </template>

@@ -5,6 +5,47 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.1] - 2026-09-25
+
+### Changed
+
+- **Real principals, no fixtures.** The plugin no longer ships demo
+  fixture data (`api/fixtures.ts` deleted; backend `fixtures: [...]`
+  field removed from the graph endpoint envelope). The left column is
+  a `PrincipalListSidebar` listing the caller's principals from
+  `GET /principals/me` — the user-owned user-principal always renders
+  as "My Agents", and every group the user belongs to renders as its
+  raw name. Switching a row swaps the centre canvas to that principal's
+  directed graph.
+- **Detail as a sidebar at every viewport.** The `lg:`-only sidebar +
+  centred-modal split is gone. Per user feedback ("details open in an
+  overlay instead of the sidebar"), `AgentDetailPanel` now renders as
+  a right-column sidebar at every breakpoint; `AgentDetailModal.vue`
+  is deleted.
+- **Three-column layout.** `[240px principal list | flex graph | 340px
+  detail]`. On `<lg` the columns stack to `[principal list above
+  graph above detail]` instead of swapping the detail for a modal.
+
+### Added
+
+- `usePrincipalList` composable: loads `/principals/me`, picks the
+  user-principal as the default selection, exposes
+  `select(id)` and `reload()`.
+- New `PrincipalListSidebar.vue` component with MY/G badges, hover
+  states, and aria-current for the active row.
+- Plugin-side `principalLabel()` helper that renders the user-owned
+  user-principal as "My Agents" regardless of what the wire's `name`
+  field says (the wire usually returns the user's email).
+
+### Size
+
+- `frontend/main.js`: 3,436,440 B (3,355 KiB) raw / 1,031,210 B
+  (1,007 KiB) gzipped.
+- `frontend/style.css`: 13,344 B (13 KiB) raw / 3,029 B (3 KiB)
+  gzipped.
+- Diff vs v0.1.0: -11 KiB raw on main.js (fixture graph payloads gone),
+  no meaningful change in gzipped size.
+
 ## [0.1.0] - 2026-09-25
 
 ### Added

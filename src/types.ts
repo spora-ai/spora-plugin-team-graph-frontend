@@ -1,15 +1,9 @@
 /**
  * Wire shape for the team-graph plugin.
  *
- * Mirrors the response shape of `GET /api/v1/plugins/team-graph/graph`
- * (see `spora-plugin-team-graph` backend plan, "GET /api/v1/plugins/
- * team-graph/graph"). The plugin-local fixtures in `api/fixtures.ts`
- * produce payloads of this shape verbatim so the Mermaid source
- * builder can render the wire response and the fixture response
- * without branching.
- *
- * Status enum mirrors the host's `app/Enums/AgentStatus.php` —
- * the frontend is the only surface where `AWAITING_INPUT`,
+ * Mirrors the response shape of `GET /api/v1/plugins/team-graph/graph`.
+ * Status enum mirrors the host's `app/Enums/AgentStatus.php` — the
+ * frontend is the only surface where `AWAITING_INPUT`,
  * `AWAITING_FINAL_APPROVAL`, `APPROVED`, `CANCELLED`, and `QUEUED`
  * are collapsed into a smaller set of class names (see
  * `lib/nodeStatus.ts → statusSlug`); the wire layer still carries
@@ -48,14 +42,9 @@ export interface GraphEdge {
     last_invoked_at: string
 }
 
-export interface FixtureSummary {
-    key: string
-    label: string
-}
-
 export interface PrincipalSummary {
     id: number
-    type: string
+    type: 'user' | 'group'
     name: string
     is_current_user_owned: boolean
 }
@@ -64,7 +53,6 @@ export interface GraphPayload {
     principal: PrincipalSummary
     nodes: GraphNode[]
     edges: GraphEdge[]
-    fixtures: FixtureSummary[]
     generated_at: string
 }
 

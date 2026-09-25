@@ -25,13 +25,11 @@ const fixturePayload: GraphPayload = {
     edges: [
         { id: '1->2', source: 1, target: 2, op: 'sub_agent', count_24h: 3, last_invoked_at: '2026-09-23T10:14:00Z' },
     ],
-    fixtures: [],
     generated_at: '2026-09-25T08:14:00Z',
 }
 
 vi.mock('../../src/api/teamGraph', () => ({
     fetchGraph: (id: number) => fetchGraphMock(id),
-    fetchPrincipals: vi.fn().mockResolvedValue([]),
 }))
 
 beforeEach(() => {

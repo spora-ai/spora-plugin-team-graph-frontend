@@ -24,7 +24,6 @@ const tinyStartup: GraphPayload = {
         { id: '1->2', source: 1, target: 2, op: 'sub_agent', count_24h: 3, last_invoked_at: '2026-09-23T10:14:00Z' },
         { id: '1->4', source: 1, target: 4, op: 'sub_agent', count_24h: 2, last_invoked_at: '2026-09-23T09:48:00Z' },
     ],
-    fixtures: [],
     generated_at: '2026-09-25T08:14:00Z',
 }
 
