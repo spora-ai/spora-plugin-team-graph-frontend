@@ -1,0 +1,29 @@
+# Dependencies
+/node_modules/
+
+# Build artifacts (Vite output)
+/frontend/main.js
+/frontend/style.css
+/.vite/
+/dist/
+
+# Coverage
+/coverage/
+/coverage.xml
+
+# Release packaging artifacts (CI staging + tarballs)
+/package/
+/staging/
+
+# Lockfile + caches
+/package-lock.json.bak
+
+# IDE / OS
+/.idea/
+/.vscode/
+/.DS_Store
+*.swp
+*.log
+/npm-debug.log*
+
+/tmp/

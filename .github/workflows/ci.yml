@@ -1,0 +1,307 @@
+name: CI
+
+# External actions are pinned to full commit SHAs to prevent supply-chain
+# attacks via tag reassignment. Run `gh api repos/OWNER/REPO/git/refs/tags/vN`
+# to look up the current SHA when upgrading.
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint-and-test:
+    name: Lint + Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: package-lock.json
+
+      - name: Install
+        run: npm ci --ignore-scripts
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Type-check
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
+      - name: Coverage
+        # Runs the suite with the v8 coverage provider enabled so the
+        # artifact is available for debugging. The SonarCloud job
+        # below re-runs the same suite (it has its own working tree)
+        # and ingests coverage/lcov.info from there — it does NOT
+        # pick up this job's coverage/ directory. Excluded files
+        # (main.ts / dev-main / shims.d.ts / types.ts / *.vue) are
+        # mirrored in sonar-project.properties so the coverage view
+        # matches what SonarCloud sees.
+        env:
+          CI: '1'
+        run: npm run test:coverage
+
+  build:
+    name: Build + smoke
+    runs-on: ubuntu-latest
+    needs: lint-and-test
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: package-lock.json
+
+      - name: Install
+        run: npm ci --ignore-scripts
+
+      - name: Build
+        run: npm run build
+
+      - name: Smoke
+        # Verify the IIFE bundle mounts in a headless DOM. Catches
+        # regressions where the build emits a bundle that throws on
+        # window.SporaAppTeamGraph.mount() — the kind of failure that's
+        # invisible to the unit tests but breaks production.
+        run: node scripts/smoke.js
+
+  size-budget:
+    name: Bundle size budget
+    runs-on: ubuntu-latest
+    needs: lint-and-test
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: package-lock.json
+
+      - name: Install
+        run: npm ci --ignore-scripts
+
+      - name: Build
+        run: npm run build
+
+      - name: Verify bundle size
+        # Sanity check — main.js + style.css combined should fit under
+        # 4 MB pre-gzip. Mermaid 10.9.x bundles every diagram type by
+        # default (sequence / class / gantt / gitgraph / etc.) and the
+        # raw IIFE lands at ~3.4 MB / ~1 MB gz — that's the floor for
+        # a graph plugin without diagram-specific tree-shaking. The
+        # budget is set generously enough to admit the current
+        # Mermaid baseline; a 4 MB ceiling still catches the obvious
+        # "accidentally re-bundled Vue / Pinia / vue-router" mistake
+        # (those alone add ~150 KB raw to the bundle). The plan's
+        # "800 KB" figure referenced gzipped bytes, not raw.
+        run: |
+          MAIN=$(stat -c%s frontend/main.js)
+          CSS=$(stat -c%s frontend/style.css)
+          TOTAL=$((MAIN + CSS))
+          echo "main.js=${MAIN}B style.css=${CSS}B total=${TOTAL}B"
+          if [ $TOTAL -gt 4194304 ]; then
+            echo "::error::Bundle exceeded 4 MB budget (got ${TOTAL}B)"
+            exit 1
+          fi
+
+  sonarcloud:
+    name: SonarCloud scan
+    runs-on: ubuntu-latest
+    needs: lint-and-test
+    if: github.event_name == 'push' || github.event_name == 'pull_request'
+    steps:
+      - name: Checkout
+        # fetch-depth: 0 so SonarCloud can attribute issues via git
+        # blame; without it the "new code" computation falls back to
+        # the last commit and skews coverage / quality gate.
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: package-lock.json
+
+      - name: Install
+        run: npm ci --ignore-scripts
+
+      # Generate the coverage report the JS/TS scanner ingests. The
+      # `lint-and-test` job above runs the same suite but doesn't share
+      # its working tree, so we re-run it here.
+      - name: Run tests with coverage
+        env:
+          CI: '1'
+        run: npm run test:coverage
+
+      # Fail loud if the report is missing. The scanner would otherwise
+      # exit 0 with "No coverage information will be saved" and the
+      # dashboard would show "Coverage is not yet visible" — which is
+      # harder to debug than a step that names the missing file.
+      - name: Verify coverage report
+        run: |
+          set -euo pipefail
+          if [ ! -s coverage/lcov.info ]; then
+            echo "::error::coverage/lcov.info is missing or empty — the scanner would publish 0% coverage."
+            echo "::error::Check that 'npm run test:coverage' succeeded and emitted ./coverage/lcov.info."
+            exit 1
+          fi
+          echo "coverage/lcov.info size: $(wc -c < coverage/lcov.info) bytes"
+          echo "covered files: $(grep -c '^SF:' coverage/lcov.info)"
+
+      - name: SonarCloud Scan
+        # v6.0.0 drops the cache step entirely and runs on node20, so the
+        # cache-v4.0.2 deprecation goes away. It also exposes `projectBaseDir`
+        # as a first-class input, which the action concatenates as
+        # `-Dsonar.projectBaseDir=...` — the only form the bundled scanner
+        # CLI 7.2.0 accepts (the legacy `--project-base-dir=...` flag we used
+        # with v4 is rejected with "Unrecognized option").
+        #
+        # Note: do NOT forward `SONAR_HOST_URL` into the step env. The
+        # repo has no such secret, so the var expands to an empty string,
+        # and the scanner 7.2.0 bootstrapper treats the empty string as a
+        # malformed SonarQube-Server host URL instead of falling back to
+        # the `sonar.organization=spora-ai` org-based auto-resolution.
+        # SonarCloud auth is handled by SONAR_TOKEN alone.
+        uses: SonarSource/sonarqube-scan-action@fd88b7d7ccbaefd23d8f36f73b59db7a3d246602 # v6.0.0
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        with:
+          projectBaseDir: ${{ github.workspace }}
+
+  # Tags only. Builds the bundle, packages ONLY `frontend/` (the
+  # SporaPluginFrontendInstaller source dir) under a versioned root,
+  # and creates the GitHub Release with the tarball attached.
+  # `composer install` on operator hosts reads `dist.url` from the
+  # tagged composer.json — see RELEASING.md for the full flow.
+  build-and-release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: package-lock.json
+
+      - name: Install
+        run: npm ci
+
+      - name: Build
+        # vue-tsc + vite build, output goes to frontend/ (per vite.config.ts).
+        run: npm run build
+
+      - name: Verify dist.url matches the release tag
+        run: |
+          TAG_V="${GITHUB_REF_NAME}"
+          EXPECTED="https://github.com/${{ github.repository }}/releases/download/${TAG_V}/spora-plugin-team-graph-frontend-${TAG_V}.tar.gz"
+          ACTUAL=$(jq -r .dist.url composer.json)
+          echo "Tag:        ${TAG_V}"
+          echo "Expected:   ${EXPECTED}"
+          echo "Actual:     ${ACTUAL}"
+          if [ "${ACTUAL}" != "${EXPECTED}" ]; then
+            echo "::error::composer.json dist.url does not match the release tag. Update composer.json BEFORE tagging."
+            echo "::error::Expected: ${EXPECTED}"
+            echo "::error::Actual:   ${ACTUAL}"
+            exit 1
+          fi
+
+      - name: Verify only frontend/ is shipped
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          # The release artifact must contain ONLY the contents of frontend/
+          # (main.js + style.css, the Vite IIFE bundle) under a single
+          # spora-plugin-team-graph-frontend-v<VERSION>/ root directory.
+          # Nothing else — no source code, no node_modules, no build
+          # configs. The versioned root is what Composer's TarDownloader
+          # (PHP's PharData) requires to extract the archive cleanly.
+          # The frontend/ subdir MUST be preserved verbatim so
+          # SporaPluginFrontendInstaller can find it after extraction.
+          set -e
+          STAGING=$(mktemp -d)
+          mkdir -p "$STAGING/spora-plugin-team-graph-frontend-${TAG}"
+          cp -R frontend "$STAGING/spora-plugin-team-graph-frontend-${TAG}/"
+          tar -czf /tmp/release-check.tar.gz -C "$STAGING" "spora-plugin-team-graph-frontend-${TAG}"
+          PREFIX="spora-plugin-team-graph-frontend-${TAG}/"
+          tar -tzf /tmp/release-check.tar.gz | head -20
+          echo
+          echo "Release artifact contains $(tar -tzf /tmp/release-check.tar.gz | wc -l | tr -d ' ') entries."
+
+          # Deny list: fail loudly if any of these ever sneak into the
+          # release tarball. Add to this list if a new non-runtime path
+          # starts shipping by accident. Strip the versioned root before
+          # matching so the regex sees only real frontend/ entries.
+          # main.js and style.css are ALLOWED inside frontend/ but DENIED
+          # at the top level (where they used to ship pre-v0.1.3).
+          DENY_PATTERNS='^((\.git|\.github|node_modules|src|tests|coverage|scripts|package\.json|package-lock\.json|composer\.json|composer\.lock|vite\.config\.ts|tsconfig\.json|tailwind\.config\.ts|postcss\.config\.js|eslint\.config\.js|sonar-project\.properties|index\.html|README\.md|RELEASING\.md|main\.js|style\.css)/?)$'
+          LEAKED=$(tar -tzf /tmp/release-check.tar.gz | grep -E "^${PREFIX}" | sed "s|^${PREFIX}||" | grep -E "$DENY_PATTERNS" || true)
+          if [ -n "$LEAKED" ]; then
+            echo "::error::Release artifact contains non-runtime paths:"
+            echo "$LEAKED"
+            exit 1
+          fi
+
+          # Allow list: confirm the expected frontend/ entries are
+          # present, each under the versioned root. Both files are
+          # REQUIRED for this plugin: main.js carries the IIFE bundle
+          # (window.SporaAppTeamGraph) and style.css carries the Mermaid
+          # node + canvas styles scoped under #spora-plugin-team-graph —
+          # the host SPA loads both via SporaPluginFrontendInstaller's
+          # copyFrontend().
+          for REQUIRED in main.js style.css; do
+            if ! tar -tzf /tmp/release-check.tar.gz | grep -qx "^${PREFIX}frontend/${REQUIRED}"; then
+              echo "::error::Release artifact is missing required entry: ${PREFIX}frontend/${REQUIRED}"
+              exit 1
+            fi
+          done
+
+          echo "OK: release artifact shape is correct (only frontend/ contents, under spora-plugin-team-graph-frontend-${TAG}/frontend/)."
+
+      - name: Package
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          # Ship ONLY the Vite frontend/ output, packaged under a single
+          # versioned root directory so Composer's TarDownloader (PHP's
+          # PharData) can extract the archive cleanly. The archive's
+          # top entry must be "spora-plugin-team-graph-frontend-${TAG}/",
+          # not "./" — the latter is what made spora-frontend v0.1.3 fail
+          # with "Cannot extract '.', internal error". The frontend/
+          # subdir is preserved so SporaPluginFrontendInstaller's
+          # copyFrontend() can find it after LibraryInstaller extracts.
+          rm -rf staging
+          mkdir -p "staging/spora-plugin-team-graph-frontend-${TAG}"
+          cp -R frontend "staging/spora-plugin-team-graph-frontend-${TAG}/"
+          tar -czf "spora-plugin-team-graph-frontend-${TAG}.tar.gz" -C staging "spora-plugin-team-graph-frontend-${TAG}"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
+        with:
+          files: spora-plugin-team-graph-frontend-${{ github.ref_name }}.tar.gz
+          generate_release_notes: true

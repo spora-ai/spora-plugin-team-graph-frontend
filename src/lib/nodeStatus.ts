@@ -1,0 +1,102 @@
+/**
+ * Map `AgentStatus` (wire enum, 11 values) to the Mermaid `classDef`
+ * name used in `buildMermaidSource()`. Mermaid has 6 slots; we
+ * collapse the wire enum onto those slots, mirroring the other
+ * prototypes so the colour palette stays consistent across plugins.
+ *
+ * Output slugs: `running`, `pending`, `awaiting`, `failed`,
+ * `aborted`, `completed`.
+ */
+import type { AgentStatus } from '../types'
+
+export function statusSlug(status: AgentStatus): string {
+    switch (status) {
+        case 'RUNNING':
+        case 'APPROVED':
+            return 'running'
+        case 'PENDING_APPROVAL':
+            return 'pending'
+        case 'AWAITING_SUB_AGENTS':
+        case 'AWAITING_INPUT':
+        case 'AWAITING_FINAL_APPROVAL':
+            return 'awaiting'
+        case 'FAILED':
+            return 'failed'
+        case 'ABORTED':
+            return 'aborted'
+        case 'COMPLETED':
+        case 'CANCELLED':
+        case 'QUEUED':
+            return 'completed'
+    }
+}
+
+/**
+ * CSS class name for the status pill rendered inside each Mermaid
+ * node's HTML label. The class definitions live in `style.css`;
+ * they share the prefix `tg-status-` so they don't collide with
+ * the host's `.status-*` Tailwind utilities.
+ */
+export function statusPillClass(status: AgentStatus): string {
+    return `tg-status-${statusSlug(status)}`
+}
+
+/**
+ * Human-readable label for the panel sub-header. Mirrors the
+ * `STATUS_LABEL` map in Prototype E so the prototype and the
+ * production plugin show the same text.
+ */
+export function statusLabel(status: AgentStatus): string {
+    switch (status) {
+        case 'RUNNING':
+            return 'running'
+        case 'PENDING_APPROVAL':
+            return 'awaiting approval'
+        case 'AWAITING_SUB_AGENTS':
+            return 'awaiting sub-agent'
+        case 'AWAITING_INPUT':
+            return 'awaiting input'
+        case 'AWAITING_FINAL_APPROVAL':
+            return 'awaiting final approval'
+        case 'APPROVED':
+            return 'approved'
+        case 'FAILED':
+            return 'failed'
+        case 'ABORTED':
+            return 'aborted'
+        case 'COMPLETED':
+            return 'idle'
+        case 'CANCELLED':
+            return 'cancelled'
+        case 'QUEUED':
+            return 'queued'
+    }
+}
+
+/**
+ * Background colour for the panel's avatar / pill dots. Mirrors the
+ * `STATUS_PILL_BG` map in Prototype E.
+ */
+export function statusColor(status: AgentStatus): string {
+    switch (status) {
+        case 'RUNNING':
+            return '#10b981'
+        case 'PENDING_APPROVAL':
+            return '#6366f1'
+        case 'AWAITING_SUB_AGENTS':
+        case 'AWAITING_INPUT':
+        case 'AWAITING_FINAL_APPROVAL':
+            return '#f59e0b'
+        case 'APPROVED':
+            return '#06b6d4'
+        case 'FAILED':
+            return '#ef4444'
+        case 'ABORTED':
+            return '#a855f7'
+        case 'COMPLETED':
+        case 'CANCELLED':
+            return '#94a3b8'
+        case 'QUEUED':
+            return '#cbd5e1'
+    }
+}
