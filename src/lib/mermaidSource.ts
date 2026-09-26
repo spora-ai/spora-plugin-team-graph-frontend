@@ -26,8 +26,14 @@ import { statusSlug, statusPillClass, statusLabel } from './nodeStatus'
  * that's the only character that can break out of the attribute;
  * Mermaid's parser already handles `<`, `>`, and `&` inside
  * `["…"]` labels.
+ *
+ * Defensive: nullish / non-string input collapses to an empty string
+ * so the canvas still renders when a node field is unexpectedly
+ * undefined (the Mermaid renderer is strict about every `nX["…"]`
+ * label being a well-formed HTML string).
  */
-function escapeAttr(s: string): string {
+function escapeAttr(s: unknown): string {
+    if (typeof s !== 'string') return ''
     return s.replace(/'/g, '&#39;')
 }
 

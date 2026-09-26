@@ -1,34 +1,34 @@
 <script setup lang="ts">
 /**
- * TeamGraphPage — three-column layout.
+ * TeamGraphPage — single-sidebar layout (graph + right-side detail).
  *
- *   ┌─────────────┬────────────────────────┬──────────────────┐
- *   │ Left list   │ Centre graph canvas     │ Right detail      │
- *   │ (principals │                        │ (selected agent)  │
- *   │ the user is │                        │                   │
- *   │ a member of)│                        │                   │
- *   └─────────────┴────────────────────────┴──────────────────┘
+ *   ┌──────────────────────────────────────────────────────────────┐
+ *   │ Toolbar                                                      │
+ *   │   title · principal pill row · refresh                       │
+ *   ├───────────────────────────────────┬──────────────────────────┤
+ *   │ Centre graph canvas               │ Right detail sidebar     │
+ *   │ (flex — gets whatever's left)     │ (340px when populated)    │
+ *   └───────────────────────────────────┴──────────────────────────┘
  *
- * One graph per principal. The left column is a sidebar that lists
- * the user's own user-principal ("My Agents") plus every group they're
- * a member of. The right column is the agent-detail sidebar — it now
- * renders as a sidebar at every viewport size, never as a centred
- * modal (the modal-on-mobile variant is gone: the right column just
- * collapses to a smaller fixed width on narrow screens).
+ * One graph per principal. The principal pill row in the toolbar
+ * lists the user's own user-principal (always rendered as "My
+ * Agents") plus every group principal they're a member of — driven
+ * by `GET /principals/me` via `usePrincipalList`. Clicking a pill
+ * switches the centre canvas to render that principal's directed
+ * graph.
  *
- * Data flow:
- *   - usePrincipalList → loads `/api/v1/principals` on mount, exposes
- *     `principals`, `selectedPrincipalId`, `select(id)`, `reload()`.
- *   - useTeamGraph → fetches the live `/plugins/team-graph/graph` for
- *     the selected principal id, 5-second polling, refetch button.
+ * The right column is `AgentDetailPanel` — always rendered as a
+ * sidebar at every breakpoint (per user feedback: "details open in
+ * an overlay instead of the sidebar" → never an overlay). It
+ * shows the empty-state placeholder when no agent is selected.
  *
- * Selection (which agent is highlighted in the canvas) lives in the
- * Pinia store so the canvas (centre) and the detail panel (right) stay
- * in lockstep across re-renders.
+ * Switching principals clears the agent selection because agent
+ * ids are principal-local — an id from the previous principal is
+ * meaningless in the new principal's graph.
  *
- * Switching principals clears the agent selection — agent ids are
- * principal-local, so an id from the previous principal is meaningless
- * in the new principal's graph.
+ * The toolbar's refresh button calls `useTeamGraph.refetch()` which
+ * re-fetches the currently-selected principal's graph on demand
+ * (the 5-second polling is independent).
  */
 import { computed, ref, watch } from 'vue'
 import { useSelectionStore } from '../stores/selection'
@@ -37,7 +37,6 @@ import { useTeamGraph } from '../composables/useTeamGraph'
 import { principalLabel, type PrincipalSummary } from '../api/principals'
 import TeamGraphCanvas from './TeamGraphCanvas.vue'
 import AgentDetailPanel from './AgentDetailPanel.vue'
-import PrincipalListSidebar from './PrincipalListSidebar.vue'
 import Legend from './Legend.vue'
 import GraphErrorFallback from './GraphErrorFallback.vue'
 
@@ -51,29 +50,11 @@ const principalList = usePrincipalList()
 const { graph, loading, error, refetch, refreshTick } = useTeamGraph(principalList.selectedPrincipalId)
 
 const shouldFit = ref(false)
-const principalError = computed<{ list: string | null; graph: string | null }>(() => ({
-    list: principalList.error.value,
-    graph: error.value,
-}))
-
-interface PrincipalHeadline {
-    label: string
-    badge: 'MY' | 'GROUP'
-}
 
 const activePrincipal = computed<PrincipalSummary | null>(() => {
     const id = principalList.selectedPrincipalId.value
     if (id === null) return null
     return principalList.principals.value.find((p) => p.id === id) ?? null
-})
-
-const headline = computed<PrincipalHeadline | null>(() => {
-    const p = activePrincipal.value
-    if (p === null) return null
-    return {
-        label: principalLabel(p),
-        badge: p.type === 'user' && p.is_current_user_owned ? 'MY' : 'GROUP',
-    }
 })
 
 interface GraphStats {
@@ -106,6 +87,10 @@ function onSelectPrincipal(id: number): void {
     principalList.select(id)
 }
 
+function isOwn(principal: PrincipalSummary): boolean {
+    return principal.type === 'user' && principal.is_current_user_owned
+}
+
 watch(() => principalList.selectedPrincipalId.value, () => {
     selection.clear()
     shouldFit.value = true
@@ -122,76 +107,103 @@ function onTapEmptyCanvas(): void {
 
 <template>
     <div class="p-4 lg:p-6 max-w-7xl mx-auto w-full" data-testid="tg-page">
-        <header class="mb-4 flex flex-wrap items-end justify-between gap-4">
-            <div class="min-w-0">
-                <h1 class="text-2xl font-semibold tracking-tight">Team Graph</h1>
-                <p
-                    v-if="headline !== null && graph !== null"
-                    class="text-sm text-muted-foreground mt-1"
-                    data-testid="tg-summary"
-                >
-                    <span class="text-foreground font-medium">{{ headline.label }}</span>
-                    ·
-                    {{ stats.nodes }} agent{{ stats.nodes === 1 ? '' : 's' }} ·
-                    {{ stats.edges }} edge{{ stats.edges === 1 ? '' : 's' }}
-                    <span v-if="stats.bidirectional > 0">
-                        · {{ stats.bidirectional }} bidirectional
-                    </span>
-                </p>
-                <p
-                    v-else-if="principalList.loading.value"
-                    class="text-sm text-muted-foreground mt-1"
-                >
-                    Loading teams…
-                </p>
-                <p
-                    v-else
-                    class="text-sm text-muted-foreground mt-1"
-                >
-                    Select a team on the left to view its agent graph.
-                </p>
-            </div>
-            <div class="flex items-center gap-2">
-                <button
-                    type="button"
-                    class="h-9 inline-flex items-center gap-1.5 rounded-lg border border-border bg-background text-muted-foreground hover:text-foreground hover:bg-muted/50 px-3 transition-colors"
-                    data-testid="tg-refresh"
-                    :disabled="loading"
-                    @click="refresh"
-                >
-                    <svg
-                        class="w-4 h-4"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="1.5"
+        <header class="mb-4 space-y-3">
+            <div class="flex flex-wrap items-end justify-between gap-3">
+                <div class="min-w-0">
+                    <h1 class="text-2xl font-semibold tracking-tight">Team Graph</h1>
+                    <p
+                        v-if="activePrincipal !== null && graph !== null"
+                        class="text-sm text-muted-foreground mt-1"
+                        data-testid="tg-summary"
                     >
-                        <path d="M21 12a9 9 0 1 1-9-9c2.4 0 4.6 1 6.3 2.6L21 8" />
-                        <path d="M21 3v5h-5" />
-                    </svg>
-                    Refresh
+                        <span class="text-foreground font-medium">{{ principalLabel(activePrincipal) }}</span>
+                        ·
+                        {{ stats.nodes }} agent{{ stats.nodes === 1 ? '' : 's' }} ·
+                        {{ stats.edges }} edge{{ stats.edges === 1 ? '' : 's' }}
+                        <span v-if="stats.bidirectional > 0">
+                            · {{ stats.bidirectional }} bidirectional
+                        </span>
+                    </p>
+                    <p
+                        v-else-if="principalList.loading.value"
+                        class="text-sm text-muted-foreground mt-1"
+                    >
+                        Loading teams…
+                    </p>
+                    <p v-else class="text-sm text-muted-foreground mt-1">
+                        Select a team below to view its agent graph.
+                    </p>
+                </div>
+                <div class="flex items-center gap-2">
+                    <button
+                        type="button"
+                        class="h-9 inline-flex items-center gap-1.5 rounded-lg border border-border bg-background text-muted-foreground hover:text-foreground hover:bg-muted/50 px-3 transition-colors"
+                        data-testid="tg-refresh"
+                        :disabled="loading"
+                        @click="refresh"
+                    >
+                        <svg
+                            class="w-4 h-4"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            stroke-width="1.5"
+                        >
+                            <path d="M21 12a9 9 0 1 1-9-9c2.4 0 4.6 1 6.3 2.6L21 8" />
+                            <path d="M21 3v5h-5" />
+                        </svg>
+                        Refresh
+                    </button>
+                </div>
+            </div>
+
+            <!-- Principal pill row: one pill per principal. Wraps when there are
+                 many principals so the toolbar never overflows horizontally. -->
+            <div
+                v-if="principalList.principals.value.length > 0"
+                data-testid="tg-principal-pills"
+                class="flex flex-wrap items-center gap-2"
+                role="tablist"
+                aria-label="Principals"
+            >
+                <button
+                    v-for="p in principalList.principals.value"
+                    :key="p.id"
+                    type="button"
+                    role="tab"
+                    :data-testid="`tg-pill-${p.id}`"
+                    :aria-selected="p.id === principalList.selectedPrincipalId.value"
+                    class="tg-pill"
+                    :class="p.id === principalList.selectedPrincipalId.value ? 'is-selected' : ''"
+                    @click="onSelectPrincipal(p.id)"
+                >
+                    <span
+                        class="tg-pill__badge"
+                        :class="isOwn(p) ? 'tg-pill__badge--my' : 'tg-pill__badge--group'"
+                        aria-hidden="true"
+                    >{{ isOwn(p) ? 'MY' : 'G' }}</span>
+                    <span class="truncate">{{ principalLabel(p) }}</span>
                 </button>
             </div>
+            <p
+                v-else-if="!principalList.loading.value"
+                class="text-xs text-muted-foreground"
+            >
+                No principals available for this user.
+            </p>
+
+            <Legend />
         </header>
 
-        <Legend />
-
-        <div class="grid grid-cols-1 lg:grid-cols-[240px_minmax(0,1fr)_340px] gap-4 items-start">
-            <PrincipalListSidebar
-                :principals="principalList.principals.value"
-                :selected-id="principalList.selectedPrincipalId.value"
-                :loading="principalList.loading.value"
-                @select="onSelectPrincipal"
-            />
-
+        <div class="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_340px] gap-4 items-start">
             <div class="min-w-0">
                 <div
-                    v-if="principalError.graph !== null && graph === null"
+                    v-if="error !== null && graph === null"
                     class="surface-card border border-border rounded-xl bg-card text-card-foreground"
                     style="height: 620px;"
                     data-testid="tg-graph-error"
                 >
-                    <GraphErrorFallback :message="principalError.graph ?? ''">
+                    <GraphErrorFallback :message="error">
                         <button
                             type="button"
                             class="mt-4 text-[11px] font-medium text-primary hover:underline"

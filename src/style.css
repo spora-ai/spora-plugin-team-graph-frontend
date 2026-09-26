@@ -148,40 +148,47 @@ body,
 .tg-agent-panel-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 280px; text-align: center; color: var(--muted-foreground); }
 
 /**
- * Left-column principal list (`<PrincipalListSidebar />`).
+ * Principal pill row in the toolbar (replaces the dropped
+ * `<PrincipalListSidebar />`).
  *
- * Each row is a button — pressing it tells the page to render the
+ * Each pill is a button — pressing it tells the page to render the
  * graph for that principal. The "MY" badge highlights the user's own
  * user-principal so it's obvious which row is "you" without reading
  * the label. Group rows get a quieter "G" badge.
  *
- * Colours come from the brand palette (violet accent), so the
- * selected row tints with the host's app-accent token.
+ * Picked pills over the prior list view because the toolbar is
+ * shared horizontal real-estate — pills read as a compact "tabs"
+ * affordance while the sidebar slot stays free for the agent-detail
+ * panel. Pills wrap when there are many principals so the toolbar
+ * never overflows horizontally.
  */
-.tg-principal-row {
-    display: flex; align-items: center; justify-content: space-between;
-    padding: 10px 16px; transition: background 100ms, color 100ms;
-    color: var(--muted-foreground); background: transparent; border: none;
-    cursor: pointer; width: 100%;
+.tg-pill {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 4px 10px 4px 6px; border-radius: 999px;
+    background: transparent; color: var(--muted-foreground);
+    border: 1px solid transparent; cursor: pointer;
+    font-size: 12px; font-weight: 500; line-height: 1;
+    max-width: 240px; transition: background 100ms, color 100ms, border-color 100ms;
 }
-.tg-principal-row:hover:not(.is-selected):not(:disabled) {
+.tg-pill:hover:not(.is-selected):not(:disabled) {
     background: var(--muted); color: var(--foreground);
 }
-.tg-principal-row.is-selected {
+.tg-pill.is-selected {
     background: rgba(124, 58, 237, 0.10); /* violet-500 at 10% */
-    color: var(--foreground);
+    color: var(--foreground); border-color: rgba(124, 58, 237, 0.45);
 }
-.tg-principal-row:disabled { cursor: not-allowed; opacity: 0.5; }
-.tg-principal-row__badge {
+.tg-pill:disabled { cursor: not-allowed; opacity: 0.5; }
+.tg-pill__badge {
     display: inline-flex; align-items: center; justify-content: center;
-    width: 22px; height: 22px; border-radius: 999px; font-size: 9px; font-weight: 700;
-    letter-spacing: 0.04em;
+    width: 20px; height: 20px; border-radius: 999px;
+    font-size: 9px; font-weight: 700; letter-spacing: 0.04em;
+    flex-shrink: 0;
 }
-.tg-principal-row__badge--my {
+.tg-pill__badge--my {
     background: rgba(124, 58, 237, 0.18); color: var(--foreground);
     border: 1px solid rgba(124, 58, 237, 0.45);
 }
-.tg-principal-row__badge--group {
+.tg-pill__badge--group {
     background: var(--muted); color: var(--muted-foreground);
     border: 1px solid var(--border);
 }

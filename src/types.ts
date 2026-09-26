@@ -28,7 +28,12 @@ export interface GraphNode {
     name: string
     role: string | null
     picture_url: string | null
-    status: AgentStatus
+    /** Node status may be null when no in-flight task exists for the
+     *  agent — the frontend treats that as `COMPLETED` ("idle") via
+     *  the lib/nodeStatus defensive defaults. The backend COALESCE'd
+     * the value to COMPLETED in v0.1.2 — the runtime tolerance is
+     * belt-and-braces for older envelopes and any future schema drift. */
+    status: AgentStatus | string | null
     active_chats: number
     recent_chats_24h: number
 }

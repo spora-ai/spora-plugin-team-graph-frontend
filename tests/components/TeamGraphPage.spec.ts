@@ -2,27 +2,26 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import TeamGraphPage from '../../src/components/TeamGraphPage.vue'
-import PrincipalListSidebar from '../../src/components/PrincipalListSidebar.vue'
 import { useSelectionStore } from '../../src/stores/selection'
 import { principalLabel } from '../../src/api/principals'
 import type { PrincipalSummary } from '../../src/api/principals'
 
 /**
- * Tests for the real-principals data path.
+ * Tests for the single-sidebar layout.
  *
- * The page renders the left sidebar (`<PrincipalListSidebar />`),
- * the centre graph (`<TeamGraphCanvas />` stubbed via the
- * Mermaid mock below so the test doesn't actually try to render
- * an SVG), and the right detail panel (`<AgentDetailPanel />`).
+ * Layout: toolbar (title + principal pill row + refresh) over a
+ * grid of `[flex graph | 340px detail sidebar]`. The principal
+ * pill row replaces the dropped left-column sidebar.
  *
  * Each test cases a specific page-level contract:
- *  - the sidebar lists the user's user-principal first as
+ *  - the pill row lists the user's user-principal first as
  *    "My Agents" and every group with its raw `name`,
- *  - clicking a sidebar row swaps the graph to that principal,
+ *  - clicking a pill swaps the graph to that principal,
  *  - the summary line reflects the active principal's
  *    node / edge counts,
- *  - selecting an agent via the store highlights it on the
- *    canvas AND opens the right-side detail panel.
+ *  - selecting an agent via the store opens the right-side
+ *    detail panel,
+ *  - switching principals clears the agent selection.
  */
 
 vi.mock('mermaid', () => ({
@@ -106,23 +105,25 @@ beforeEach(() => {
     })
 })
 
-describe('TeamGraphPage.vue', () => {
-    it('boots by selecting the user-principal and rendering the sidebar', async () => {
+describe('TeamGraphPage.vue (single-sidebar layout)', () => {
+    it('boots by selecting the user-principal and rendering the pill row', async () => {
         const wrapper = mount(TeamGraphPage, { props: { hostContext } })
         await flushPromises()
 
         expect(fetchPrincipalsMock).toHaveBeenCalledOnce()
         expect(fetchGraphMock).toHaveBeenCalledWith(7)
 
-        const sidebar = wrapper.find('[data-testid="tg-principal-sidebar"]')
-        expect(sidebar.exists()).toBe(true)
-        const rows = sidebar.findAll('[data-testid^="tg-principal-row-"]')
-        expect(rows).toHaveLength(3)
+        const pills = wrapper.find('[data-testid="tg-principal-pills"]').findAll('button')
+        expect(pills).toHaveLength(3)
         // The user's own principal renders as "My Agents", never by
         // the wire's email-as-name.
-        expect(rows[0]!.text()).toContain('My Agents')
-        expect(rows[1]!.text()).toContain('Marketing')
-        expect(rows[2]!.text()).toContain('Engineering')
+        expect(pills[0]!.text()).toContain('MY')
+        expect(pills[0]!.text()).toContain('My Agents')
+        expect(pills[1]!.text()).toContain('Marketing')
+        expect(pills[2]!.text()).toContain('Engineering')
+
+        // No left-column sidebar anymore — only the right detail panel.
+        expect(wrapper.find('[data-testid="tg-principal-sidebar"]').exists()).toBe(false)
 
         // The summary line picks up the active principal name + node/edge
         // counts from the graph response.
@@ -133,15 +134,29 @@ describe('TeamGraphPage.vue', () => {
         wrapper.unmount()
     })
 
-    it('swaps the graph when a sidebar row is clicked', async () => {
+    it('swaps the graph when a pill is clicked', async () => {
         const wrapper = mount(TeamGraphPage, { props: { hostContext } })
         await flushPromises()
-        const sidebar = wrapper.findComponent(PrincipalListSidebar)
-        await sidebar.vm.$emit('select', 2)
+        const engineeringPill = wrapper.find('[data-testid="tg-pill-4"]')
+        expect(engineeringPill.exists()).toBe(true)
+        await engineeringPill.trigger('click')
         await flushPromises()
 
-        expect(fetchGraphMock).toHaveBeenLastCalledWith(2)
-        expect(wrapper.text()).toContain('Marketing')
+        expect(fetchGraphMock).toHaveBeenLastCalledWith(4)
+        expect(wrapper.text()).toContain('Engineering')
+        wrapper.unmount()
+    })
+
+    it('marks the active pill as selected (aria-selected + class)', async () => {
+        const wrapper = mount(TeamGraphPage, { props: { hostContext } })
+        await flushPromises()
+        const ownPill = wrapper.find('[data-testid="tg-pill-7"]')
+        expect(ownPill.attributes('aria-selected')).toBe('true')
+        expect(ownPill.classes()).toContain('is-selected')
+
+        const marketingPill = wrapper.find('[data-testid="tg-pill-2"]')
+        expect(marketingPill.attributes('aria-selected')).toBe('false')
+        expect(marketingPill.classes()).not.toContain('is-selected')
         wrapper.unmount()
     })
 
@@ -153,8 +168,7 @@ describe('TeamGraphPage.vue', () => {
         selection.setSelected(11)
         expect(selection.selectedId).toBe(11)
 
-        const sidebar = wrapper.findComponent(PrincipalListSidebar)
-        await sidebar.vm.$emit('select', 4)
+        await wrapper.find('[data-testid="tg-pill-4"]').trigger('click')
         await flushPromises()
 
         // Different principal → ids aren't shared → selection should clear
@@ -176,24 +190,9 @@ describe('TeamGraphPage.vue', () => {
     it('renders the empty state of the detail panel when no agent is selected', async () => {
         const wrapper = mount(TeamGraphPage, { props: { hostContext } })
         await flushPromises()
-        // The panel still mounts when there's a graph (so we don't lose
-        // its scroll state), but its body shows the empty placeholder
-        // rather than an agent's detail. The placeholder inside
-        // `AgentDetailPanel` carries the `.tg-agent-panel-empty` class.
         expect(wrapper.find('[data-testid="tg-agent-panel"]').exists()).toBe(true)
         expect(wrapper.find('.tg-agent-panel-empty').exists()).toBe(true)
         expect(wrapper.text()).toContain('No agent selected')
-        wrapper.unmount()
-    })
-
-    it('shows a tile-shaped placeholder in the right column when the graph is still loading', async () => {
-        fetchGraphMock.mockReturnValueOnce(new Promise(() => { /* never resolves */ }))
-        const wrapper = mount(TeamGraphPage, { props: { hostContext } })
-        await flushPromises()
-        // When the graph hasn't loaded yet, the standalone tile
-        // placeholder carries the `tg-detail-placeholder` testid so
-        // the page boundary stays predictable for a11y tooling.
-        expect(wrapper.find('[data-testid="tg-detail-placeholder"]').exists()).toBe(true)
         wrapper.unmount()
     })
 })
