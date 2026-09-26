@@ -13,8 +13,8 @@
  *  - the Mermaid canvas (viewport + transformable content + zoom
  *    button stack) — the same composition Prototype E uses;
  *  - the per-node content template (`.m-node`, `.m-node-name`, etc.);
- *  - the selection-driven SVG styling (`g.node.selected`, `g.edgePath.out`,
- *    `g.edgePath.in`, `g.node.dimmed`, etc.);
+ *  - the selection-driven SVG styling (`g.node.selected`, `path.flowchart-link.out`,
+ *    `path.flowchart-link.in`, `g.node.dimmed`, etc.);
  *  - the modal + sidebar containers shared with the other plugin
  *    prototypes.
  *
@@ -127,8 +127,14 @@ body,
  * a saturated status dot. This keeps the pill readable on every
  * palette (slate, red, orange, green, teal, blue, indigo, violet,
  * pink) without having to pick per-palette contrast colours.
+ *
+ * `!important` on `color` + `background` is necessary because
+ * Mermaid 10 auto-injects `#<svg-id> .tg-palette-<key> span`
+ * rules that win on specificity (1,1,1) and would otherwise force
+ * the pill text to the agent's `fg_color` — making "idle" sit
+ * white-on-white on the slate palette, for example.
  */
-.tg-status-pill { display: inline-flex; align-items: center; gap: 4px; font-size: 10px; font-weight: 600; padding: 2px 7px; border-radius: 999px; letter-spacing: 0.02em; white-space: nowrap; background: rgba(255, 255, 255, 0.92); color: #0f172a; }
+.tg-status-pill { display: inline-flex; align-items: center; gap: 4px; font-size: 10px; font-weight: 600; padding: 2px 7px; border-radius: 999px; letter-spacing: 0.02em; white-space: nowrap; background: rgba(255, 255, 255, 0.92) !important; color: #0f172a !important; }
 .tg-status-pill .dot { width: 6px; height: 6px; border-radius: 999px; flex-shrink: 0; }
 .tg-status-running  .dot { background: #10b981; }
 .tg-status-pending  .dot { background: #6366f1; }
@@ -163,21 +169,9 @@ body,
     stroke-width: 2.5px !important;
 }
 .tg-canvas-content svg g.node.dimmed { opacity: 0.28; }
-.tg-canvas-content svg g.edgePath.dim path { stroke-opacity: 0.15; }
-.tg-canvas-content svg g.edgePath.out path { stroke: #059669 !important; stroke-width: 2.6px !important; }
-.tg-canvas-content svg g.edgePath.in  path { stroke: #4f46e5 !important; stroke-width: 2.6px !important; }
-/*
- * Configured-but-never-fired edges render as Mermaid's dashed arrow
- * syntax (`-.->`) and pick up an additional `uninvoked` class via
- * `applySelectionStyling` so we can dim the underlying stroke without
- * losing the dash pattern. The CSS keeps them muted at rest and
- * reveals them at full opacity when selected.
- */
-.tg-canvas-content svg g.edgePath.uninvoked path { stroke: #94a3b8 !important; stroke-opacity: 0.45; }
-.tg-canvas-content svg g.edgePath.uninvoked.out path,
-.tg-canvas-content svg g.edgePath.uninvoked.in path { stroke-opacity: 0.85; }
-.tg-canvas-content svg g.edgeLabel.uninvoked { opacity: 0.55; }
-.tg-canvas-content svg g.edgeLabel.dim { opacity: 0.15; }
+.tg-canvas-content svg path.flowchart-link.dim { stroke-opacity: 0.15; }
+.tg-canvas-content svg path.flowchart-link.out { stroke: #059669 !important; stroke-width: 2.6px !important; }
+.tg-canvas-content svg path.flowchart-link.in  { stroke: #4f46e5 !important; stroke-width: 2.6px !important; }
 .tg-canvas-content svg .edgeLabel { transition: opacity 150ms; }
 
 /**

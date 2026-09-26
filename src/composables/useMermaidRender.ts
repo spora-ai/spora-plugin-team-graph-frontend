@@ -69,7 +69,14 @@ export function nodeIdFromMermaidId(domId: string): number | null {
 }
 
 function edgeEndsFromMermaidId(domId: string): [number, number] | null {
-    const m = /(?:^|_)n(\d+)_n(\d+)(?:[-_]\d+)?$/.exec(domId)
+    /*
+     * Mermaid 10 emits edge path ids in the form `L-n<src>-n<tgt>-<idx>`
+     * (the older Mermaid 9 form `flowchart-n<src>_n<tgt>-<idx>` is
+     * still recognised for safety). We accept both because the
+     * difference is internal to Mermaid and not part of any public
+     * contract — the regex just needs to extract the two agent ids.
+     */
+    const m = /(?:^|[_-])n(\d+)[_-]n(\d+)(?:[-_]\d+)?$/.exec(domId)
     if (m === null) return null
     const a = Number(m[1])
     const b = Number(m[2])
@@ -130,27 +137,20 @@ export function useMermaidRender({ hostRef, graph, onRender }: UseMermaidRenderO
 
         /*
          * Tag each edge group with `out`/`in`/`dim` (per the
-         * selection) AND `uninvoked` when the wire payload says this
-         * edge has never been fired in the 24 h window — a
-         * configured-but-dormant relationship. The CSS picks up both
-         * classes; the dashed arrow already comes from Mermaid's
-         * `-.->` syntax. We tag the matching pair (`edgePath` +
-         * `edgeLabel`) so the dash carries over the label too.
+         * selection). Every edge is a solid arrow now — the
+         * configured-but-never-fired distinction is conveyed in
+         * the detail panel's secondary label, not on the canvas.
+         *
+         * Mermaid 10 changed the edge DOM: edges are
+         * `<path class="flowchart-link LS-N LE-M">` (not the
+         * older `<g class="edgePath">`). We tag the `path` element
+         * so the CSS in style.css can recolour it.
          */
-        const uninvokedByKey = new Map<string, true>()
-        for (const e of edges) {
-            if (e.count_24h === 0 && e.last_invoked_at === null) {
-                uninvokedByKey.set(`${e.source}->${e.target}`, true)
-            }
-        }
-
-        svgEl.querySelectorAll('g.edgePath, g.edgeLabel').forEach((edgeEl) => {
+        svgEl.querySelectorAll('path.flowchart-link').forEach((edgeEl) => {
             const ends = edgeEndsFromMermaidId(edgeEl.id)
-            edgeEl.classList.remove('out', 'in', 'dim')
+            edgeEl.classList.remove('out', 'in', 'dim', 'uninvoked')
             if (ends === null) return
             const [src, tgt] = ends
-            const isUninvoked = uninvokedByKey.has(`${src}->${tgt}`)
-            edgeEl.classList.toggle('uninvoked', isUninvoked)
             if (sel === null) return
             if (src === sel) {
                 edgeEl.classList.add('out')
@@ -219,6 +219,27 @@ export function useMermaidRender({ hostRef, graph, onRender }: UseMermaidRenderO
 
             selection.setEdges(payload.edges)
             applySelectionStyling(svgEl, payload.edges)
+            /*
+             * Force-set status pill colours after Mermaid renders.
+             * Mermaid injects per-class rules like
+             *   `#m-N .tg-palette-indigo span { color: <fg>; }`
+             * into the SVG's <style> element, which beats our
+             * `.tg-status-pill { color: #0f172a !important }` rule on
+             * specificity (1,1,1 > 0,1,0) AND on source order (Mermaid
+             * injects after our document-head stylesheet). The result
+             * is the pill text inheriting the agent's fg_color — "idle"
+             * sits white-on-white on the slate palette, etc.
+             *
+             * Inline style on the pill wins unconditionally, so we set
+             * the colour imperatively here, after Mermaid's CSSOM has
+             * settled. This is the cheapest reliable fix that does not
+             * require coupling to Mermaid's internal CSS class naming.
+             */
+            svgEl.querySelectorAll('g.node .tg-status-pill').forEach((pill) => {
+                const el = pill as SVGElement
+                el.style.setProperty('color', '#0f172a', 'important')
+                el.style.setProperty('background-color', 'rgba(255, 255, 255, 0.92)', 'important')
+            })
             /* Notify the canvas so it can fit the viewport against the
              * freshly committed SVG. Doing it here — instead of from
              * a prop watcher that races the async render — means fit()

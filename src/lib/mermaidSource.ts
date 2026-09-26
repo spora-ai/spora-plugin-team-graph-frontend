@@ -83,9 +83,17 @@ export function buildMermaidSource(graph: GraphPayload): string {
     }
 
     for (const edge of graph.edges) {
-        const isUninvoked = edge.count_24h === 0 && edge.last_invoked_at === null
-        const arrow = isUninvoked ? '-.->' : '-->'
-        lines.push(`  n${edge.source} ${arrow} n${edge.target}`)
+        /*
+         * Every configured edge renders as a solid Mermaid arrow
+         * (`-->`). The user's "All Configured connections should be
+         * displayed" rule means the canvas treats configuration as
+         * the source of truth — the configured-but-never-fired
+         * distinction is preserved in the detail panel's secondary
+         * label ("configured, never used") but not on the canvas
+         * itself, where a dashed arrow reads as "broken" rather
+         * than "dormant" and confuses operators.
+         */
+        lines.push(`  n${edge.source} --> n${edge.target}`)
     }
 
     return lines.join('\n')

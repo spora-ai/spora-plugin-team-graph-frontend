@@ -30,7 +30,7 @@
  * re-fetches the currently-selected principal's graph on demand
  * (the 5-second polling is independent).
  */
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useSelectionStore } from '../stores/selection'
 import { usePrincipalList } from '../composables/usePrincipalList'
 import { useTeamGraph } from '../composables/useTeamGraph'
@@ -47,9 +47,36 @@ defineProps<{
 const selection = useSelectionStore()
 
 const principalList = usePrincipalList()
-const { graph, loading, error, refetch } = useTeamGraph(principalList.selectedPrincipalId)
+const { graph, loading, error, refetch, lastUpdatedAt } = useTeamGraph(principalList.selectedPrincipalId)
 
 const shouldFit = ref(false)
+
+/*
+ * Freshness indicator — "Updated Xs ago". Ticks every 15 s so the
+ * text is accurate enough to feel live without forcing a re-render
+ * on every second. The interval is independent of the polling
+ * interval because the indicator only reads `lastUpdatedAt` and
+ * does not trigger any network call.
+ */
+const now = ref<number>(Date.now())
+let nowTimer: ReturnType<typeof setInterval> | null = null
+onMounted(() => {
+    nowTimer = setInterval(() => {
+        now.value = Date.now()
+    }, 15_000)
+})
+onBeforeUnmount(() => {
+    if (nowTimer !== null) clearInterval(nowTimer)
+})
+
+const freshnessLabel = computed<string | null>(() => {
+    if (lastUpdatedAt.value === null) return null
+    const secs = Math.max(0, Math.round((now.value - lastUpdatedAt.value) / 1_000))
+    if (secs < 5) return 'Updated just now'
+    if (secs < 60) return `Updated ${secs}s ago`
+    const mins = Math.round(secs / 60)
+    return `Updated ${mins} min${mins === 1 ? '' : 's'} ago`
+})
 
 const activePrincipal = computed<PrincipalSummary | null>(() => {
     const id = principalList.selectedPrincipalId.value
@@ -139,7 +166,12 @@ function onTapEmptyCanvas(): void {
                         Select a team below to view its agent graph.
                     </p>
                 </div>
-                <div class="flex items-center gap-2">
+                <div class="flex items-center gap-3">
+                    <span
+                        v-if="freshnessLabel !== null"
+                        class="text-xs text-muted-foreground"
+                        data-testid="tg-freshness"
+                    >{{ freshnessLabel }}</span>
                     <button
                         type="button"
                         class="h-9 inline-flex items-center gap-1.5 rounded-lg border border-border bg-background text-muted-foreground hover:text-foreground hover:bg-muted/50 px-3 transition-colors"
@@ -153,6 +185,8 @@ function onTapEmptyCanvas(): void {
                             fill="none"
                             stroke="currentColor"
                             stroke-width="1.5"
+                            stroke-linecap="round"
+                            stroke-linejoin="round"
                         >
                             <path d="M21 12a9 9 0 1 1-9-9c2.4 0 4.6 1 6.3 2.6L21 8" />
                             <path d="M21 3v5h-5" />

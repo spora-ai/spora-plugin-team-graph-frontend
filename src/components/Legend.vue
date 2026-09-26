@@ -41,13 +41,5 @@ const STATUS_LEGEND = [
             <span class="w-3 h-0.5" style="background: #4f46e5" />
             they spawned you
         </span>
-        <span class="flex items-center gap-1" data-testid="tg-legend-uninvoked">
-            <svg width="14" height="6" class="overflow-visible">
-                <line x1="0" y1="3" x2="14" y2="3"
-                      stroke="#94a3b8" stroke-width="1.5"
-                      stroke-dasharray="3 2" stroke-linecap="round" />
-            </svg>
-            configured, never used
-        </span>
     </div>
 </template>

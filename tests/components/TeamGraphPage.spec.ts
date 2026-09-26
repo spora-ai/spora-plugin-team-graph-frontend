@@ -150,6 +150,14 @@ describe('TeamGraphPage.vue (single-sidebar layout)', () => {
         expect(wrapper.text()).toContain('3 agents')
         expect(wrapper.text()).toContain('2 edges')
 
+        // The freshness indicator anchors off the first commit and
+        // shows "Updated just now" (or "Xs ago" if the test ran long
+        // enough for the threshold to flip). We accept either because
+        // the timer reads Date.now() at mount time.
+        const freshness = wrapper.find('[data-testid="tg-freshness"]')
+        expect(freshness.exists()).toBe(true)
+        expect(freshness.text()).toMatch(/Updated (just now|\d+s ago|\d+ min(?:s)? ago)/)
+
         wrapper.unmount()
     })
 

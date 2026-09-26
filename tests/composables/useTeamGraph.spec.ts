@@ -5,12 +5,12 @@ import { ApiError } from '../../src/api/client'
 import type { GraphPayload } from '../../src/types'
 
 /**
- * useTeamGraph — fetch + 5 s polling + principalId reactivity.
+ * useTeamGraph — fetch + 30 s polling + dedup + principalId reactivity.
  *
  * Mock the network module (`api/teamGraph.ts → fetchGraph`) so the
  * composable's lifecycle (monotonic request token, polling
- * registration, principalId watcher) can be exercised without
- * hitting a real backend.
+ * registration, principalId watcher, payload dedup) can be exercised
+ * without hitting a real backend.
  */
 
 const fetchGraphMock = vi.fn()
@@ -44,12 +44,15 @@ afterEach(() => {
 describe('useTeamGraph', () => {
     it('fetches immediately on mount with the current principalId', async () => {
         fetchGraphMock.mockResolvedValueOnce(fixturePayload)
-        const { graph, loading } = useTeamGraph(principalId)
+        const { graph, loading, lastUpdatedAt } = useTeamGraph(principalId)
         await vi.waitFor(() => {
             expect(fetchGraphMock).toHaveBeenCalledWith(7)
             expect(graph.value).toEqual(fixturePayload)
             expect(loading.value).toBe(false)
         })
+        // lastUpdatedAt gets stamped on first commit so the
+        // freshness indicator has a non-null anchor.
+        expect(lastUpdatedAt.value).not.toBeNull()
     })
 
     it('returns null graph and no error when principalId is null', async () => {
@@ -77,10 +80,6 @@ describe('useTeamGraph', () => {
     })
 
     it('ignores stale responses from a slow earlier call', async () => {
-        // Monotonic-token guard: a slow earlier response whose token
-        // no longer matches must not overwrite the latest committed
-        // graph. We drive two concurrent fetches and resolve the
-        // older one last to confirm the new value sticks.
         let resolveSlow!: (value: GraphPayload) => void
         let resolveFast!: (value: GraphPayload) => void
         fetchGraphMock
@@ -88,26 +87,18 @@ describe('useTeamGraph', () => {
             .mockImplementation(() => new Promise<GraphPayload>((r) => { resolveFast = r }))
 
         const { graph, refetch } = useTeamGraph(principalId)
-        // Wait for the immediate watcher's fetch to consume the
-        // first mockImplementationOnce (resolveSlow is now wired).
         await vi.waitFor(() => {
             expect(fetchGraphMock.mock.calls.length).toBeGreaterThanOrEqual(1)
         })
-        // Kick off a second fetch via refetch() — uses the second
-        // mock implementation (resolveFast).
         const refetchPromise = refetch()
         await vi.waitFor(() => {
             expect(fetchGraphMock.mock.calls.length).toBeGreaterThanOrEqual(2)
         })
-        // Resolve the SECOND fetch first (latest principal) — graph
-        // commits to that value.
         resolveFast({ ...fixturePayload, principal: { ...fixturePayload.principal, id: 99 } })
         await refetchPromise
         await vi.waitFor(() => {
             expect(graph.value?.principal.id).toBe(99)
         })
-        // Now resolve the SLOW first response — it must be ignored
-        // because the request token has moved on.
         resolveSlow({ ...fixturePayload, principal: { ...fixturePayload.principal, id: 7 } })
         await new Promise((r) => setTimeout(r, 10))
         expect(graph.value?.principal.id).toBe(99)
@@ -118,7 +109,65 @@ describe('useTeamGraph', () => {
         const { refetch } = useTeamGraph(principalId)
         await refetch()
         expect(fetchGraphMock).toHaveBeenCalledWith(7)
-        // At least one call from the immediate watcher + the refetch.
         expect(fetchGraphMock.mock.calls.length).toBeGreaterThanOrEqual(2)
+    })
+
+    it('skips the commit when a poll returns the same payload (dedup)', async () => {
+        // Every poll returns the same bytes; the composable must
+        // commit only the first one. The downstream effect (no
+        // graph.value write) is what keeps the Mermaid SVG from
+        // re-rendering on every poll — see the "pan/zoom reset"
+        // bug report.
+        fetchGraphMock.mockResolvedValue(fixturePayload)
+        const { graph, lastUpdatedAt, refetch } = useTeamGraph(principalId)
+        await vi.waitFor(() => expect(graph.value).toEqual(fixturePayload))
+        const firstStamp = lastUpdatedAt.value
+        expect(firstStamp).not.toBeNull()
+
+        // Drive another fetch — same payload. lastUpdatedAt must
+        // not advance (commit was skipped), and graph.value stays
+        // referentially identical (no Vue reactivity triggers).
+        await refetch()
+        expect(lastUpdatedAt.value).toBe(firstStamp)
+        // graph.value stays structurally equal — payloadEquals()
+        // compares field-by-field and rejects identical payloads
+        // before the ref's value gets replaced. `toBe` would be
+        // stronger (referential identity) but the fixture spreads
+        // objects inside, so structural equality is the contract.
+        expect(graph.value).toEqual(fixturePayload)
+    })
+
+    it('commits when a poll returns a payload with changed node status', async () => {
+        // First fetch: idle. Second fetch: one node flipped to RUNNING.
+        // The composable must commit the second payload (no dedup) so
+        // the canvas re-renders the new status pill colour.
+        const first = {
+            ...fixturePayload,
+            nodes: fixturePayload.nodes.map((n) => ({ ...n, status: 'COMPLETED' as const })),
+        }
+        const second = {
+            ...fixturePayload,
+            nodes: fixturePayload.nodes.map((n, i) => i === 0 ? { ...n, status: 'RUNNING' as const } : n),
+        }
+        fetchGraphMock.mockResolvedValueOnce(first).mockResolvedValueOnce(second)
+        const { graph, refetch } = useTeamGraph(principalId)
+        await vi.waitFor(() => expect(graph.value).toEqual(first))
+        await refetch()
+        await vi.waitFor(() => expect(graph.value).toEqual(second))
+    })
+
+    it('polls on a 30 s interval', async () => {
+        vi.useFakeTimers()
+        fetchGraphMock.mockResolvedValue(fixturePayload)
+        useTeamGraph(principalId)
+        // The immediate fetch + zero polls so far.
+        expect(fetchGraphMock).toHaveBeenCalledTimes(1)
+        await vi.advanceTimersByTimeAsync(29_999)
+        expect(fetchGraphMock).toHaveBeenCalledTimes(1)
+        await vi.advanceTimersByTimeAsync(2)
+        expect(fetchGraphMock).toHaveBeenCalledTimes(2)
+        await vi.advanceTimersByTimeAsync(30_000)
+        expect(fetchGraphMock).toHaveBeenCalledTimes(3)
+        vi.useRealTimers()
     })
 })

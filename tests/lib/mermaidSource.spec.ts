@@ -86,50 +86,31 @@ describe('buildMermaidSource', () => {
         expect(src).toContain(':::tg-palette-slate')
     })
 
-    it('emits one arrow line per edge', () => {
-        const src = buildMermaidSource(tinyStartup)
-        expect(src).toContain('  n1 --> n2')
-        expect(src).toContain('  n1 --> n4')
-    })
-
-    it('emits a dashed arrow for configured-but-never-fired edges', () => {
-        const payload: GraphPayload = {
+    it('emits one solid arrow line per edge, regardless of last_invoked_at', () => {
+        /* Every configured edge renders as a solid arrow — the
+         * "configured, never used" distinction lives in the detail
+         * panel's secondary label only, not on the canvas, because
+         * a dashed arrow reads as "broken" rather than "dormant"
+         * and confuses operators. */
+        const payloadUnfired: GraphPayload = {
             ...tinyStartup,
             edges: [
                 { id: '1->2', source: 1, target: 2, op: 'sub_agent', configured: true, count_24h: 0, last_invoked_at: null },
             ],
         }
-        const src = buildMermaidSource(payload)
-        expect(src).toContain('  n1 -.-> n2')
-        expect(src).not.toContain('  n1 --> n2')
-    })
+        const srcUnfired = buildMermaidSource(payloadUnfired)
+        expect(srcUnfired).toContain('  n1 --> n2')
+        expect(srcUnfired).not.toContain('  n1 -.-> n2')
 
-    it('emits a solid arrow when count_24h is zero but a previous invocation is on file', () => {
-        /* Dormant edge: last fired more than 24h ago but inside the
-         * 7-day enrichment window. Renders solid — the operator has
-         * touched this connection recently enough that it doesn't
-         * warrant the "configured, never used" treatment. */
-        const payload: GraphPayload = {
-            ...tinyStartup,
-            edges: [
-                { id: '1->2', source: 1, target: 2, op: 'sub_agent', configured: true, count_24h: 0, last_invoked_at: '2026-09-19T08:14:00Z' },
-            ],
-        }
-        const src = buildMermaidSource(payload)
-        expect(src).toContain('  n1 --> n2')
-        expect(src).not.toContain('  n1 -.-> n2')
-    })
-
-    it('emits a solid arrow once the edge has fired in the last 24h', () => {
-        const payload: GraphPayload = {
+        const payloadFired: GraphPayload = {
             ...tinyStartup,
             edges: [
                 { id: '1->2', source: 1, target: 2, op: 'sub_agent', configured: true, count_24h: 3, last_invoked_at: '2026-09-25T08:14:00Z' },
             ],
         }
-        const src = buildMermaidSource(payload)
-        expect(src).toContain('  n1 --> n2')
-        expect(src).not.toContain('  n1 -.-> n2')
+        const srcFired = buildMermaidSource(payloadFired)
+        expect(srcFired).toContain('  n1 --> n2')
+        expect(srcFired).not.toContain('  n1 -.-> n2')
     })
 
     it('escapes single quotes in node names', () => {

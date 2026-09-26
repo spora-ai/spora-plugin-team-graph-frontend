@@ -7,11 +7,15 @@
  * taps the empty area without dragging — the page wires this to
  * `selection.clear()`.
  *
- * Two render passes happen on mount: the first Mermaid render
- * commits the SVG with the loose `useMaxWidth` setting, the
- * second (after `getBBox`) tightens the viewBox. The fit call
- * lives behind a `requestAnimationFrame` so the SVG has time
- * to attach to layout before we measure it.
+ * **Pan/zoom preservation.** The view state lives inside
+ * `usePanZoom`'s `view` ref; the canvas only calls `fit()` when
+ * the principal genuinely changes (`shouldFit=true`) or the very
+ * first render after mount. Every other render leaves the
+ * view alone — the operator's zoom and pan survive data refreshes
+ * (which are themselves deduped in `useTeamGraph` so the only
+ * re-renders that fire are the ones that genuinely changed
+ * something). The "Fit to view" toolbar button is the explicit
+ * escape hatch.
  */
 import { onMounted, ref, watch } from 'vue'
 import { useMermaidRender } from '../composables/useMermaidRender'
@@ -42,15 +46,29 @@ watch(
 )
 
 const selection = useSelectionStore()
+let hasRenderedOnce = false
 const { reRender } = useMermaidRender({
     hostRef,
     graph: graphRef,
-    /* Two RAFs: the first lets the freshly committed SVG attach to
+    /*
+     * Two RAFs: the first lets the freshly committed SVG attach to
      * the DOM, the second lets layout propagate so wrap.clientWidth
      * and the SVG's width/height attributes are valid by the time
      * fit() reads them. Without this double-rAF the first fit is
-     * sometimes called before the browser has sized the new node. */
-    onRender: () => requestAnimationFrame(() => requestAnimationFrame(() => fit())),
+     * sometimes called before the browser has sized the new node.
+     *
+     * We only fit() on the very first render; every subsequent
+     * render preserves the operator's zoom + pan so polling
+     * doesn't yank the view back to the fit-to-viewport baseline.
+     */
+    onRender: () => requestAnimationFrame(() => requestAnimationFrame(() => {
+        if (!hasRenderedOnce) {
+            hasRenderedOnce = true
+            fit()
+        }
+        /* else: keep the existing view state — the SVG grew /
+         * shrunk under it. */
+    })),
 })
 const { fit, zoomIn, zoomOut } = usePanZoom({
     wrapRef: canvasWrap,
