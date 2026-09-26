@@ -214,42 +214,94 @@ describe('TeamGraphPage.vue (single-sidebar layout)', () => {
         wrapper.unmount()
     })
 
-    it('renders hierarchy info + tools + description + owner when an agent is selected', async () => {
+    it('renders the compact header + owner + description + edges when an agent is selected', async () => {
         const wrapper = mount(TeamGraphPage, { props: { hostContext } })
         await flushPromises()
         const selection = useSelectionStore()
         selection.setSelected(11)
         await flushPromises()
 
-        // /agents/11 was called by the detail panel for tools /
-        // description / owner — these come from /agents/{id}, not the
-        // graph payload.
+        // /agents/11 was called by the detail panel for description
+        // / owner — these come from /agents/{id}, not the graph
+        // payload. The compact variant no longer reads m.tools.
         expect(fetchAgentMetaMock).toHaveBeenCalledWith(11)
 
-        // Tool tiles rendered (one per configured tool) with a
-        // compact two-letter chip + tooltip via the parent's title=.
-        const tools = wrapper.find('[data-testid="tg-tool-tiles"]').findAll('.tg-tool-tile')
-        expect(tools.length).toBe(2)
-        expect(tools[0]!.attributes('title')).toBe('Web search')
-        expect(tools[0]!.text()).toBe('WE')
+        // Compact header — name + #ID on one row, status chip
+        // alongside. The chip lives in its own component so a status
+        // poll re-renders only the chip.
+        expect(wrapper.find('[data-testid="tg-agent-name"]').text()).toBe('Lead')
+        expect(wrapper.text()).toContain('#11')
+        const chip = wrapper.findComponent({ name: 'AgentStatusChip' })
+        expect(chip.exists()).toBe(true)
+        expect(chip.text()).toContain('running')
+
+        // Tools section is gone in the compact variant (the
+        // dashboard's AgentCard already carries the tool list).
+        expect(wrapper.find('[data-testid="tg-tool-tiles"]').exists()).toBe(false)
 
         // Owner label says "Personal agent" because the agent is
-        // owned by the user's user-principal (the test mock's
-        // `principal.type === 'user'`).
+        // owned by the user's user-principal.
         expect(wrapper.text()).toContain('Owner')
         expect(wrapper.text()).toContain('Personal agent')
-        // max_steps surfaces in the owner section.
         expect(wrapper.text()).toContain('max 25 steps per run')
 
-        // Description renders the agent's body copy.
+        // Description renders the agent's body copy (line-clamped).
         expect(wrapper.text()).toContain('Owns the marketing strategy')
 
         // Outbound edge list distinguishes a "used in last 24h"
         // edge from a "configured, never used" one via the new
-        // edgeActivity label.
-        expect(wrapper.text()).toContain('→ sub_agent · 3× / 24 h')
-        expect(wrapper.text()).toContain('→ sub_agent · configured, never used')
+        // edgeActivity label. The fixture has 2 outbound edges
+        // (both visible at the cap of 4).
+        const outbound = wrapper.find('[data-testid="tg-outbound-section"]')
+        expect(outbound.text()).toContain('→ sub_agent · 3× / 24 h')
+        expect(outbound.text()).toContain('→ sub_agent · configured, never used')
+        expect(outbound.text()).toContain('Outbound — spawned (2)')
 
+        wrapper.unmount()
+    })
+
+    it('shows a "+N more" line when outbound edges exceed the cap', async () => {
+        // Build a fixture with 6 outbound edges — the cap is 4, so
+        // the panel should render 4 rows + "+2 more" overflow.
+        const manyEdges = Array.from({ length: 6 }, (_, i) => ({
+            id: `11->${13 + i}`,
+            source: 11,
+            target: 13 + i,
+            op: 'sub_agent' as const,
+            configured: true as const,
+            count_24h: 0,
+            last_invoked_at: null,
+        }))
+        fetchGraphMock.mockImplementation(async (id: number) => {
+            if (id === 7) return {
+                ...buildPayload(7, 'admin@spora.local'),
+                nodes: [
+                    ...buildPayload(7, 'admin@spora.local').nodes,
+                    ...Array.from({ length: 6 }, (_, i) => ({
+                        id: 13 + i,
+                        name: `Target ${i}`,
+                        role: null,
+                        picture_url: null,
+                        status: 'COMPLETED',
+                        active_chats: 0,
+                        recent_chats_24h: 0,
+                        profile_picture: { palette_key: 'slate', bg_color: '#475569', fg_color: '#F8FAFC' },
+                    })),
+                ],
+                edges: manyEdges,
+            }
+            return buildPayload(id === 2 ? 2 : 4, id === 2 ? 'Marketing' : 'Engineering')
+        })
+
+        const wrapper = mount(TeamGraphPage, { props: { hostContext } })
+        await flushPromises()
+        const selection = useSelectionStore()
+        selection.setSelected(11)
+        await flushPromises()
+
+        const outbound = wrapper.find('[data-testid="tg-outbound-section"]')
+        expect(outbound.text()).toContain('Outbound — spawned (6)')
+        expect(outbound.text()).toContain('+2 more')
         wrapper.unmount()
     })
 

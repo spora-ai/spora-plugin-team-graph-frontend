@@ -1,30 +1,28 @@
 <script setup lang="ts">
 /**
- * Right-sidebar agent detail panel — renders at every viewport.
+ * Right-sidebar agent detail panel — compact variant.
  *
  * Layout (top → bottom):
- *   1. Header: avatar + name + role + status pill
+ *   1. Compact header: name + #ID on one line, status chip on the
+ *      same row (right-aligned). The chip lives in its own component
+ *      (`AgentStatusChip`) so a status poll re-renders only the chip
+ *      and not the static name + ID text.
  *   2. Activity counts (active + 24 h)
- *   3. Hierarchy chain (root → ... → this agent) — computed from the
- *      graph payload's inbound edges by walking up the spawn tree
- *      until a node with no parent is reached
+ *   3. Hierarchy chain (root → ... → this agent)
  *   4. Owner / Principal (live /agents/{id} payload)
  *   5. Description (line-clamped, from /agents/{id})
- *   6. Tools row (icons + tooltip, from /agents/{id})
- *   7. Inbound + Outbound edges (graph payload) — already clickable
- *      deep-links; switching selection also fires `selection.setSelected`
- *      so the canvas highlights the new node
- *   8. Active chats (live /tasks)
- *   9. Recent chats (live /tasks)
+ *   6. Outbound + Inbound edges, capped at MAX_EDGES_DISPLAYED = 4
+ *      each, with a "+N more" overflow line
+ *   7. Active chats, capped at MAX_CHATS_DISPLAYED = 4
+ *   8. Recent chats, capped at MAX_CHATS_DISPLAYED = 4
  *
- * Edge rows are deep-link buttons — clicking one sets
+ * The Tools section was removed in this compact variant — the
+ * dashboard's AgentCard already carries the tool list, and
+ * surfacing it twice on the same screen dilutes the header.
+ *
+ * Edge rows are deep-link buttons — clicking one calls
  * `selection.setSelected(otherId)` so the canvas highlights the
  * target and the panel re-renders for the new agent.
- *
- * Active / recent chats come from the live `/tasks` endpoint; the
- * `is_archived` filter and `principal_id` scope mirror what the
- * host's dashboard chat feed shows, so the operator sees the same
- * set of chats here as on the agent's main page.
  */
 import { computed, ref, watch } from 'vue'
 import { useSelectionStore } from '../stores/selection'
@@ -33,15 +31,22 @@ import {
     fetchAgentMeta,
     fetchRecentChats,
     type AgentMeta,
-    type AgentToolEntry,
 } from '../api/agentDetail'
-import { statusColor, statusLabel, statusPillClass } from '../lib/nodeStatus'
+import { statusColor } from '../lib/nodeStatus'
 import { inDegree, outDegree } from '../lib/stats'
 import type { ChatSummary, GraphEdge, GraphNode, GraphPayload } from '../types'
+import AgentStatusChip from './AgentStatusChip.vue'
 
 const props = defineProps<{
     graph: GraphPayload
 }>()
+
+/* Display caps. The user asked to limit outbound to a maximum of 4;
+ * we apply the same cap to inbound + chats so a busy agent doesn't
+ * push the panel off the viewport. Each cap surfaces a "+N more"
+ * line at the bottom so the operator knows there are more. */
+const MAX_EDGES_DISPLAYED = 4
+const MAX_CHATS_DISPLAYED = 4
 
 const selection = useSelectionStore()
 
@@ -56,6 +61,14 @@ const outboundEdges = computed<GraphEdge[]>(() =>
 )
 const inboundEdges = computed<GraphEdge[]>(() =>
     selectedNode.value === null ? [] : inDegree(props.graph.edges, selectedNode.value.id),
+)
+const visibleOutbound = computed<GraphEdge[]>(() => outboundEdges.value.slice(0, MAX_EDGES_DISPLAYED))
+const visibleInbound = computed<GraphEdge[]>(() => inboundEdges.value.slice(0, MAX_EDGES_DISPLAYED))
+const hiddenOutboundCount = computed<number>(() =>
+    Math.max(0, outboundEdges.value.length - visibleOutbound.value.length),
+)
+const hiddenInboundCount = computed<number>(() =>
+    Math.max(0, inboundEdges.value.length - visibleInbound.value.length),
 )
 
 /**
@@ -86,8 +99,6 @@ const hierarchyChain = computed<{ path: AncestorLink[]; isRoot: boolean }>(() =>
         }
         const parentId: number = parentEdge.source
         if (visited.has(parentId)) {
-            // Cycle (shouldn't happen in a directed spawn graph, but
-            // defensive — break out before infinite-looping the walk).
             return { path, isRoot: true }
         }
         visited.add(parentId)
@@ -98,8 +109,6 @@ const hierarchyChain = computed<{ path: AncestorLink[]; isRoot: boolean }>(() =>
         path.unshift({ id: parentNode.id, name: parentNode.name, role: parentNode.role })
         currentId = parentNode.id
     }
-    /* We hit the depth cap with parents still ahead — show what we
-     * have and let the operator click an inbound edge to go deeper. */
     return { path, isRoot: false }
 })
 
@@ -165,20 +174,10 @@ function relTime(iso: string | null): string {
 }
 
 /**
- * Build the secondary line of an edge row in the detail panel.
- *
- * The wire payload distinguishes three states for a configured
- * sub-agent edge:
- *
- *   1. Just-fired:  `count_24h > 0`, recent timestamp
- *   2. Dormant:     `count_24h === 0` but `last_invoked_at !== null`
- *                   (fired within the 7-day enrichment window but
- *                   outside the 24h counter)
- *   3. Unfired:     `count_24h === 0 && last_invoked_at === null`
- *                   (configured but never invoked)
- *
- * Returns the plain-text label so the template can render it without
- * branching on every case.
+ * Three states for a configured sub-agent edge:
+ *   1. Just-fired: `count_24h > 0`, recent timestamp
+ *   2. Dormant:    `count_24h === 0` but `last_invoked_at !== null`
+ *   3. Unfired:    `count_24h === 0 && last_invoked_at === null`
  */
 function edgeActivity(edge: GraphEdge): string {
     if (edge.count_24h > 0) {
@@ -193,12 +192,6 @@ function edgeActivity(edge: GraphEdge): string {
 function jumpTo(id: number): void {
     selection.setSelected(id)
 }
-
-const visibleTools = computed<AgentToolEntry[]>(() => {
-    const m = agentMeta.value
-    if (m === null) return []
-    return m.tools
-})
 
 const ownerLabel = computed<string>(() => {
     const m = agentMeta.value
@@ -229,26 +222,22 @@ const ownerLabel = computed<string>(() => {
             </p>
         </div>
         <template v-else>
-            <header class="flex items-start gap-3 p-4 border-b border-border">
-                <div
-                    class="shrink-0 flex items-center justify-center text-white font-semibold text-xs"
-                    :style="{ background: statusColor(selectedNode.status), width: '38px', height: '38px', borderRadius: '999px' }"
-                >
-                    {{ initials(selectedNode.name) }}
+            <!--
+                Compact header — one row with the name + #ID on the
+                left and the status chip on the right. The chip is
+                its own component (`AgentStatusChip`) so a status
+                poll re-renders only the chip, not the static text.
+            -->
+            <header class="flex items-center gap-2 px-4 py-2.5 border-b border-border">
+                <div class="flex-1 min-w-0 flex items-baseline gap-1.5">
+                    <h3
+                        class="text-sm font-semibold truncate"
+                        :title="selectedNode.name"
+                        data-testid="tg-agent-name"
+                    >{{ selectedNode.name }}</h3>
+                    <span class="text-[11px] text-muted-foreground shrink-0">#{{ selectedNode.id }}</span>
                 </div>
-                <div class="flex-1 min-w-0">
-                    <h3 class="text-sm font-semibold leading-tight truncate">{{ selectedNode.name }}</h3>
-                    <p class="text-[11px] text-muted-foreground leading-tight truncate">
-                        #{{ selectedNode.id }} · {{ selectedNode.role ?? '—' }}
-                    </p>
-                    <span
-                        class="tg-status-pill mt-1.5"
-                        :class="statusPillClass(selectedNode.status)"
-                    >
-                        <span class="dot" />
-                        {{ statusLabel(selectedNode.status) }}
-                    </span>
-                </div>
+                <AgentStatusChip :status="selectedNode.status" />
             </header>
             <div class="tg-agent-panel-body p-4 space-y-5">
                 <section class="flex items-center justify-between text-xs">
@@ -315,44 +304,24 @@ const ownerLabel = computed<string>(() => {
                     <h4 class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">
                         Description
                     </h4>
-                    <p class="text-xs leading-[1.4] text-foreground/90">
+                    <p class="text-xs leading-[1.4] text-foreground/90 line-clamp-3">
                         {{ agentMeta.description }}
                     </p>
                 </section>
 
-                <!-- Tools row — server-resolved icons + tooltips. -->
-                <section v-if="visibleTools.length > 0">
-                    <h4 class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">
-                        Tools
-                    </h4>
-                    <div class="flex flex-wrap gap-1.5" data-testid="tg-tool-tiles">
-                        <span
-                            v-for="(tool, idx) in visibleTools.slice(0, 12)"
-                            :key="`${tool.tool_class}-${idx}`"
-                            class="tg-tool-tile"
-                            :title="tool.tool_name"
-                            :aria-label="`Tool: ${tool.tool_name}`"
-                        >
-                            {{ tool.tool_name.slice(0, 2).toUpperCase() }}
-                        </span>
-                        <span
-                            v-if="visibleTools.length > 12"
-                            class="tg-tool-tile tg-tool-tile--more"
-                            :title="`+${visibleTools.length - 12} more`"
-                        >
-                            +{{ visibleTools.length - 12 }}
-                        </span>
-                    </div>
-                </section>
-
-                <section>
+                <!--
+                    Outbound edges, capped at MAX_EDGES_DISPLAYED. Each
+                    row deep-links to the target agent. A "+N more"
+                    line appears when there are more than the cap.
+                -->
+                <section data-testid="tg-outbound-section">
                     <h4 class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">
                         Outbound — spawned ({{ outboundEdges.length }})
                     </h4>
                     <p v-if="outboundEdges.length === 0" class="text-xs text-muted-foreground">None.</p>
                     <div v-else class="space-y-1">
                         <button
-                            v-for="edge in outboundEdges"
+                            v-for="edge in visibleOutbound"
                             :key="edge.id"
                             type="button"
                             class="tg-edge-row w-full text-left"
@@ -382,17 +351,25 @@ const ownerLabel = computed<string>(() => {
                                 <path d="m9 18 6-6-6-6" />
                             </svg>
                         </button>
+                        <p
+                            v-if="hiddenOutboundCount > 0"
+                            class="text-[11px] text-muted-foreground pl-9"
+                        >
+                            +{{ hiddenOutboundCount }} more — open the dashboard
+            to inspect.
+                        </p>
                     </div>
                 </section>
 
-                <section>
+                <!-- Inbound edges, capped at MAX_EDGES_DISPLAYED. -->
+                <section data-testid="tg-inbound-section">
                     <h4 class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">
                         Inbound — spawned by ({{ inboundEdges.length }})
                     </h4>
                     <p v-if="inboundEdges.length === 0" class="text-xs text-muted-foreground">None.</p>
                     <div v-else class="space-y-1">
                         <button
-                            v-for="edge in inboundEdges"
+                            v-for="edge in visibleInbound"
                             :key="edge.id"
                             type="button"
                             class="tg-edge-row w-full text-left"
@@ -422,10 +399,18 @@ const ownerLabel = computed<string>(() => {
                                 <path d="m9 18 6-6-6-6" />
                             </svg>
                         </button>
+                        <p
+                            v-if="hiddenInboundCount > 0"
+                            class="text-[11px] text-muted-foreground pl-9"
+                        >
+                            +{{ hiddenInboundCount }} more — open the dashboard
+            to inspect.
+                        </p>
                     </div>
                 </section>
 
-                <section>
+                <!-- Active chats, capped at MAX_CHATS_DISPLAYED. -->
+                <section data-testid="tg-active-chats-section">
                     <h4 class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">
                         Active chats ({{ activeChats.length }})
                     </h4>
@@ -434,7 +419,7 @@ const ownerLabel = computed<string>(() => {
                     </p>
                     <div v-else class="space-y-1">
                         <div
-                            v-for="chat in activeChats"
+                            v-for="chat in activeChats.slice(0, MAX_CHATS_DISPLAYED)"
                             :key="chat.id"
                             class="tg-task-row"
                         >
@@ -449,10 +434,17 @@ const ownerLabel = computed<string>(() => {
                                 </div>
                             </div>
                         </div>
+                        <p
+                            v-if="activeChats.length > MAX_CHATS_DISPLAYED"
+                            class="text-[11px] text-muted-foreground"
+                        >
+                            +{{ activeChats.length - MAX_CHATS_DISPLAYED }} more in flight.
+                        </p>
                     </div>
                 </section>
 
-                <section>
+                <!-- Recent chats, capped at MAX_CHATS_DISPLAYED. -->
+                <section data-testid="tg-recent-chats-section">
                     <h4 class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">
                         Recent chats ({{ recentChats.length }})
                     </h4>
@@ -461,7 +453,7 @@ const ownerLabel = computed<string>(() => {
                     </p>
                     <div v-else class="space-y-1">
                         <div
-                            v-for="chat in recentChats"
+                            v-for="chat in recentChats.slice(0, MAX_CHATS_DISPLAYED)"
                             :key="chat.id"
                             class="tg-task-row"
                         >
@@ -476,6 +468,13 @@ const ownerLabel = computed<string>(() => {
                                 </div>
                             </div>
                         </div>
+                        <p
+                            v-if="recentChats.length > MAX_CHATS_DISPLAYED"
+                            class="text-[11px] text-muted-foreground"
+                        >
+                            +{{ recentChats.length - MAX_CHATS_DISPLAYED }} more — open the dashboard
+                            for the full history.
+                        </p>
                     </div>
                 </section>
             </div>

@@ -211,24 +211,11 @@ body,
 }
 
 /**
- * Tool tiles in the detail panel. The host's icon-resolver cascade
- * can give us a real lucide name per tool, but the plugin UI
- * renders these as compact initials (two-letter) chips because
- * (a) we don't depend on lucide icons in the plugin bundle, and
- * (b) two letters of the tool name are more readable than a tiny
- * 14 px icon at a glance. The tooltip (the parent's `title=`)
- * carries the full tool name on hover.
- */
-.tg-tool-tile {
-    display: inline-flex; align-items: center; justify-content: center;
-    min-width: 26px; height: 26px; padding: 0 6px;
-    border-radius: 6px; border: 1px solid var(--border);
-    background: var(--background); color: var(--muted-foreground);
-    font-size: 9px; font-weight: 700; letter-spacing: 0.04em;
-}
-.tg-tool-tile--more {
-    background: var(--muted); color: var(--foreground);
-}
+ * (removed in v0.1.x — Tools section was dropped from the compact
+ *  detail-panel header. The host's AgentCard already carries the
+ *  tool list, so the plugin no longer duplicates it. The CSS
+ *  rules for `.tg-tool-tile` were deleted alongside the markup;
+ *  if a future variant needs them, restore from git history.) */
 
 .tg-agent-panel { position: sticky; top: 16px; max-height: calc(100vh - 32px); display: flex; flex-direction: column; }
 .tg-agent-panel-body { overflow-y: auto; }
