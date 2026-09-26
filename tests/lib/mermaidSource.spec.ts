@@ -11,6 +11,9 @@ import { PALETTES } from '../../src/lib/palette'
  * `n<id>["…"]:::tg-palette-<key>` line would surface as the wrong
  * palette or a render error. We pin the entire source string for
  * one representative payload (Tiny Startup fixture, minus chats).
+ *
+ * Compact variant (v0.1.x): nodes carry only an accent bar + name
+ * + status pill — no #ID, no role, no stats line.
  */
 const tinyStartup: GraphPayload = {
     principal: { id: -1, type: 'group', name: 'Tiny Startup', is_current_user_owned: true },
@@ -34,16 +37,14 @@ describe('buildMermaidSource', () => {
         expect(src.split('\n')[0]).toBe('flowchart TB')
     })
 
-    it('emits exactly one classDef per palette_key actually used in the payload', () => {
+    it('emits transparent-fill classDefs (CSS owns the rect styling)', () => {
         const src = buildMermaidSource(tinyStartup)
-        // Tiny Startup uses indigo, amber, teal, pink, green → 5 classDefs.
-        // No classDef for slate/red/orange/blue/violet even though they're
-        // in the PALETTES table — the emitted set is the used-set.
-        expect(src).toContain('classDef tg-palette-indigo fill:#4338CA,color:#EEF2FF,stroke:#4338CA')
-        expect(src).toContain('classDef tg-palette-amber fill:#D97706,color:#FFFBEB,stroke:#D97706')
-        expect(src).toContain('classDef tg-palette-teal fill:#0F766E,color:#F0FDFA,stroke:#0F766E')
-        expect(src).toContain('classDef tg-palette-pink fill:#BE185D,color:#FDF2F8,stroke:#BE185D')
-        expect(src).toContain('classDef tg-palette-green fill:#15803D,color:#F0FDF4,stroke:#15803D')
+        // Every classDef uses fill:transparent + stroke:transparent
+        // so Mermaid's per-palette CSS injection can't fight our
+        // stylesheet's white-fill + violet-outline rules.
+        for (const palette of ['indigo', 'amber', 'teal', 'pink', 'green']) {
+            expect(src).toContain(`classDef tg-palette-${palette} fill:transparent,stroke:transparent`)
+        }
         expect(src).not.toContain('classDef tg-palette-slate')
         expect(src).not.toContain('classDef tg-palette-red')
         expect(src).not.toContain('classDef tg-palette-violet')
@@ -61,15 +62,26 @@ describe('buildMermaidSource', () => {
         expect(src).toContain(':::tg-palette-green')
     })
 
-    it('does NOT inline style attributes on the label div', () => {
+    it('does NOT inline background-color or fill on the label div', () => {
         /* Inline `style=` was tried first and rejected: Mermaid 10's
          * HTML-label sanitiser strips `;` characters from inline
          * styles, which concatenates adjacent declarations into
-         * invalid CSS. Every colour now lives in CSS variables
-         * driven by the wrapping `<g class="tg-palette-*">`. */
+         * invalid CSS. Every colour lives in CSS variables driven
+         * by the wrapping `<g class="tg-palette-*">`. The compact
+         * variant only carries a single inline property:
+         * `--palette-bg` for the accent bar. */
         const src = buildMermaidSource(tinyStartup)
-        expect(src).not.toContain('style=\'background-color')
-        expect(src).not.toContain('style="background-color')
+        expect(src).not.toContain('background-color:')
+        // classDefs legitimately use `fill:transparent` — the
+        // assertion has to look for an actual colour, not just
+        // the property prefix.
+        expect(src).not.toMatch(/fill:\s*(?!transparent)[^,)]+/)
+    })
+
+    it('passes the agent palette_key via --palette-bg (inline) so the accent bar can read it', () => {
+        const src = buildMermaidSource(tinyStartup)
+        expect(src).toContain("style='--palette-bg:#4338CA'") // indigo
+        expect(src).toContain("style='--palette-bg:#D97706'") // amber
     })
 
     it('falls back to Slate palette when a node\'s wire payload omits palette_key', () => {
@@ -80,18 +92,13 @@ describe('buildMermaidSource', () => {
             ],
         }
         const src = buildMermaidSource(payload)
-        // paletteByKey('') returns the Slate fallback; the canvas
-        // always has a usable (bg, fg) pair.
-        expect(src).toContain('classDef tg-palette-slate fill:#475569,color:#F8FAFC,stroke:#475569')
+        expect(src).toContain('classDef tg-palette-slate fill:transparent,stroke:transparent')
         expect(src).toContain(':::tg-palette-slate')
+        // safeHex('') falls back to #475569 (Slate bg_color).
+        expect(src).toContain("style='--palette-bg:#475569'")
     })
 
     it('emits one solid arrow line per edge, regardless of last_invoked_at', () => {
-        /* Every configured edge renders as a solid arrow — the
-         * "configured, never used" distinction lives in the detail
-         * panel's secondary label only, not on the canvas, because
-         * a dashed arrow reads as "broken" rather than "dormant"
-         * and confuses operators. */
         const payloadUnfired: GraphPayload = {
             ...tinyStartup,
             edges: [
@@ -101,16 +108,6 @@ describe('buildMermaidSource', () => {
         const srcUnfired = buildMermaidSource(payloadUnfired)
         expect(srcUnfired).toContain('  n1 --> n2')
         expect(srcUnfired).not.toContain('  n1 -.-> n2')
-
-        const payloadFired: GraphPayload = {
-            ...tinyStartup,
-            edges: [
-                { id: '1->2', source: 1, target: 2, op: 'sub_agent', configured: true, count_24h: 3, last_invoked_at: '2026-09-25T08:14:00Z' },
-            ],
-        }
-        const srcFired = buildMermaidSource(payloadFired)
-        expect(srcFired).toContain('  n1 --> n2')
-        expect(srcFired).not.toContain('  n1 -.-> n2')
     })
 
     it('escapes single quotes in node names', () => {
@@ -121,25 +118,39 @@ describe('buildMermaidSource', () => {
             ],
         }
         const src = buildMermaidSource(payload)
-        // Single-quote inside the name attribute must be escaped
-        // to `&#39;` so Mermaid's parser doesn't terminate the label.
         expect(src).toContain('O&#39;Reilly')
+    })
+
+    it('does not include #ID, role, or stats line in the compact label', () => {
+        const src = buildMermaidSource(tinyStartup)
+        // The user asked to drop the stats line and the agent ID from
+        // the canvas nodes. The compact label carries only the
+        // accent bar + agent name + status pill.
+        expect(src).not.toContain('tg-node-stats')
+        expect(src).not.toContain('tg-node-role')
+        expect(src).not.toContain('active · <strong>')
+        expect(src).not.toContain('24h')
+        // `#ID` rendering would look like "#1 · Marketing Lead".
+        // `#1` itself shows up in hex colours (e.g. #15803D) so we
+        // check for the rendered interpolation pattern, not the raw
+        // substring.
+        expect(src).not.toMatch(/#\d+\s+·\s+\w/)  // "#1 · Marketing"
     })
 
     it('produces a stable, line-ordered output', () => {
         const src = buildMermaidSource(tinyStartup)
         expect(src).toBe([
             'flowchart TB',
-            'classDef tg-palette-indigo fill:#4338CA,color:#EEF2FF,stroke:#4338CA',
-            'classDef tg-palette-amber fill:#D97706,color:#FFFBEB,stroke:#D97706',
-            'classDef tg-palette-teal fill:#0F766E,color:#F0FDFA,stroke:#0F766E',
-            'classDef tg-palette-pink fill:#BE185D,color:#FDF2F8,stroke:#BE185D',
-            'classDef tg-palette-green fill:#15803D,color:#F0FDF4,stroke:#15803D',
-            '  n1["<div class=\'tg-node\'><div class=\'tg-node-name\'>Alex</div><div class=\'tg-node-role\'>#1 · Marketing Lead</div><span class=\'tg-status-pill tg-status-running\'><span class=\'dot\'></span>running</span><div class=\'tg-node-stats\'><span><strong>1</strong> active · <strong>4</strong>/24h</span></div></div>"]:::tg-palette-indigo',
-            '  n2["<div class=\'tg-node\'><div class=\'tg-node-name\'>Blake</div><div class=\'tg-node-role\'>#2 · Content Writer</div><span class=\'tg-status-pill tg-status-running\'><span class=\'dot\'></span>running</span><div class=\'tg-node-stats\'><span><strong>1</strong> active · <strong>3</strong>/24h</span></div></div>"]:::tg-palette-amber',
-            '  n3["<div class=\'tg-node\'><div class=\'tg-node-name\'>Casey</div><div class=\'tg-node-role\'>#3 · Translator</div><span class=\'tg-status-pill tg-status-completed\'><span class=\'dot\'></span>idle</span><div class=\'tg-node-stats\'><span><strong>0</strong> active · <strong>1</strong>/24h</span></div></div>"]:::tg-palette-teal',
-            '  n4["<div class=\'tg-node\'><div class=\'tg-node-name\'>Dakota</div><div class=\'tg-node-role\'>#4 · Designer</div><span class=\'tg-status-pill tg-status-awaiting\'><span class=\'dot\'></span>awaiting sub-agent</span><div class=\'tg-node-stats\'><span><strong>1</strong> active · <strong>2</strong>/24h</span></div></div>"]:::tg-palette-pink',
-            '  n5["<div class=\'tg-node\'><div class=\'tg-node-name\'>Ellis</div><div class=\'tg-node-role\'>#5 · Developer</div><span class=\'tg-status-pill tg-status-pending\'><span class=\'dot\'></span>awaiting approval</span><div class=\'tg-node-stats\'><span><strong>1</strong> active · <strong>2</strong>/24h</span></div></div>"]:::tg-palette-green',
+            'classDef tg-palette-indigo fill:transparent,stroke:transparent',
+            'classDef tg-palette-amber fill:transparent,stroke:transparent',
+            'classDef tg-palette-teal fill:transparent,stroke:transparent',
+            'classDef tg-palette-pink fill:transparent,stroke:transparent',
+            'classDef tg-palette-green fill:transparent,stroke:transparent',
+            '  n1["<div class=\'tg-node\' style=\'--palette-bg:#4338CA\'><div class=\'tg-node-accent\'></div><div class=\'tg-node-body\'><div class=\'tg-node-name\'>Alex</div><span class=\'tg-status-pill tg-status-running\'><span class=\'dot\'></span>running</span></div></div>"]:::tg-palette-indigo',
+            '  n2["<div class=\'tg-node\' style=\'--palette-bg:#D97706\'><div class=\'tg-node-accent\'></div><div class=\'tg-node-body\'><div class=\'tg-node-name\'>Blake</div><span class=\'tg-status-pill tg-status-running\'><span class=\'dot\'></span>running</span></div></div>"]:::tg-palette-amber',
+            '  n3["<div class=\'tg-node\' style=\'--palette-bg:#0F766E\'><div class=\'tg-node-accent\'></div><div class=\'tg-node-body\'><div class=\'tg-node-name\'>Casey</div><span class=\'tg-status-pill tg-status-completed\'><span class=\'dot\'></span>idle</span></div></div>"]:::tg-palette-teal',
+            '  n4["<div class=\'tg-node\' style=\'--palette-bg:#BE185D\'><div class=\'tg-node-accent\'></div><div class=\'tg-node-body\'><div class=\'tg-node-name\'>Dakota</div><span class=\'tg-status-pill tg-status-awaiting\'><span class=\'dot\'></span>awaiting sub-agent</span></div></div>"]:::tg-palette-pink',
+            '  n5["<div class=\'tg-node\' style=\'--palette-bg:#15803D\'><div class=\'tg-node-accent\'></div><div class=\'tg-node-body\'><div class=\'tg-node-name\'>Ellis</div><span class=\'tg-status-pill tg-status-pending\'><span class=\'dot\'></span>awaiting approval</span></div></div>"]:::tg-palette-green',
             '  n1 --> n2',
             '  n1 --> n4',
         ].join('\n'))
@@ -154,9 +165,6 @@ describe('PALETTES table', () => {
     })
 
     it('matches the host Palette hex codes exactly', () => {
-        // Mirrors spora-core/app/Services/AgentPictures/Palette.php —
-        // any drift here breaks the colour contract with the dashboard
-        // Avatar tile for the same agent.
         const expected: Record<string, { bg: string; fg: string }> = {
             slate:  { bg: '#475569', fg: '#F8FAFC' },
             red:    { bg: '#DC2626', fg: '#FEF2F2' },

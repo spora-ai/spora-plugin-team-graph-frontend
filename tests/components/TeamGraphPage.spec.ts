@@ -226,11 +226,12 @@ describe('TeamGraphPage.vue (single-sidebar layout)', () => {
         // payload. The compact variant no longer reads m.tools.
         expect(fetchAgentMetaMock).toHaveBeenCalledWith(11)
 
-        // Compact header — name + #ID on one row, status chip
-        // alongside. The chip lives in its own component so a status
-        // poll re-renders only the chip.
+        // Compact header — agent name + status chip on one row.
+        // The user dropped the #ID from the canvas node, and we
+        // never show it in the panel header either. The chip lives
+        // in its own component so a status poll re-renders only the
+        // chip.
         expect(wrapper.find('[data-testid="tg-agent-name"]').text()).toBe('Lead')
-        expect(wrapper.text()).toContain('#11')
         const chip = wrapper.findComponent({ name: 'AgentStatusChip' })
         expect(chip.exists()).toBe(true)
         expect(chip.text()).toContain('running')

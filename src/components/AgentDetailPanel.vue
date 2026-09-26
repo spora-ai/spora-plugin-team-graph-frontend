@@ -223,19 +223,20 @@ const ownerLabel = computed<string>(() => {
         </div>
         <template v-else>
             <!--
-                Compact header — one row with the name + #ID on the
-                left and the status chip on the right. The chip is
-                its own component (`AgentStatusChip`) so a status
-                poll re-renders only the chip, not the static text.
+                Compact header — one row with the name on the left
+                and the status chip on the right. The #ID was
+                dropped in the compact variant (the agent name is
+                the primary identifier). The chip lives in its own
+                component (`AgentStatusChip`) so a status poll
+                re-renders only the chip, not the static text.
             -->
             <header class="flex items-center gap-2 px-4 py-2.5 border-b border-border">
-                <div class="flex-1 min-w-0 flex items-baseline gap-1.5">
+                <div class="flex-1 min-w-0">
                     <h3
                         class="text-sm font-semibold truncate"
                         :title="selectedNode.name"
                         data-testid="tg-agent-name"
                     >{{ selectedNode.name }}</h3>
-                    <span class="text-[11px] text-muted-foreground shrink-0">#{{ selectedNode.id }}</span>
                 </div>
                 <AgentStatusChip :status="selectedNode.status" />
             </header>

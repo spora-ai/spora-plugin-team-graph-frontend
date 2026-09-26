@@ -7,15 +7,35 @@
  * taps the empty area without dragging — the page wires this to
  * `selection.clear()`.
  *
- * **Pan/zoom preservation.** The view state lives inside
- * `usePanZoom`'s `view` ref; the canvas only calls `fit()` when
- * the principal genuinely changes (`shouldFit=true`) or the very
- * first render after mount. Every other render leaves the
- * view alone — the operator's zoom and pan survive data refreshes
- * (which are themselves deduped in `useTeamGraph` so the only
- * re-renders that fire are the ones that genuinely changed
- * something). The "Fit to view" toolbar button is the explicit
- * escape hatch.
+ * **View reset semantics.**
+ *
+ * The canvas fits to viewport when ANY of these change:
+ *
+ *   1. The principal changes (`props.graph.principal.id` differs
+ *      from the previously-rendered one) — the new graph has
+ *      different dimensions, so the operator's old zoom + pan
+ *      would frame the wrong content.
+ *   2. The first render (initial mount) — nothing to preserve.
+ *   3. The Refresh button or `shouldFit` prop fires — explicit
+ *      "reset view to fit" request.
+ *
+ * Data refreshes (the 30 s polling in `useTeamGraph`) DO NOT fit:
+ * the operator's zoom + pan survive, and `useTeamGraph`'s dedup
+ * means identical payloads don't re-render anyway.
+ *
+ * Implementation: a single `pendingFit` ref is the contract. Both
+ * the principal-change watcher and the shouldFit watcher set it to
+ * true. The fit itself runs from two paths:
+ *
+ *   - `useMermaidRender`'s `onRender` callback fires AFTER the new
+ *     SVG has been committed to the DOM with final dimensions.
+ *     This is the path the principal-change case takes.
+ *   - A double rAF fallback in `scheduleFit()` handles the dedup
+ *     case (Refresh with identical data → no re-render → onRender
+ *     doesn't fire → rAF fallback runs `fit()` directly).
+ *
+ * Whichever path fires first clears the flag + calls `fit()`; the
+ * other sees the flag cleared and no-ops.
  */
 import { onMounted, ref, watch } from 'vue'
 import { useMermaidRender } from '../composables/useMermaidRender'
@@ -25,7 +45,7 @@ import type { GraphPayload } from '../types'
 
 const props = defineProps<{
     graph: GraphPayload | null
-    /** Set true when the principal changes so we can refit on the next render. */
+    /** Set true when the toolbar's Refresh button is clicked. */
     shouldFit?: boolean
 }>()
 
@@ -46,7 +66,36 @@ watch(
 )
 
 const selection = useSelectionStore()
-let hasRenderedOnce = false
+
+/*
+ * `pendingFit` is the one-bit contract between the trigger
+ * sources (principal-change + shouldFit) and the runner
+ * (useMermaidRender's onRender + the double-rAF fallback).
+ * Whoever fires first consumes the flag.
+ */
+const pendingFit = ref(false)
+
+/**
+ * Schedule a fit-to-viewport on the next available animation
+ * frame. Two paths consume the flag:
+ *
+ *   1. useMermaidRender's `onRender` callback (the normal path —
+ *      fires after the new SVG has been committed).
+ *   2. The double rAF here (the fallback — fires after two
+ *      animation frames, by which time any in-flight render
+ *      has either completed and consumed the flag, or will
+ *      consume it next).
+ */
+function scheduleFit(): void {
+    pendingFit.value = true
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+        if (pendingFit.value) {
+            pendingFit.value = false
+            fit()
+        }
+    }))
+}
+
 const { reRender } = useMermaidRender({
     hostRef,
     graph: graphRef,
@@ -57,23 +106,57 @@ const { reRender } = useMermaidRender({
      * fit() reads them. Without this double-rAF the first fit is
      * sometimes called before the browser has sized the new node.
      *
-     * We only fit() on the very first render; every subsequent
-     * render preserves the operator's zoom + pan so polling
-     * doesn't yank the view back to the fit-to-viewport baseline.
+     * On every render we check the `pendingFit` flag — if a fit
+     * was requested (principal change or Refresh), run it now
+     * that the SVG has its final dimensions.
      */
     onRender: () => requestAnimationFrame(() => requestAnimationFrame(() => {
-        if (!hasRenderedOnce) {
-            hasRenderedOnce = true
+        if (pendingFit.value) {
+            pendingFit.value = false
             fit()
         }
-        /* else: keep the existing view state — the SVG grew /
-         * shrunk under it. */
     })),
 })
 const { fit, zoomIn, zoomOut } = usePanZoom({
     wrapRef: canvasWrap,
     contentRef: canvasContent,
 })
+
+/*
+ * Principal-change detection. `graph.principal.id` flips the
+ * moment `useTeamGraph` commits the new principal's payload —
+ * this watcher fires synchronously (Vue's reactivity) and asks
+ * for a fit on the next render. The onRender callback above then
+ * runs `fit()` once the new SVG has settled.
+ *
+ * The dedup case (`oldId === null` initial load) is included —
+ * the very first render still needs a fit.
+ */
+watch(
+    () => props.graph?.principal.id ?? null,
+    (newId, oldId) => {
+        if (newId !== null && (oldId === null || newId !== oldId)) {
+            scheduleFit()
+        }
+    },
+)
+
+/*
+ * Explicit refresh trigger from the toolbar. The Refresh button
+ * in `TeamGraphPage` sets `shouldFit = true` after refetch resolves;
+ * if the refetch dedup'd (no data change), no re-render happens,
+ * so the rAF fallback in `scheduleFit()` is what actually runs
+ * the fit. If the refetch produced a new payload, both paths race
+ * — whichever fires first wins, the other sees the cleared flag.
+ */
+watch(
+    () => props.shouldFit,
+    (next) => {
+        if (next === true) {
+            scheduleFit()
+        }
+    },
+)
 
 function onTapEmptyCanvas(): void {
     emit('tap-empty-canvas')
@@ -92,15 +175,6 @@ watch(
         // own watcher; the canvas just needs to clear any pending
         // fit when a re-render fires after selection changes.
         void reRender
-    },
-)
-
-watch(
-    () => props.shouldFit,
-    (next) => {
-        if (next === true) {
-            requestAnimationFrame(() => requestAnimationFrame(() => fit()))
-        }
     },
 )
 </script>

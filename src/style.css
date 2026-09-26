@@ -60,60 +60,99 @@ body,
  * first render; with `useMaxWidth:false` the SVG renders at its
  * natural size, so these sizes land directly on screen.
  *
- * The agent's icon colour is driven by the `tg-palette-<key>` class
- * that Mermaid applies to the wrapping `<g class="node">` via the
- * classDef system (see `lib/mermaidSource.ts`). We can't use inline
- * `style=` on the inner div because Mermaid 10's HTML-label
- * sanitiser strips `;` characters, concatenating adjacent
- * declarations into invalid CSS — every colour lives in the
- * stylesheet below, keyed off `tg-palette-*`.
+ * Compact variant (v0.1.x): the rect is white with a violet outline
+ * (the team's primary accent — `TeamGraphApp::accent() === 'violet'`).
+ * The agent's palette colour shows only as a 6 px wide accent bar on
+ * the left edge — the canvas reads as a unified grid of white-tiled
+ * boxes with violet outlines, and each agent still carries its
+ * icon colour as a discrete accent.
+ *
+ * The status pill remains translucent-white with dark text, so
+ * it's readable on every palette. (Mermaid's HTML-label
+ * sanitiser strips `;` from inline styles, which is why we don't
+ * inline the bg colour here — every colour is in CSS.)
  */
 .tg-node {
-    padding: 14px 16px;
-    min-width: 240px;
+    position: relative;
+    padding: 8px 12px 8px 18px;
+    min-width: 180px;
     text-align: left;
-    line-height: 1.35;
+    line-height: 1.3;
     font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-    border-radius: 12px;
-    background-color: var(--palette-bg, #475569);
-    color: var(--palette-fg, #F8FAFC);
+    border-radius: 10px;
+    background-color: transparent;
+    color: #0f172a;
 }
-.tg-node-name  { font-size: 16px; font-weight: 600; margin: 0; letter-spacing: -0.01em; color: inherit; }
-.tg-node-role  { font-size: 13px; margin: 4px 0 10px; opacity: 0.85; }
-.tg-node-stats { font-size: 13px; margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(255, 255, 255, 0.18); display: flex; justify-content: space-between; gap: 12px; opacity: 0.9; }
-.tg-node-stats strong { color: inherit; font-weight: 600; opacity: 1; }
+.tg-node-body {
+    display: flex; align-items: center; gap: 8px;
+}
+.tg-node-name {
+    font-size: 14px; font-weight: 600; margin: 0; letter-spacing: -0.01em;
+    color: #0f172a; line-height: 1.2;
+    flex: 1 1 auto; min-width: 0;
+}
+/**
+ * 6 px wide accent bar on the left edge — reads the agent's
+ * palette bg_color from the inline `--palette-bg` set by
+ * buildMermaidSource. The rounded corners only show on the left
+ * side so the bar visually attaches to the rounded rect outline.
+ */
+.tg-node-accent {
+    position: absolute;
+    left: 0; top: 0; bottom: 0;
+    width: 6px;
+    background: var(--palette-bg, #475569);
+    border-radius: 10px 0 0 10px;
+}
 
 /**
- * Per-palette colour injection. Mermaid applies `tg-palette-<key>`
- * to the `<g class="node">`; we expose the bg/fg as CSS variables
- * so the inner `.tg-node` reads them via `var(--palette-*)`. The
- * hex codes mirror `Spora\Services\AgentPictures\Palette` — keep
- * in sync if a palette is renamed or its hex shifts upstream.
+ * Per-palette accent colour injection. Mermaid applies
+ * `tg-palette-<key>` to the `<g class="node">`; the inner
+ * `.tg-node-accent` reads `--palette-bg` to paint the left stripe.
+ * The hex codes mirror `Spora\Services\AgentPictures\Palette` —
+ * keep in sync if a palette is renamed or its hex shifts upstream.
+ */
+.tg-canvas-content svg g.tg-palette-slate   { --palette-bg: #475569; }
+.tg-canvas-content svg g.tg-palette-red     { --palette-bg: #DC2626; }
+.tg-canvas-content svg g.tg-palette-orange  { --palette-bg: #EA580C; }
+.tg-canvas-content svg g.tg-palette-amber   { --palette-bg: #D97706; }
+.tg-canvas-content svg g.tg-palette-green   { --palette-bg: #15803D; }
+.tg-canvas-content svg g.tg-palette-teal    { --palette-bg: #0F766E; }
+.tg-canvas-content svg g.tg-palette-blue    { --palette-bg: #1D4ED8; }
+.tg-canvas-content svg g.tg-palette-indigo  { --palette-bg: #4338CA; }
+.tg-canvas-content svg g.tg-palette-violet  { --palette-bg: #6D28D9; }
+.tg-canvas-content svg g.tg-palette-pink    { --palette-bg: #BE185D; }
+
+/**
+ * Rect styling — every node gets a white fill + the team's primary
+ * violet outline. A single wildcard selector covers all 10 palettes
+ * (the classDef sets fill/stroke:transparent so Mermaid doesn't
+ * inject per-palette overrides; we paint the actual values here).
  *
  * `!important` is needed to win against Mermaid's inline
- * `style="fill:…"` on the rect.
+ * `style="fill:…"` on the rect, which is the source of a long
+ * sequence of past "the rect is the wrong colour" bugs.
+ *
+ * The `#spora-plugin-team-graph` ID-prefixed selector bumps
+ * specificity above Mermaid's injected
+ * `#m-N .tg-palette-<key> > * { fill: transparent; … }` rule
+ * (1,1,0) so our white fill + violet outline survive the
+ * automatic cascade.
  */
-.tg-canvas-content svg g.tg-palette-slate   rect { fill: #475569 !important; stroke: #475569 !important; }
-.tg-canvas-content svg g.tg-palette-red     rect { fill: #DC2626 !important; stroke: #DC2626 !important; }
-.tg-canvas-content svg g.tg-palette-orange  rect { fill: #EA580C !important; stroke: #EA580C !important; }
-.tg-canvas-content svg g.tg-palette-amber   rect { fill: #D97706 !important; stroke: #D97706 !important; }
-.tg-canvas-content svg g.tg-palette-green   rect { fill: #15803D !important; stroke: #15803D !important; }
-.tg-canvas-content svg g.tg-palette-teal    rect { fill: #0F766E !important; stroke: #0F766E !important; }
-.tg-canvas-content svg g.tg-palette-blue    rect { fill: #1D4ED8 !important; stroke: #1D4ED8 !important; }
-.tg-canvas-content svg g.tg-palette-indigo  rect { fill: #4338CA !important; stroke: #4338CA !important; }
-.tg-canvas-content svg g.tg-palette-violet  rect { fill: #6D28D9 !important; stroke: #6D28D9 !important; }
-.tg-canvas-content svg g.tg-palette-pink    rect { fill: #BE185D !important; stroke: #BE185D !important; }
-
-.tg-canvas-content svg g.tg-palette-slate   { --palette-bg: #475569; --palette-fg: #F8FAFC; }
-.tg-canvas-content svg g.tg-palette-red     { --palette-bg: #DC2626; --palette-fg: #FEF2F2; }
-.tg-canvas-content svg g.tg-palette-orange  { --palette-bg: #EA580C; --palette-fg: #FFF7ED; }
-.tg-canvas-content svg g.tg-palette-amber   { --palette-bg: #D97706; --palette-fg: #FFFBEB; }
-.tg-canvas-content svg g.tg-palette-green   { --palette-bg: #15803D; --palette-fg: #F0FDF4; }
-.tg-canvas-content svg g.tg-palette-teal    { --palette-bg: #0F766E; --palette-fg: #F0FDFA; }
-.tg-canvas-content svg g.tg-palette-blue    { --palette-bg: #1D4ED8; --palette-fg: #EFF6FF; }
-.tg-canvas-content svg g.tg-palette-indigo  { --palette-bg: #4338CA; --palette-fg: #EEF2FF; }
-.tg-canvas-content svg g.tg-palette-violet  { --palette-bg: #6D28D9; --palette-fg: #F5F3FF; }
-.tg-canvas-content svg g.tg-palette-pink    { --palette-bg: #BE185D; --palette-fg: #FDF2F8; }
+#spora-plugin-team-graph .tg-canvas-content svg g[class*="tg-palette-"] rect {
+    fill: #ffffff !important;
+    stroke: #7c3aed !important;        /* violet-600 — the team's primary accent */
+    stroke-width: 1.5px !important;
+}
+/* Selected / adjacent overrides win because the `!important`
+ * declarations here are more specific. */
+#spora-plugin-team-graph .tg-canvas-content svg g.node.selected rect,
+#spora-plugin-team-graph .tg-canvas-content svg g.node.selected polygon,
+#spora-plugin-team-graph .tg-canvas-content svg g.node.selected .basic.label-container {
+    stroke: #4f46e5 !important;
+    stroke-width: 3px !important;
+    filter: drop-shadow(0 0 0 2px rgba(79, 70, 229, 0.25));
+}
 
 /**
  * Status pills — same shape as the other plugin prototypes. The
@@ -153,18 +192,15 @@ body,
  * edges (emerald for outgoing, indigo for incoming, dim for the
  * rest). `!important` is required to win against Mermaid's
  * inline `style="stroke:…"` on each shape.
+ *
+ * Selected / adjacent overrides live in the rect-fill section
+ * above (alongside the violet outline) to keep the styling
+ * co-located; the rules here only cover opacity + edge styling.
  */
 .tg-canvas-content svg g.node { cursor: pointer; transition: opacity 150ms; }
-.tg-canvas-content svg g.node.selected rect,
-.tg-canvas-content svg g.node.selected polygon,
-.tg-canvas-content svg g.node.selected .basic.label-container {
-    stroke: #4f46e5 !important;
-    stroke-width: 3px !important;
-    filter: drop-shadow(0 0 0 2px rgba(79, 70, 229, 0.25));
-}
-.tg-canvas-content svg g.node.adjacent rect,
-.tg-canvas-content svg g.node.adjacent polygon,
-.tg-canvas-content svg g.node.adjacent .basic.label-container {
+#spora-plugin-team-graph .tg-canvas-content svg g.node.adjacent rect,
+#spora-plugin-team-graph .tg-canvas-content svg g.node.adjacent polygon,
+#spora-plugin-team-graph .tg-canvas-content svg g.node.adjacent .basic.label-container {
     stroke: rgba(79, 70, 229, 0.55) !important;
     stroke-width: 2.5px !important;
 }
