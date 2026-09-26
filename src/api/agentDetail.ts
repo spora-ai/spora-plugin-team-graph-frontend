@@ -8,16 +8,65 @@
  * driver FK, etc. The agent resource shape is locked in
  * `Spora\Services\AgentResource::toArray()`; we mirror only the
  * fields the plugin's right sidebar actually consumes.
+ *
+ * The `/tasks` endpoint returns the raw `tasks` row shape
+ * (`user_prompt`, `final_response`, `created_at`, etc.) — NOT a
+ * pre-shaped `title`/`preview`/`started_at` triple. We map the
+ * raw row into a `ChatSummary` here so the panel can render
+ * without knowing the wire format. Truncation is intentionally
+ * surface-level (50 / 120 chars); the panel links to the full
+ * chat elsewhere when the operator wants more.
  */
 
 import { getApi } from './client'
-import type { ChatSummary } from '../types'
+import type { ChatSummary, AgentStatus } from '../types'
 
 /* Active-chats enum mirrors the agent-detail sidebar's filters. The
  * status values match the live `tasks.status` column; the plugin
  * doesn't translate them into the Mermaid palette slugs at this
  * layer — that's `lib/nodeStatus.ts`. */
 const ACTIVE_STATUSES = ['RUNNING', 'AWAITING_SUB_AGENTS', 'PENDING_APPROVAL'] as const
+
+/**
+ * Raw `/tasks` row shape — mirrors `tasks` table columns. We
+ * accept this at the API boundary and map into `ChatSummary`
+ * before handing off to the panel.
+ */
+interface RawTaskRow {
+    id: number
+    agent_id: number
+    status: string
+    user_prompt: string | null
+    final_response: string | null
+    created_at: string
+    updated_at?: string
+    step_count?: number
+    max_steps?: number
+}
+
+function truncate(s: string, max: number): string {
+    if (s.length <= max) return s
+    return s.substring(0, max - 1).trimEnd() + '…'
+}
+
+function taskToChatSummary(t: RawTaskRow): ChatSummary {
+    /*
+     * `title` is the first line of the user prompt (truncated to
+     * 50 chars). Multi-line prompts collapse to their first
+     * meaningful line so the panel doesn't show "<no prompt>\n\n\n…".
+     * `preview` is the agent's response, clipped to 120 chars.
+     */
+    const firstLine = (t.user_prompt ?? '').split('\n')[0]?.trim() ?? ''
+    const title = firstLine.length > 0 ? truncate(firstLine, 50) : 'Untitled prompt'
+    const preview = t.final_response !== null ? truncate(t.final_response.replace(/\s+/g, ' ').trim(), 120) : null
+    return {
+        id: t.id,
+        title,
+        status: t.status as AgentStatus,
+        started_at: t.created_at,
+        preview,
+    }
+}
 
 /**
  * `GET /api/v1/tasks?agent_id={id}&status=…&limit=10`
@@ -32,10 +81,10 @@ export async function fetchActiveChats(agentId: number): Promise<ChatSummary[]> 
     const results = await Promise.all(
         ACTIVE_STATUSES.map((status) =>
             getApi()
-                .get<{ tasks: ChatSummary[] }>(
+                .get<{ tasks: RawTaskRow[] }>(
                     `/tasks?agent_id=${agentId}&status=${status}&limit=10`,
                 )
-                .then((r) => r.tasks ?? [])
+                .then((r) => (r.tasks ?? []).map(taskToChatSummary))
                 .catch(() => []),
         ),
     )
@@ -50,10 +99,10 @@ export async function fetchActiveChats(agentId: number): Promise<ChatSummary[]> 
  */
 export async function fetchRecentChats(agentId: number): Promise<ChatSummary[]> {
     try {
-        const result = await getApi().get<{ tasks: ChatSummary[] }>(
+        const result = await getApi().get<{ tasks: RawTaskRow[] }>(
             `/tasks?agent_id=${agentId}&status=COMPLETED&limit=5`,
         )
-        return result.tasks ?? []
+        return (result.tasks ?? []).map(taskToChatSummary)
     } catch {
         return []
     }
