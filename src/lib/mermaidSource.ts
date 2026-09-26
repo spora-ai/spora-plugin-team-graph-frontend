@@ -69,7 +69,17 @@ export function buildMermaidSource(graph: GraphPayload): string {
     }
 
     for (const edge of graph.edges) {
-        lines.push(`  n${edge.source} --> n${edge.target}`)
+        const isUninvoked = edge.count_24h === 0 && edge.last_invoked_at === null
+        /*
+         * Configured-but-never-fired edges render as Mermaid's
+         * dashed arrow syntax (`-.->`); the runtime CSS keeps them
+         * muted so the canvas distinguishes "live connection" from
+         * "configured, never used". Once the operator actually fires
+         * the edge the 24 h count will tick above 0 and the next
+         * render promotes it to a solid line.
+         */
+        const arrow = isUninvoked ? '-.->' : '-->'
+        lines.push(`  n${edge.source} ${arrow} n${edge.target}`)
     }
 
     return lines.join('\n')

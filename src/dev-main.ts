@@ -44,7 +44,7 @@ function devGraph(principalId: number): unknown {
             { id: 12, name: 'Helper', role: 'Helper', picture_url: null, status: 'COMPLETED', active_chats: 0, recent_chats_24h: 2 },
         ],
         edges: [
-            { id: '11->12', source: 11, target: 12, op: 'sub_agent', count_24h: 1, last_invoked_at: '2026-09-25T08:14:00Z' },
+            { id: '11->12', source: 11, target: 12, op: 'sub_agent', configured: true, count_24h: 1, last_invoked_at: '2026-09-25T08:14:00Z' },
         ],
         generated_at: '2026-09-25T08:14:00Z',
     }

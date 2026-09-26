@@ -23,7 +23,7 @@ const fixturePayload: GraphPayload = {
         { id: 2, name: 'Blake', role: 'Writer', picture_url: null, status: 'RUNNING', active_chats: 1, recent_chats_24h: 3 },
     ],
     edges: [
-        { id: '1->2', source: 1, target: 2, op: 'sub_agent', count_24h: 3, last_invoked_at: '2026-09-23T10:14:00Z' },
+        { id: '1->2', source: 1, target: 2, op: 'sub_agent', configured: true, count_24h: 3, last_invoked_at: '2026-09-23T10:14:00Z' },
     ],
     generated_at: '2026-09-25T08:14:00Z',
 }

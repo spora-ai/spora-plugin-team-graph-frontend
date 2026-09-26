@@ -43,8 +43,30 @@ export interface GraphEdge {
     source: number
     target: number
     op: 'sub_agent' | 'handover'
+    /**
+     * True when the edge comes from the source agent's
+     * `agent_tool_overrides.allowed_target_agents` allowlist (the
+     * configuration the runtime SubAgentTool would let through).
+     * False (or undefined, for legacy fixtures) when the edge was
+     * derived purely from historical tool_calls. Today every wire
+     * edge is `configured: true` — the flag is kept so the canvas
+     * can distinguish "configured but never used" from "configured
+     * and actively firing".
+     */
+    configured: true
+    /**
+     * Last-24h invocation count from `tool_calls.proposed_arguments`.
+     * 0 when the edge is configured but has not been fired in the
+     * last 24 hours — the canvas shows this as a dashed line so
+     * operators can spot dead-on-arrival configurations.
+     */
     count_24h: number
-    last_invoked_at: string
+    /**
+     * ISO-8601 timestamp of the most recent invocation within the
+     * 7-day enrichment window. Null when the edge has never been
+     * fired (purely configured).
+     */
+    last_invoked_at: string | null
 }
 
 export interface PrincipalSummary {

@@ -128,11 +128,30 @@ export function useMermaidRender({ hostRef, graph, onRender }: UseMermaidRenderO
             }
         })
 
+        /*
+         * Tag each edge group with `out`/`in`/`dim` (per the
+         * selection) AND `uninvoked` when the wire payload says this
+         * edge has never been fired in the 24 h window — a
+         * configured-but-dormant relationship. The CSS picks up both
+         * classes; the dashed arrow already comes from Mermaid's
+         * `-.->` syntax. We tag the matching pair (`edgePath` +
+         * `edgeLabel`) so the dash carries over the label too.
+         */
+        const uninvokedByKey = new Map<string, true>()
+        for (const e of edges) {
+            if (e.count_24h === 0 && e.last_invoked_at === null) {
+                uninvokedByKey.set(`${e.source}->${e.target}`, true)
+            }
+        }
+
         svgEl.querySelectorAll('g.edgePath, g.edgeLabel').forEach((edgeEl) => {
             const ends = edgeEndsFromMermaidId(edgeEl.id)
             edgeEl.classList.remove('out', 'in', 'dim')
-            if (sel === null || ends === null) return
+            if (ends === null) return
             const [src, tgt] = ends
+            const isUninvoked = uninvokedByKey.has(`${src}->${tgt}`)
+            edgeEl.classList.toggle('uninvoked', isUninvoked)
+            if (sel === null) return
             if (src === sel) {
                 edgeEl.classList.add('out')
             } else if (tgt === sel) {

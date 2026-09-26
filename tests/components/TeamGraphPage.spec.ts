@@ -65,9 +65,13 @@ function buildPayload(principalId: number, principalName: string) {
         nodes: [
             { id: 11, name: 'Lead', role: 'Lead', picture_url: null, status: 'RUNNING', active_chats: 1, recent_chats_24h: 4 },
             { id: 12, name: 'Helper', role: 'Helper', picture_url: null, status: 'COMPLETED', active_chats: 0, recent_chats_24h: 2 },
+            { id: 13, name: 'Writer', role: 'Writer', picture_url: null, status: 'COMPLETED', active_chats: 0, recent_chats_24h: 0 },
         ],
         edges: [
-            { id: '11->12', source: 11, target: 12, op: 'sub_agent' as const, count_24h: 1, last_invoked_at: '2026-09-25T08:14:00Z' },
+            // Used in the last 24h — solid line + "Nx / 24 h" label.
+            { id: '11->12', source: 11, target: 12, op: 'sub_agent' as const, configured: true as const, count_24h: 3, last_invoked_at: '2026-09-25T08:14:00Z' },
+            // Configured but never fired — dashed line + "configured, never used" label.
+            { id: '11->13', source: 11, target: 13, op: 'sub_agent' as const, configured: true as const, count_24h: 0, last_invoked_at: null },
         ],
         generated_at: '2026-09-25T08:14:00Z',
     }
@@ -143,8 +147,8 @@ describe('TeamGraphPage.vue (single-sidebar layout)', () => {
         // The summary line picks up the active principal name + node/edge
         // counts from the graph response.
         expect(wrapper.text()).toContain('My Agents')
-        expect(wrapper.text()).toContain('2 agents')
-        expect(wrapper.text()).toContain('1 edge')
+        expect(wrapper.text()).toContain('3 agents')
+        expect(wrapper.text()).toContain('2 edges')
 
         wrapper.unmount()
     })
@@ -231,6 +235,12 @@ describe('TeamGraphPage.vue (single-sidebar layout)', () => {
 
         // Description renders the agent's body copy.
         expect(wrapper.text()).toContain('Owns the marketing strategy')
+
+        // Outbound edge list distinguishes a "used in last 24h"
+        // edge from a "configured, never used" one via the new
+        // edgeActivity label.
+        expect(wrapper.text()).toContain('→ sub_agent · 3× / 24 h')
+        expect(wrapper.text()).toContain('→ sub_agent · configured, never used')
 
         wrapper.unmount()
     })

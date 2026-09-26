@@ -153,7 +153,8 @@ function otherEnd(edge: GraphEdge, direction: 'out' | 'in'): number {
     return direction === 'out' ? edge.target : edge.source
 }
 
-function relTime(iso: string): string {
+function relTime(iso: string | null): string {
+    if (iso === null || iso === '') return ''
     const then = new Date(iso).getTime()
     if (!Number.isFinite(then)) return iso
     const mins = Math.round((Date.now() - then) / 60_000)
@@ -161,6 +162,32 @@ function relTime(iso: string): string {
     if (mins < 60) return `${mins} min ago`
     if (mins < 1440) return `${Math.round(mins / 60)} h ago`
     return 'yesterday'
+}
+
+/**
+ * Build the secondary line of an edge row in the detail panel.
+ *
+ * The wire payload distinguishes three states for a configured
+ * sub-agent edge:
+ *
+ *   1. Just-fired:  `count_24h > 0`, recent timestamp
+ *   2. Dormant:     `count_24h === 0` but `last_invoked_at !== null`
+ *                   (fired within the 7-day enrichment window but
+ *                   outside the 24h counter)
+ *   3. Unfired:     `count_24h === 0 && last_invoked_at === null`
+ *                   (configured but never invoked)
+ *
+ * Returns the plain-text label so the template can render it without
+ * branching on every case.
+ */
+function edgeActivity(edge: GraphEdge): string {
+    if (edge.count_24h > 0) {
+        return `${edge.count_24h}× / 24 h · ${relTime(edge.last_invoked_at)}`
+    }
+    if (edge.last_invoked_at !== null) {
+        return `last seen ${relTime(edge.last_invoked_at)}`
+    }
+    return 'configured, never used'
 }
 
 function jumpTo(id: number): void {
@@ -342,7 +369,7 @@ const ownerLabel = computed<string>(() => {
                                     {{ props.graph.nodes.find((n) => n.id === otherEnd(edge, 'out'))?.name ?? 'Unknown' }}
                                 </p>
                                 <p class="text-[11px] text-muted-foreground">
-                                    → sub_agent · {{ edge.count_24h }}× / 24 h · {{ relTime(edge.last_invoked_at) }}
+                                    → sub_agent · {{ edgeActivity(edge) }}
                                 </p>
                             </div>
                             <svg
@@ -382,7 +409,7 @@ const ownerLabel = computed<string>(() => {
                                     {{ props.graph.nodes.find((n) => n.id === otherEnd(edge, 'in'))?.name ?? 'Unknown' }}
                                 </p>
                                 <p class="text-[11px] text-muted-foreground">
-                                    ← sub_agent · {{ edge.count_24h }}× / 24 h · {{ relTime(edge.last_invoked_at) }}
+                                    ← sub_agent · {{ edgeActivity(edge) }}
                                 </p>
                             </div>
                             <svg

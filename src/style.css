@@ -123,6 +123,17 @@ body,
 .tg-canvas-content svg g.edgePath.dim path { stroke-opacity: 0.15; }
 .tg-canvas-content svg g.edgePath.out path { stroke: #059669 !important; stroke-width: 2.6px !important; }
 .tg-canvas-content svg g.edgePath.in  path { stroke: #4f46e5 !important; stroke-width: 2.6px !important; }
+/*
+ * Configured-but-never-fired edges render as Mermaid's dashed arrow
+ * syntax (`-.->`) and pick up an additional `uninvoked` class via
+ * `applySelectionStyling` so we can dim the underlying stroke without
+ * losing the dash pattern. The CSS keeps them muted at rest and
+ * reveals them at full opacity when selected.
+ */
+.tg-canvas-content svg g.edgePath.uninvoked path { stroke: #94a3b8 !important; stroke-opacity: 0.45; }
+.tg-canvas-content svg g.edgePath.uninvoked.out path,
+.tg-canvas-content svg g.edgePath.uninvoked.in path { stroke-opacity: 0.85; }
+.tg-canvas-content svg g.edgeLabel.uninvoked { opacity: 0.55; }
 .tg-canvas-content svg g.edgeLabel.dim { opacity: 0.15; }
 .tg-canvas-content svg .edgeLabel { transition: opacity 150ms; }
 

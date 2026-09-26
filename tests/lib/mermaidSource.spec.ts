@@ -21,8 +21,8 @@ const tinyStartup: GraphPayload = {
         { id: 5, name: 'Ellis', role: 'Developer', picture_url: null, status: 'PENDING_APPROVAL', active_chats: 1, recent_chats_24h: 2 },
     ],
     edges: [
-        { id: '1->2', source: 1, target: 2, op: 'sub_agent', count_24h: 3, last_invoked_at: '2026-09-23T10:14:00Z' },
-        { id: '1->4', source: 1, target: 4, op: 'sub_agent', count_24h: 2, last_invoked_at: '2026-09-23T09:48:00Z' },
+        { id: '1->2', source: 1, target: 2, op: 'sub_agent', configured: true, count_24h: 3, last_invoked_at: '2026-09-23T10:14:00Z' },
+        { id: '1->4', source: 1, target: 4, op: 'sub_agent', configured: true, count_24h: 2, last_invoked_at: '2026-09-23T09:48:00Z' },
     ],
     generated_at: '2026-09-25T08:14:00Z',
 }
@@ -56,6 +56,46 @@ describe('buildMermaidSource', () => {
         const src = buildMermaidSource(tinyStartup)
         expect(src).toContain('  n1 --> n2')
         expect(src).toContain('  n1 --> n4')
+    })
+
+    it('emits a dashed arrow for configured-but-never-fired edges', () => {
+        const payload: GraphPayload = {
+            ...tinyStartup,
+            edges: [
+                { id: '1->2', source: 1, target: 2, op: 'sub_agent', configured: true, count_24h: 0, last_invoked_at: null },
+            ],
+        }
+        const src = buildMermaidSource(payload)
+        expect(src).toContain('  n1 -.-> n2')
+        expect(src).not.toContain('  n1 --> n2')
+    })
+
+    it('emits a solid arrow when count_24h is zero but a previous invocation is on file', () => {
+        /* Dormant edge: last fired more than 24h ago but inside the
+         * 7-day enrichment window. Renders solid — the operator has
+         * touched this connection recently enough that it doesn't
+         * warrant the "configured, never used" treatment. */
+        const payload: GraphPayload = {
+            ...tinyStartup,
+            edges: [
+                { id: '1->2', source: 1, target: 2, op: 'sub_agent', configured: true, count_24h: 0, last_invoked_at: '2026-09-19T08:14:00Z' },
+            ],
+        }
+        const src = buildMermaidSource(payload)
+        expect(src).toContain('  n1 --> n2')
+        expect(src).not.toContain('  n1 -.-> n2')
+    })
+
+    it('emits a solid arrow once the edge has fired in the last 24h', () => {
+        const payload: GraphPayload = {
+            ...tinyStartup,
+            edges: [
+                { id: '1->2', source: 1, target: 2, op: 'sub_agent', configured: true, count_24h: 3, last_invoked_at: '2026-09-25T08:14:00Z' },
+            ],
+        }
+        const src = buildMermaidSource(payload)
+        expect(src).toContain('  n1 --> n2')
+        expect(src).not.toContain('  n1 -.-> n2')
     })
 
     it('escapes single quotes in node names', () => {
