@@ -18,11 +18,11 @@ import { PALETTES } from '../../src/lib/palette'
 const tinyStartup: GraphPayload = {
     principal: { id: -1, type: 'group', name: 'Tiny Startup', is_current_user_owned: true },
     nodes: [
-        { id: 1, name: 'Alex', role: 'Marketing Lead', picture_url: null, status: 'RUNNING', active_chats: 1, recent_chats_24h: 4, profile_picture: {kind: 'avatar',archetype: null,variant_key: null,palette_key: 'indigo',bg_color: '#4338CA',fg_color: '#EEF2FF',image_url: null,image_updated_at: null} },
-        { id: 2, name: 'Blake', role: 'Content Writer', picture_url: null, status: 'RUNNING', active_chats: 1, recent_chats_24h: 3, profile_picture: {kind: 'avatar',archetype: null,variant_key: null,palette_key: 'amber',bg_color: '#D97706',fg_color: '#FFFBEB',image_url: null,image_updated_at: null} },
-        { id: 3, name: 'Casey', role: 'Translator', picture_url: null, status: 'COMPLETED', active_chats: 0, recent_chats_24h: 1, profile_picture: {kind: 'avatar',archetype: null,variant_key: null,palette_key: 'teal',bg_color: '#0F766E',fg_color: '#F0FDFA',image_url: null,image_updated_at: null} },
-        { id: 4, name: 'Dakota', role: 'Designer', picture_url: null, status: 'AWAITING_SUB_AGENTS', active_chats: 1, recent_chats_24h: 2, profile_picture: {kind: 'avatar',archetype: null,variant_key: null,palette_key: 'pink',bg_color: '#BE185D',fg_color: '#FDF2F8',image_url: null,image_updated_at: null} },
-        { id: 5, name: 'Ellis', role: 'Developer', picture_url: null, status: 'PENDING_APPROVAL', active_chats: 1, recent_chats_24h: 2, profile_picture: {kind: 'avatar',archetype: null,variant_key: null,palette_key: 'green',bg_color: '#15803D',fg_color: '#F0FDF4',image_url: null,image_updated_at: null} },
+        { id: 1, name: 'Alex', role: 'Marketing Lead', picture_url: null, status: 'RUNNING', active_chats: 1, recent_chats_24h: 4, profile_picture: { palette_key: 'indigo', bg_color: '#4338CA', fg_color: '#EEF2FF' } },
+        { id: 2, name: 'Blake', role: 'Content Writer', picture_url: null, status: 'RUNNING', active_chats: 1, recent_chats_24h: 3, profile_picture: { palette_key: 'amber', bg_color: '#D97706', fg_color: '#FFFBEB' } },
+        { id: 3, name: 'Casey', role: 'Translator', picture_url: null, status: 'COMPLETED', active_chats: 0, recent_chats_24h: 1, profile_picture: { palette_key: 'teal', bg_color: '#0F766E', fg_color: '#F0FDFA' } },
+        { id: 4, name: 'Dakota', role: 'Designer', picture_url: null, status: 'AWAITING_SUB_AGENTS', active_chats: 1, recent_chats_24h: 2, profile_picture: { palette_key: 'pink', bg_color: '#BE185D', fg_color: '#FDF2F8' } },
+        { id: 5, name: 'Ellis', role: 'Developer', picture_url: null, status: 'PENDING_APPROVAL', active_chats: 1, recent_chats_24h: 2, profile_picture: { palette_key: 'green', bg_color: '#15803D', fg_color: '#F0FDF4' } },
     ],
     edges: [
         { id: '1->2', source: 1, target: 2, op: 'sub_agent', configured: true, count_24h: 3, last_invoked_at: '2026-09-23T10:14:00Z' },
@@ -88,7 +88,7 @@ describe('buildMermaidSource', () => {
         const payload: GraphPayload = {
             ...tinyStartup,
             nodes: [
-                { id: 99, name: 'Default', role: null, picture_url: null, status: 'COMPLETED', active_chats: 0, recent_chats_24h: 0, profile_picture: {kind: 'avatar',archetype: null,variant_key: null,palette_key: '',bg_color: '',fg_color: '',image_url: null,image_updated_at: null} },
+                { id: 99, name: 'Default', role: null, picture_url: null, status: 'COMPLETED', active_chats: 0, recent_chats_24h: 0, profile_picture: { palette_key: '', bg_color: '', fg_color: '' } },
             ],
         }
         const src = buildMermaidSource(payload)
@@ -114,7 +114,7 @@ describe('buildMermaidSource', () => {
         const payload: GraphPayload = {
             ...tinyStartup,
             nodes: [
-                { id: 99, name: "O'Reilly", role: "Engineer", picture_url: null, status: 'RUNNING', active_chats: 0, recent_chats_24h: 0, profile_picture: {kind: 'avatar',archetype: null,variant_key: null,palette_key: 'green',bg_color: '#15803D',fg_color: '#F0FDF4',image_url: null,image_updated_at: null} },
+                { id: 99, name: "O'Reilly", role: "Engineer", picture_url: null, status: 'RUNNING', active_chats: 0, recent_chats_24h: 0, profile_picture: { palette_key: 'green', bg_color: '#15803D', fg_color: '#F0FDF4' } },
             ],
         }
         const src = buildMermaidSource(payload)
@@ -124,8 +124,8 @@ describe('buildMermaidSource', () => {
     it('does not include #ID, role, or stats line in the compact label', () => {
         const src = buildMermaidSource(tinyStartup)
         // The user asked to drop the stats line and the agent ID from
-        // the canvas nodes. The compact label carries the accent bar +
-        // avatar + name on row 1 + status pill on row 2.
+        // the canvas nodes. The compact label carries only the
+        // accent bar + agent name + status pill.
         expect(src).not.toContain('tg-node-stats')
         expect(src).not.toContain('tg-node-role')
         expect(src).not.toContain('active · <strong>')
@@ -137,21 +137,6 @@ describe('buildMermaidSource', () => {
         expect(src).not.toMatch(/#\d+\s+·\s+\w/)  // "#1 · Marketing"
     })
 
-    it('emits the avatar initials for agents with no profile_picture archetype', () => {
-        // The tinyStartup fixture has no archetype / variant_key, so
-        // the avatar falls back to the initials branch. The HTML
-        // carries the agent's first letter inside a tg-node-avatar
-        // span with the --initials class.
-        const src = buildMermaidSource(tinyStartup)
-        expect(src).toContain('class="tg-node-avatar tg-node-avatar--initials"')
-        // Alex / Blake / Casey / Dakota / Ellis → first letters
-        expect(src).toContain('>A</span>')
-        expect(src).toContain('>B</span>')
-        expect(src).toContain('>C</span>')
-        expect(src).toContain('>D</span>')
-        expect(src).toContain('>E</span>')
-    })
-
     it('produces a stable, line-ordered output', () => {
         const src = buildMermaidSource(tinyStartup)
         expect(src).toBe([
@@ -161,11 +146,11 @@ describe('buildMermaidSource', () => {
             'classDef tg-palette-teal fill:transparent,stroke:transparent',
             'classDef tg-palette-pink fill:transparent,stroke:transparent',
             'classDef tg-palette-green fill:transparent,stroke:transparent',
-            `  n1["<div class='tg-node' style='--palette-bg:#4338CA'><div class='tg-node-accent'></div><div class='tg-node-body'><div class='tg-node-row tg-node-row--main'><span class="tg-node-avatar tg-node-avatar--initials" data-testid="tg-node-avatar">A</span><span class='tg-node-name'>Alex</span></div><span class='tg-status-pill tg-status-running'><span class='dot'></span>running</span></div></div>"]:::tg-palette-indigo`,
-            `  n2["<div class='tg-node' style='--palette-bg:#D97706'><div class='tg-node-accent'></div><div class='tg-node-body'><div class='tg-node-row tg-node-row--main'><span class="tg-node-avatar tg-node-avatar--initials" data-testid="tg-node-avatar">B</span><span class='tg-node-name'>Blake</span></div><span class='tg-status-pill tg-status-running'><span class='dot'></span>running</span></div></div>"]:::tg-palette-amber`,
-            `  n3["<div class='tg-node' style='--palette-bg:#0F766E'><div class='tg-node-accent'></div><div class='tg-node-body'><div class='tg-node-row tg-node-row--main'><span class="tg-node-avatar tg-node-avatar--initials" data-testid="tg-node-avatar">C</span><span class='tg-node-name'>Casey</span></div><span class='tg-status-pill tg-status-completed'><span class='dot'></span>idle</span></div></div>"]:::tg-palette-teal`,
-            `  n4["<div class='tg-node' style='--palette-bg:#BE185D'><div class='tg-node-accent'></div><div class='tg-node-body'><div class='tg-node-row tg-node-row--main'><span class="tg-node-avatar tg-node-avatar--initials" data-testid="tg-node-avatar">D</span><span class='tg-node-name'>Dakota</span></div><span class='tg-status-pill tg-status-awaiting'><span class='dot'></span>awaiting sub-agent</span></div></div>"]:::tg-palette-pink`,
-            `  n5["<div class='tg-node' style='--palette-bg:#15803D'><div class='tg-node-accent'></div><div class='tg-node-body'><div class='tg-node-row tg-node-row--main'><span class="tg-node-avatar tg-node-avatar--initials" data-testid="tg-node-avatar">E</span><span class='tg-node-name'>Ellis</span></div><span class='tg-status-pill tg-status-pending'><span class='dot'></span>awaiting approval</span></div></div>"]:::tg-palette-green`,
+            '  n1["<div class=\'tg-node\' style=\'--palette-bg:#4338CA\'><div class=\'tg-node-accent\'></div><div class=\'tg-node-body\'><div class=\'tg-node-name\'>Alex</div><span class=\'tg-status-pill tg-status-running\'><span class=\'dot\'></span>running</span></div></div>"]:::tg-palette-indigo',
+            '  n2["<div class=\'tg-node\' style=\'--palette-bg:#D97706\'><div class=\'tg-node-accent\'></div><div class=\'tg-node-body\'><div class=\'tg-node-name\'>Blake</div><span class=\'tg-status-pill tg-status-running\'><span class=\'dot\'></span>running</span></div></div>"]:::tg-palette-amber',
+            '  n3["<div class=\'tg-node\' style=\'--palette-bg:#0F766E\'><div class=\'tg-node-accent\'></div><div class=\'tg-node-body\'><div class=\'tg-node-name\'>Casey</div><span class=\'tg-status-pill tg-status-completed\'><span class=\'dot\'></span>idle</span></div></div>"]:::tg-palette-teal',
+            '  n4["<div class=\'tg-node\' style=\'--palette-bg:#BE185D\'><div class=\'tg-node-accent\'></div><div class=\'tg-node-body\'><div class=\'tg-node-name\'>Dakota</div><span class=\'tg-status-pill tg-status-awaiting\'><span class=\'dot\'></span>awaiting sub-agent</span></div></div>"]:::tg-palette-pink',
+            '  n5["<div class=\'tg-node\' style=\'--palette-bg:#15803D\'><div class=\'tg-node-accent\'></div><div class=\'tg-node-body\'><div class=\'tg-node-name\'>Ellis</div><span class=\'tg-status-pill tg-status-pending\'><span class=\'dot\'></span>awaiting approval</span></div></div>"]:::tg-palette-green',
             '  n1 --> n2',
             '  n1 --> n4',
         ].join('\n'))
