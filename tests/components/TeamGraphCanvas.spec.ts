@@ -58,7 +58,7 @@ function makeGraph(
             status: 'COMPLETED',
             active_chats: 0,
             recent_chats_24h: 0,
-            profile_picture: { palette_key: 'indigo', bg_color: '#4338CA', fg_color: '#EEF2FF' },
+            profile_picture: {kind: 'avatar',archetype: null,variant_key: null,palette_key: 'indigo',bg_color: '#4338CA',fg_color: '#EEF2FF',image_url: null,image_updated_at: null},
         })),
         edges: edgePairs.map(([src, tgt]) => ({
             id: `${src}->${tgt}`,

@@ -10,6 +10,22 @@
  * the full enum so the panel can show the precise label.
  */
 
+/**
+ * Cross-subject wire shape for the agent / group avatar pipeline.
+ * Mirrors `Spora\Frontend\src\types\ProfilePicture` — kept in sync
+ * by Composer release.
+ */
+export interface ProfilePicture {
+    kind: 'avatar' | 'image'
+    archetype: string | null
+    variant_key: string | null
+    palette_key: string | null
+    bg_color: string | null
+    fg_color: string | null
+    image_url: string | null
+    image_updated_at: string | null
+}
+
 export type AgentStatus =
     | 'RUNNING'
     | 'PENDING_APPROVAL'
@@ -29,22 +45,22 @@ export interface GraphNode {
     role: string | null
     picture_url: string | null
     /**
-     * The agent's profile-picture palette, resolved server-side to a
-     * (bg_color, fg_color) hex pair via `Spora\Services\AgentPictures\
-     * Palette`. The canvas paints each node's tile with this colour
-     * so the operator can tell agents apart at a glance — the same
-     * visual signal the dashboard avatar carries. `palette_key`
-     * drives the Mermaid `classDef` so the styling lives in
-     * CSS (Mermaid 10's HTML-label sanitiser strips `;` from
-     * inline styles); `bg_color` / `fg_color` are also shipped for
-     * consumers that don't need the class machinery (e.g. the
-     * detail panel's avatar preview).
+     * The agent's profile picture — operator-picked archetype avatar
+     * (`kind: 'avatar'`, with concrete `bg_color` / `fg_color`
+     * resolved server-side from `palette_key`) or uploaded image
+     * (`kind: 'image'`, with `image_url` from the media archive).
+     * All other fields are null in the inactive branch.
+     *
+     * Mirrors `Spora\Frontend\src\types\ProfilePicture` — kept in
+     * sync by Composer release. The plugin uses this to render the
+     * same avatar tile the host's `Avatar.vue` renders, inlined
+     * into the Mermaid HTML label because foreignObject content
+     * can't host Vue components. The full shape is shipped (not a
+     * stripped projection) so future callers — detail panel, chat
+     * preview, etc. — can reuse the same data without a second
+     * round-trip.
      */
-    profile_picture: {
-        palette_key: string
-        bg_color: string
-        fg_color: string
-    }
+    profile_picture: ProfilePicture
     /** Node status may be null when no in-flight task exists for the
      *  agent — the frontend treats that as `COMPLETED` ("idle") via
      *  the lib/nodeStatus defensive defaults. The backend COALESCE'd

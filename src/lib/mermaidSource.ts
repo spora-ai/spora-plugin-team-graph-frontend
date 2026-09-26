@@ -6,7 +6,7 @@
  *     classDef tg-palette-indigo fill:transparent,stroke:transparent
  *     classDef tg-palette-teal    fill:transparent,stroke:transparent
  *     …
- *     n11["<div class='tg-node'><div class='tg-node-accent'>|name|</div>…</div>"]:::tg-palette-indigo
+ *     n11["<div class='tg-node'><div class='tg-node-accent'>|<avatar>+name|</div>…</div>"]:::tg-palette-indigo
  *     n11 --> n4
  *
  * The agent's icon colour comes from the wire's
@@ -17,29 +17,31 @@
  * classDef drives the wrapping `<g class="tg-palette-X">` so the
  * stylesheet can paint:
  *
- *   - the rect's fill + stroke (transparent — the stylesheet
- *     applies the actual white fill + violet outline via
- *     `.tg-canvas-content svg g[class*="tg-palette-"] rect`)
+ *   - the rect's fill (transparent — the agent color shows via
+ *     the left accent bar instead, so the canvas reads as a
+ *     unified grid of white-tiled boxes with violet outlines)
+ *   - the rect's stroke (the team's primary violet — gives every
+ *     node a consistent outline that ties the canvas to the
+ *     team's accent)
  *   - the left accent bar's colour via the inline `--palette-bg`
  *     CSS variable the HTML label sets
  *
  * The HTML label is intentionally compact: a 6 px wide accent bar
- * (the agent's palette bg_color) on the left edge, the agent name,
- * and the status pill on the right. No #ID, no role, no stats
- * line — those moved to the detail panel's right sidebar where
- * they have room to breathe. The canvas is now a uniform grid of
- * white-tiled boxes with violet outlines + a coloured stripe per
- * agent, so the operator can scan it like a leaderboard rather
- * than a mood-board.
+ * (the agent's palette bg_color) on the left edge, the agent name
+ * + avatar circle on the right of it (row 1), and the status pill
+ * below (row 2). The avatar mirrors the host's `Avatar.vue` —
+ * inline SVG primitives for archetype, `<img>` for uploaded
+ * pictures, uppercase initials as a fallback.
  *
  * Status no longer drives the rect colour — the operator gets a
  * status pill inside the label (matching the dashboard's
  * `DashboardAgentCard.vue` pattern) so agent identity wins and
  * status remains glance-readable.
  */
-import type { GraphPayload } from '../types'
+import type { GraphPayload, ProfilePicture } from '../types'
 import { statusPillClass, statusLabel } from './nodeStatus'
 import { paletteByKey } from './palette'
+import { agentAvatarHtml } from './agentAvatar'
 
 /**
  * Escape a string for safe inclusion in an HTML attribute value
@@ -82,7 +84,7 @@ export function buildMermaidSource(graph: GraphPayload): string {
         const pillText = escapeAttr(statusLabel(node.status))
         const paletteKey = paletteByKey(node.profile_picture?.palette_key).className
         const paletteBg = safeHex(node.profile_picture?.bg_color, '#475569')
-        const label = renderNodeLabel(name, paletteBg, pillClass, pillText)
+        const label = renderNodeLabel(node, name, paletteBg, pillClass, pillText)
         lines.push(`  n${node.id}["${label}"]:::tg-palette-${paletteKey}`)
     }
 
@@ -103,26 +105,53 @@ export function buildMermaidSource(graph: GraphPayload): string {
 }
 
 function renderNodeLabel(
+    node: { id: number; name: string; profile_picture: ProfilePicture | null },
     name: string,
     paletteBg: string,
     pillClass: string,
     pillText: string,
 ): string {
     /*
-     * Compact label — accent bar + name + status pill. The accent
-     * bar reads --palette-bg (set inline by buildMermaidSource) so
-     * each node still carries the agent's icon colour, just on a
-     * 6 px wide stripe instead of saturating the whole tile.
+     * Compact two-row label:
+     *
+     *   ┌──────────────────────────────────────────┐
+     *   │▮ [Avatar] Test Agent                      │  ← row 1: accent + avatar + name
+     *   │          ● idle                          │  ← row 2: status pill
+     *   └──────────────────────────────────────────┘
+     *
+     * The avatar is inlined via `agentAvatarHtml()` because Mermaid's
+     * `<foreignObject>` content cannot host Vue components — we
+     * can't import the host's `Avatar.vue` directly. The inner
+     * palette-bg CSS variable is set inline so the stylesheet can
+     * paint the left accent bar via `var(--palette-bg)`.
      */
+    const initials = initialsFor(node.name)
+    const avatar = agentAvatarHtml(node.profile_picture, initials)
     return (
         `<div class='tg-node' style='--palette-bg:${paletteBg}'>` +
         `<div class='tg-node-accent'></div>` +
         `<div class='tg-node-body'>` +
-        `<div class='tg-node-name'>${name}</div>` +
+        `<div class='tg-node-row tg-node-row--main'>` +
+        avatar +
+        `<span class='tg-node-name'>${name}</span>` +
+        `</div>` +
         `<span class='tg-status-pill ${pillClass}'><span class='dot'></span>${pillText}</span>` +
         `</div>` +
         `</div>`
     )
+}
+
+/**
+ * Compute the uppercase-initials fallback the host Avatar uses when
+ * `kind !== 'image'` and the agent has no archetype picked yet.
+ * Two letters from the first two whitespace-separated words. Mirrors
+ * `DashboardAgentCard.vue → initials()` which the host Avatar
+ * receives via its `initials` prop.
+ */
+function initialsFor(name: string): string {
+    const words = name.split(/\s+/).filter((w) => w.length > 0)
+    const letters = words.slice(0, 2).map((w) => w[0] ?? '').join('')
+    return letters.toUpperCase() || '?'
 }
 
 /**
