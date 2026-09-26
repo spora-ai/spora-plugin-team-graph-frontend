@@ -47,7 +47,7 @@ defineProps<{
 const selection = useSelectionStore()
 
 const principalList = usePrincipalList()
-const { graph, loading, error, refetch, refreshTick } = useTeamGraph(principalList.selectedPrincipalId)
+const { graph, loading, error, refetch } = useTeamGraph(principalList.selectedPrincipalId)
 
 const shouldFit = ref(false)
 
@@ -96,9 +96,14 @@ watch(() => principalList.selectedPrincipalId.value, () => {
     shouldFit.value = true
 })
 
-watch(refreshTick, () => {
-    selection.clear()
-})
+/* No `watch(refreshTick, () => selection.clear())` here:
+ * the 5 s poll triggers re-renders, but a user-selected agent is
+ * still valid across refreshes — clearing it on every poll makes
+ * the right-side panel flicker back to empty. The selection is
+ * cleared on principal switch (above), on empty-canvas tap
+ * (below), and on a user clicking the same node twice (handled in
+ * useMermaidRender's click listener). The watch has nothing to do
+ * for a poll-driven re-render. */
 
 function onTapEmptyCanvas(): void {
     selection.clear()

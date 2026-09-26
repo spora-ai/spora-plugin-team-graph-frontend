@@ -1,21 +1,40 @@
 <script setup lang="ts">
 /**
- * Right sidebar (lg+): avatar + name + role + status + active
- * chats + recent chats + inbound + outbound. Below `lg`, the
- * page swaps this component for `AgentDetailModal.vue`.
+ * Right-sidebar agent detail panel — renders at every viewport.
  *
- * Edge rows are deep-links: clicking one sets
+ * Layout (top → bottom):
+ *   1. Header: avatar + name + role + status pill
+ *   2. Activity counts (active + 24 h)
+ *   3. Hierarchy chain (root → ... → this agent) — computed from the
+ *      graph payload's inbound edges by walking up the spawn tree
+ *      until a node with no parent is reached
+ *   4. Owner / Principal (live /agents/{id} payload)
+ *   5. Description (line-clamped, from /agents/{id})
+ *   6. Tools row (icons + tooltip, from /agents/{id})
+ *   7. Inbound + Outbound edges (graph payload) — already clickable
+ *      deep-links; switching selection also fires `selection.setSelected`
+ *      so the canvas highlights the new node
+ *   8. Active chats (live /tasks)
+ *   9. Recent chats (live /tasks)
+ *
+ * Edge rows are deep-link buttons — clicking one sets
  * `selection.setSelected(otherId)` so the canvas highlights the
  * target and the panel re-renders for the new agent.
  *
- * Active chats come from the live `/tasks` endpoint (or the
- * fixture map when in fixture mode); recent chats similarly.
- * The panel re-renders on selection change so a stale "active
- * chats" list never persists between agents.
+ * Active / recent chats come from the live `/tasks` endpoint; the
+ * `is_archived` filter and `principal_id` scope mirror what the
+ * host's dashboard chat feed shows, so the operator sees the same
+ * set of chats here as on the agent's main page.
  */
 import { computed, ref, watch } from 'vue'
 import { useSelectionStore } from '../stores/selection'
-import { fetchActiveChats, fetchRecentChats } from '../api/agentDetail'
+import {
+    fetchActiveChats,
+    fetchAgentMeta,
+    fetchRecentChats,
+    type AgentMeta,
+    type AgentToolEntry,
+} from '../api/agentDetail'
 import { statusColor, statusLabel, statusPillClass } from '../lib/nodeStatus'
 import { inDegree, outDegree } from '../lib/stats'
 import type { ChatSummary, GraphEdge, GraphNode, GraphPayload } from '../types'
@@ -35,30 +54,88 @@ const selectedNode = computed<GraphNode | null>(() => {
 const outboundEdges = computed<GraphEdge[]>(() =>
     selectedNode.value === null ? [] : outDegree(props.graph.edges, selectedNode.value.id),
 )
-
 const inboundEdges = computed<GraphEdge[]>(() =>
     selectedNode.value === null ? [] : inDegree(props.graph.edges, selectedNode.value.id),
 )
 
+/**
+ * Walk up the spawn tree to find the chain of ancestors, capped at
+ * three hops (anything deeper reads as "deeply nested"). Multi-parent
+ * chains collapse to the first parent found — clicking an inbound
+ * edge in the panel below lets the operator hop between branches.
+ */
+interface AncestorLink {
+    id: number
+    name: string
+    role: string | null
+}
+
+const MAX_HIERARCHY_DEPTH = 3
+
+const hierarchyChain = computed<{ path: AncestorLink[]; isRoot: boolean }>(() => {
+    const node = selectedNode.value
+    if (node === null) return { path: [], isRoot: false }
+    const path: AncestorLink[] = []
+    const visited = new Set<number>([node.id])
+    let currentId: number | null = node.id
+    for (let i = 0; i < MAX_HIERARCHY_DEPTH; i++) {
+        const parents: GraphEdge[] = currentId === null ? [] : inDegree(props.graph.edges, currentId)
+        const parentEdge: GraphEdge | undefined = parents[0]
+        if (parentEdge === undefined) {
+            return { path, isRoot: true }
+        }
+        const parentId: number = parentEdge.source
+        if (visited.has(parentId)) {
+            // Cycle (shouldn't happen in a directed spawn graph, but
+            // defensive — break out before infinite-looping the walk).
+            return { path, isRoot: true }
+        }
+        visited.add(parentId)
+        const parentNode: GraphNode | undefined = props.graph.nodes.find((n) => n.id === parentId)
+        if (parentNode === undefined) {
+            return { path, isRoot: true }
+        }
+        path.unshift({ id: parentNode.id, name: parentNode.name, role: parentNode.role })
+        currentId = parentNode.id
+    }
+    /* We hit the depth cap with parents still ahead — show what we
+     * have and let the operator click an inbound edge to go deeper. */
+    return { path, isRoot: false }
+})
+
 const activeChats = ref<ChatSummary[]>([])
 const recentChats = ref<ChatSummary[]>([])
+const agentMeta = ref<AgentMeta | null>(null)
+const metaLoading = ref(false)
+
+async function loadAgentMeta(agentId: number): Promise<AgentMeta | null> {
+    metaLoading.value = true
+    try {
+        return await fetchAgentMeta(agentId)
+    } finally {
+        metaLoading.value = false
+    }
+}
 
 watch(
     () => selectedNode.value?.id,
     async (id) => {
-        if (id === undefined || id === null) {
-            activeChats.value = []
-            recentChats.value = []
-            return
-        }
-        try {
-            const [a, r] = await Promise.all([fetchActiveChats(id), fetchRecentChats(id)])
-            activeChats.value = a
-            recentChats.value = r
-        } catch {
-            activeChats.value = []
-            recentChats.value = []
-        }
+        activeChats.value = []
+        recentChats.value = []
+        agentMeta.value = null
+        if (id === undefined || id === null) return
+        /* Three independent fetches — meta + active + recent — all
+         * scoped to the freshly-clicked agent. They run in parallel;
+         * any individual failure (network, 404) degrades gracefully
+         * to empty arrays. */
+        const [metaResult, activeResult, recentResult] = await Promise.allSettled([
+            loadAgentMeta(id),
+            fetchActiveChats(id),
+            fetchRecentChats(id),
+        ])
+        agentMeta.value = metaResult.status === 'fulfilled' ? metaResult.value : null
+        activeChats.value = activeResult.status === 'fulfilled' ? activeResult.value : []
+        recentChats.value = recentResult.status === 'fulfilled' ? recentResult.value : []
     },
     { immediate: true },
 )
@@ -89,6 +166,19 @@ function relTime(iso: string): string {
 function jumpTo(id: number): void {
     selection.setSelected(id)
 }
+
+const visibleTools = computed<AgentToolEntry[]>(() => {
+    const m = agentMeta.value
+    if (m === null) return []
+    return m.tools
+})
+
+const ownerLabel = computed<string>(() => {
+    const m = agentMeta.value
+    if (m === null || m.principal === null) return ''
+    if (m.principal.type === 'user') return 'Personal agent'
+    return m.principal.name
+})
 </script>
 
 <template>
@@ -143,6 +233,91 @@ function jumpTo(id: number): void {
                         / 24 h
                     </span>
                 </section>
+
+                <!-- Hierarchy chain: root → ... → this agent. Walks
+                     inbound edges up to MAX_HIERARCHY_DEPTH. -->
+                <section
+                    v-if="hierarchyChain.path.length > 0 || hierarchyChain.isRoot"
+                    data-testid="tg-hierarchy-chain"
+                >
+                    <h4 class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">
+                        Hierarchy
+                    </h4>
+                    <p
+                        v-if="hierarchyChain.isRoot"
+                        class="text-xs text-muted-foreground"
+                    >
+                        Root — no parent in this team.
+                    </p>
+                    <p
+                        v-else
+                        class="text-xs text-muted-foreground flex flex-wrap items-center gap-x-1 gap-y-1"
+                    >
+                        <template v-for="(link, idx) in hierarchyChain.path" :key="link.id">
+                            <button
+                                type="button"
+                                class="tg-edge-row tg-hierarchy-link inline-flex items-center gap-1"
+                                @click="jumpTo(link.id)"
+                            >
+                                <span class="truncate">{{ link.name }}</span>
+                            </button>
+                            <span class="text-muted-foreground/60" aria-hidden="true">→</span>
+                            <span v-if="idx === hierarchyChain.path.length - 1" class="text-foreground font-medium">
+                                {{ selectedNode.name }}
+                            </span>
+                        </template>
+                    </p>
+                </section>
+
+                <!-- Owner / Principal (live /agents/{id} payload). -->
+                <section v-if="agentMeta !== null">
+                    <h4 class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">
+                        Owner
+                    </h4>
+                    <p class="text-xs text-foreground">{{ ownerLabel || '—' }}</p>
+                    <p
+                        v-if="agentMeta.max_steps > 0"
+                        class="text-[11px] text-muted-foreground mt-0.5"
+                    >
+                        max {{ agentMeta.max_steps }} steps per run
+                    </p>
+                </section>
+
+                <!-- Description (line-clamped, from /agents/{id}). -->
+                <section v-if="agentMeta?.description">
+                    <h4 class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">
+                        Description
+                    </h4>
+                    <p class="text-xs leading-[1.4] text-foreground/90">
+                        {{ agentMeta.description }}
+                    </p>
+                </section>
+
+                <!-- Tools row — server-resolved icons + tooltips. -->
+                <section v-if="visibleTools.length > 0">
+                    <h4 class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">
+                        Tools
+                    </h4>
+                    <div class="flex flex-wrap gap-1.5" data-testid="tg-tool-tiles">
+                        <span
+                            v-for="(tool, idx) in visibleTools.slice(0, 12)"
+                            :key="`${tool.tool_class}-${idx}`"
+                            class="tg-tool-tile"
+                            :title="tool.tool_name"
+                            :aria-label="`Tool: ${tool.tool_name}`"
+                        >
+                            {{ tool.tool_name.slice(0, 2).toUpperCase() }}
+                        </span>
+                        <span
+                            v-if="visibleTools.length > 12"
+                            class="tg-tool-tile tg-tool-tile--more"
+                            :title="`+${visibleTools.length - 12} more`"
+                        >
+                            +{{ visibleTools.length - 12 }}
+                        </span>
+                    </div>
+                </section>
+
                 <section>
                     <h4 class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">
                         Outbound — spawned ({{ outboundEdges.length }})
@@ -182,6 +357,7 @@ function jumpTo(id: number): void {
                         </button>
                     </div>
                 </section>
+
                 <section>
                     <h4 class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">
                         Inbound — spawned by ({{ inboundEdges.length }})
@@ -221,11 +397,14 @@ function jumpTo(id: number): void {
                         </button>
                     </div>
                 </section>
+
                 <section>
                     <h4 class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">
                         Active chats ({{ activeChats.length }})
                     </h4>
-                    <p v-if="activeChats.length === 0" class="text-xs text-muted-foreground">No active chats.</p>
+                    <p v-if="activeChats.length === 0" class="text-xs text-muted-foreground">
+                        No active chats. The agent hasn't run anything in flight.
+                    </p>
                     <div v-else class="space-y-1">
                         <div
                             v-for="chat in activeChats"
@@ -245,11 +424,14 @@ function jumpTo(id: number): void {
                         </div>
                     </div>
                 </section>
+
                 <section>
                     <h4 class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">
                         Recent chats ({{ recentChats.length }})
                     </h4>
-                    <p v-if="recentChats.length === 0" class="text-xs text-muted-foreground">No recent chats.</p>
+                    <p v-if="recentChats.length === 0" class="text-xs text-muted-foreground">
+                        No recent chats.
+                    </p>
                     <div v-else class="space-y-1">
                         <div
                             v-for="chat in recentChats"

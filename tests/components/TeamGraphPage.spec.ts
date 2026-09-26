@@ -97,7 +97,22 @@ beforeEach(() => {
     fetchPrincipalsMock.mockResolvedValue(PRINCIPALS)
     fetchActiveChatsMock.mockResolvedValue([])
     fetchRecentChatsMock.mockResolvedValue([])
-    fetchAgentMetaMock.mockResolvedValue(null)
+    fetchAgentMetaMock.mockResolvedValue({
+        id: 11,
+        name: 'Lead',
+        description: 'Owns the marketing strategy and reviews copy.',
+        llm_driver_config_id: 1,
+        max_steps: 25,
+        is_active: true,
+        is_pinned: false,
+        principal_id: 7,
+        principal: { id: 7, type: 'user', name: 'admin@spora.local' },
+        tools: [
+            { tool_class: 'Spora\\Tools\\WebSearchTool', tool_name: 'Web search', icon: 'search' },
+            { tool_class: 'Spora\\Tools\\SubAgentTool', tool_name: 'Sub-agent spawn', icon: 'git-fork' },
+        ],
+        created_at: '2026-09-01T00:00:00Z',
+    })
     fetchGraphMock.mockImplementation(async (id: number) => {
         if (id === 7) return buildPayload(7, 'admin@spora.local')
         if (id === 2) return buildPayload(2, 'Marketing')
@@ -184,6 +199,39 @@ describe('TeamGraphPage.vue (single-sidebar layout)', () => {
         selection.setSelected(11)
         await flushPromises()
         expect(wrapper.find('[data-testid="tg-agent-panel"]').exists()).toBe(true)
+        wrapper.unmount()
+    })
+
+    it('renders hierarchy info + tools + description + owner when an agent is selected', async () => {
+        const wrapper = mount(TeamGraphPage, { props: { hostContext } })
+        await flushPromises()
+        const selection = useSelectionStore()
+        selection.setSelected(11)
+        await flushPromises()
+
+        // /agents/11 was called by the detail panel for tools /
+        // description / owner — these come from /agents/{id}, not the
+        // graph payload.
+        expect(fetchAgentMetaMock).toHaveBeenCalledWith(11)
+
+        // Tool tiles rendered (one per configured tool) with a
+        // compact two-letter chip + tooltip via the parent's title=.
+        const tools = wrapper.find('[data-testid="tg-tool-tiles"]').findAll('.tg-tool-tile')
+        expect(tools.length).toBe(2)
+        expect(tools[0]!.attributes('title')).toBe('Web search')
+        expect(tools[0]!.text()).toBe('WE')
+
+        // Owner label says "Personal agent" because the agent is
+        // owned by the user's user-principal (the test mock's
+        // `principal.type === 'user'`).
+        expect(wrapper.text()).toContain('Owner')
+        expect(wrapper.text()).toContain('Personal agent')
+        // max_steps surfaces in the owner section.
+        expect(wrapper.text()).toContain('max 25 steps per run')
+
+        // Description renders the agent's body copy.
+        expect(wrapper.text()).toContain('Owns the marketing strategy')
+
         wrapper.unmount()
     })
 

@@ -143,6 +143,45 @@ body,
 .tg-edge-row { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 8px; cursor: pointer; transition: background 150ms; }
 .tg-edge-row:hover { background: rgba(79, 70, 229, 0.06); }
 
+/**
+ * Hierarchy chain (root → ... → this agent). The links are inline
+ * `tg-edge-row`s — clickable, deep-link to the ancestor's node so
+ * the operator can hop back up the spawn tree without leaving the
+ * sidebar.
+ */
+.tg-hierarchy-link {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--foreground);
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-weight: 500;
+}
+.tg-hierarchy-link:hover {
+    background: rgba(79, 70, 229, 0.06);
+    border-color: rgba(79, 70, 229, 0.45);
+}
+
+/**
+ * Tool tiles in the detail panel. The host's icon-resolver cascade
+ * can give us a real lucide name per tool, but the plugin UI
+ * renders these as compact initials (two-letter) chips because
+ * (a) we don't depend on lucide icons in the plugin bundle, and
+ * (b) two letters of the tool name are more readable than a tiny
+ * 14 px icon at a glance. The tooltip (the parent's `title=`)
+ * carries the full tool name on hover.
+ */
+.tg-tool-tile {
+    display: inline-flex; align-items: center; justify-content: center;
+    min-width: 26px; height: 26px; padding: 0 6px;
+    border-radius: 6px; border: 1px solid var(--border);
+    background: var(--background); color: var(--muted-foreground);
+    font-size: 9px; font-weight: 700; letter-spacing: 0.04em;
+}
+.tg-tool-tile--more {
+    background: var(--muted); color: var(--foreground);
+}
+
 .tg-agent-panel { position: sticky; top: 16px; max-height: calc(100vh - 32px); display: flex; flex-direction: column; }
 .tg-agent-panel-body { overflow-y: auto; }
 .tg-agent-panel-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 280px; text-align: center; color: var(--muted-foreground); }
