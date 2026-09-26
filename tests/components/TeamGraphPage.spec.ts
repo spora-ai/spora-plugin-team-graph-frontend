@@ -2,18 +2,26 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import TeamGraphPage from '../../src/components/TeamGraphPage.vue'
+import { useSelectionStore } from '../../src/stores/selection'
+import { principalLabel } from '../../src/api/principals'
+import type { PrincipalSummary } from '../../src/api/principals'
 
 /**
- * TeamGraphPage — top-level layout: toolbar + legend + canvas +
- * sidebar/modal. Component test pins:
- *  - the principal selector renders and emits fixture keys,
- *  - the canvas + sidebar render together (no missing branches
- *    in the conditional),
- *  - the summary line reflects the fixture's node/edge counts.
+ * Tests for the single-sidebar layout.
  *
- * The Mermaid renderer is mocked so the page mounts without a
- * real DOM graph; the canvas wrapper testid is enough to assert
- * the layout.
+ * Layout: toolbar (title + principal pill row + refresh) over a
+ * grid of `[flex graph | 340px detail sidebar]`. The principal
+ * pill row replaces the dropped left-column sidebar.
+ *
+ * Each test cases a specific page-level contract:
+ *  - the pill row lists the user's user-principal first as
+ *    "My Agents" and every group with its raw `name`,
+ *  - clicking a pill swaps the graph to that principal,
+ *  - the summary line reflects the active principal's
+ *    node / edge counts,
+ *  - selecting an agent via the store opens the right-side
+ *    detail panel,
+ *  - switching principals clears the agent selection.
  */
 
 vi.mock('mermaid', () => ({
@@ -31,7 +39,12 @@ const fetchAgentMetaMock = vi.fn()
 
 vi.mock('../../src/api/teamGraph', () => ({
     fetchGraph: (...args: unknown[]) => fetchGraphMock(...args),
+}))
+
+vi.mock('../../src/api/principals', () => ({
     fetchPrincipals: (...args: unknown[]) => fetchPrincipalsMock(...args),
+    principalLabel: (p: { type: string; is_current_user_owned: boolean; name: string }) =>
+        p.type === 'user' && p.is_current_user_owned ? 'My Agents' : p.name,
 }))
 
 vi.mock('../../src/api/agentDetail', () => ({
@@ -40,21 +53,28 @@ vi.mock('../../src/api/agentDetail', () => ({
     fetchRecentChats: (...args: unknown[]) => fetchRecentChatsMock(...args),
 }))
 
-const fixturePayload = {
-    principal: { id: -1, type: 'group', name: 'Tiny Startup', is_current_user_owned: true },
-    nodes: [
-        { id: 1, name: 'Alex', role: 'Lead', picture_url: null, status: 'RUNNING', active_chats: 1, recent_chats_24h: 4 },
-        { id: 2, name: 'Blake', role: 'Writer', picture_url: null, status: 'RUNNING', active_chats: 1, recent_chats_24h: 3 },
-    ],
-    edges: [
-        { id: '1->2', source: 1, target: 2, op: 'sub_agent', count_24h: 3, last_invoked_at: '2026-09-23T10:14:00Z' },
-    ],
-    fixtures: [
-        { key: 'tinyStartup', label: 'Tiny Startup' },
-        { key: 'marketing', label: 'Marketing Team' },
-        { key: 'solo', label: 'Solo Workspace' },
-    ],
-    generated_at: '2026-09-25T08:14:00Z',
+const PRINCIPALS: PrincipalSummary[] = [
+    { id: 7, type: 'user', name: 'admin@spora.local', is_current_user_owned: true },
+    { id: 2, type: 'group', name: 'Marketing', is_current_user_owned: false },
+    { id: 4, type: 'group', name: 'Engineering', is_current_user_owned: false },
+]
+
+function buildPayload(principalId: number, principalName: string) {
+    return {
+        principal: { id: principalId, type: 'group', name: principalName, is_current_user_owned: principalId === 7 },
+        nodes: [
+            { id: 11, name: 'Lead', role: 'Lead', picture_url: null, status: 'RUNNING', active_chats: 1, recent_chats_24h: 4, profile_picture: { palette_key: 'indigo', bg_color: '#4338CA', fg_color: '#EEF2FF' } },
+            { id: 12, name: 'Helper', role: 'Helper', picture_url: null, status: 'COMPLETED', active_chats: 0, recent_chats_24h: 2, profile_picture: { palette_key: 'amber', bg_color: '#D97706', fg_color: '#FFFBEB' } },
+            { id: 13, name: 'Writer', role: 'Writer', picture_url: null, status: 'COMPLETED', active_chats: 0, recent_chats_24h: 0, profile_picture: { palette_key: 'teal', bg_color: '#0F766E', fg_color: '#F0FDFA' } },
+        ],
+        edges: [
+            // Used in the last 24h — solid line + "Nx / 24 h" label.
+            { id: '11->12', source: 11, target: 12, op: 'sub_agent' as const, configured: true as const, count_24h: 3, last_invoked_at: '2026-09-25T08:14:00Z' },
+            // Configured but never fired — dashed line + "configured, never used" label.
+            { id: '11->13', source: 11, target: 13, op: 'sub_agent' as const, configured: true as const, count_24h: 0, last_invoked_at: null },
+        ],
+        generated_at: '2026-09-25T08:14:00Z',
+    }
 }
 
 const hostContext = {
@@ -78,55 +98,187 @@ beforeEach(() => {
     fetchActiveChatsMock.mockReset()
     fetchRecentChatsMock.mockReset()
     fetchAgentMetaMock.mockReset()
-    fetchPrincipalsMock.mockResolvedValue([])
+    fetchPrincipalsMock.mockResolvedValue(PRINCIPALS)
     fetchActiveChatsMock.mockResolvedValue([])
     fetchRecentChatsMock.mockResolvedValue([])
-    fetchAgentMetaMock.mockResolvedValue(null)
-    fetchGraphMock.mockResolvedValue(fixturePayload)
+    fetchAgentMetaMock.mockResolvedValue({
+        id: 11,
+        name: 'Lead',
+        description: 'Owns the marketing strategy and reviews copy.',
+        llm_driver_config_id: 1,
+        max_steps: 25,
+        is_active: true,
+        is_pinned: false,
+        principal_id: 7,
+        principal: { id: 7, type: 'user', name: 'admin@spora.local' },
+        tools: [
+            { tool_class: 'Spora\\Tools\\WebSearchTool', tool_name: 'Web search', icon: 'search' },
+            { tool_class: 'Spora\\Tools\\SubAgentTool', tool_name: 'Sub-agent spawn', icon: 'git-fork' },
+        ],
+        created_at: '2026-09-01T00:00:00Z',
+    })
+    fetchGraphMock.mockImplementation(async (id: number) => {
+        if (id === 7) return buildPayload(7, 'admin@spora.local')
+        if (id === 2) return buildPayload(2, 'Marketing')
+        return buildPayload(4, 'Engineering')
+    })
 })
 
-describe('TeamGraphPage.vue', () => {
-    it('renders the principal selector + canvas + summary in fixture mode', async () => {
-        const wrapper = mount(TeamGraphPage, {
-            props: { hostContext },
-        })
+describe('TeamGraphPage.vue (single-sidebar layout)', () => {
+    it('boots by selecting the user-principal and rendering the pill row', async () => {
+        const wrapper = mount(TeamGraphPage, { props: { hostContext } })
         await flushPromises()
 
-        expect(wrapper.find('[data-testid="tg-principal-select"]').exists()).toBe(true)
-        expect(wrapper.find('[data-testid="tg-canvas-wrap"]').exists()).toBe(true)
-        expect(wrapper.find('[data-testid="tg-summary"]').exists()).toBe(true)
-        // Default fixture is 'tinyStartup' which has 5 agents and 5
-        // edges. The selector emits a fixture key (the liveGraph
-        // fetch is mocked but never committed because
-        // `inFixtureMode` is true).
-        expect(wrapper.text()).toContain('5 agents')
-        expect(wrapper.text()).toContain('5 edges')
+        expect(fetchPrincipalsMock).toHaveBeenCalledOnce()
+        expect(fetchGraphMock).toHaveBeenCalledWith(7)
+
+        const pills = wrapper.find('[data-testid="tg-principal-pills"]').findAll('button')
+        expect(pills).toHaveLength(3)
+        // The user's own principal renders as "My Agents", never by
+        // the wire's email-as-name.
+        expect(pills[0]!.text()).toContain('MY')
+        expect(pills[0]!.text()).toContain('My Agents')
+        expect(pills[1]!.text()).toContain('Marketing')
+        expect(pills[2]!.text()).toContain('Engineering')
+
+        // No left-column sidebar anymore — only the right detail panel.
+        expect(wrapper.find('[data-testid="tg-principal-sidebar"]').exists()).toBe(false)
+
+        // The summary line picks up the active principal name + node/edge
+        // counts from the graph response.
+        expect(wrapper.text()).toContain('My Agents')
+        expect(wrapper.text()).toContain('3 agents')
+        expect(wrapper.text()).toContain('2 edges')
+
+        // The freshness indicator anchors off the first commit and
+        // shows "Updated just now" (or "Xs ago" if the test ran long
+        // enough for the threshold to flip). We accept either because
+        // the timer reads Date.now() at mount time.
+        const freshness = wrapper.find('[data-testid="tg-freshness"]')
+        expect(freshness.exists()).toBe(true)
+        expect(freshness.text()).toMatch(/Updated (just now|\d+s ago|\d+ min(?:s)? ago)/)
+
         wrapper.unmount()
     })
 
-    it('renders the legend + refresh button', async () => {
-        const wrapper = mount(TeamGraphPage, {
-            props: { hostContext },
-        })
+    it('swaps the graph when a pill is clicked', async () => {
+        const wrapper = mount(TeamGraphPage, { props: { hostContext } })
         await flushPromises()
-        expect(wrapper.find('[data-testid="tg-legend"]').exists()).toBe(true)
-        expect(wrapper.find('[data-testid="tg-refresh"]').exists()).toBe(true)
+        const engineeringPill = wrapper.find('[data-testid="tg-pill-4"]')
+        expect(engineeringPill.exists()).toBe(true)
+        await engineeringPill.trigger('click')
+        await flushPromises()
+
+        expect(fetchGraphMock).toHaveBeenLastCalledWith(4)
+        expect(wrapper.text()).toContain('Engineering')
         wrapper.unmount()
     })
 
-    it('updates the graph when a different fixture key is emitted', async () => {
-        const wrapper = mount(TeamGraphPage, {
-            props: { hostContext },
-        })
+    it('marks the active pill as selected (aria-selected + class)', async () => {
+        const wrapper = mount(TeamGraphPage, { props: { hostContext } })
         await flushPromises()
-        const select = wrapper.find('[data-testid="tg-principal-select"]')
-        await select.setValue('marketing')
-        await flushPromises()
-        // Marketing fixture has 8 agents / 7 edges (vs. tinyStartup's
-        // 5 / 5). Switching fixture keys drives the canvas through
-        // the same graph pipeline.
-        expect(wrapper.text()).toContain('8 agents')
-        expect(wrapper.text()).toContain('7 edges')
+        const ownPill = wrapper.find('[data-testid="tg-pill-7"]')
+        expect(ownPill.attributes('aria-selected')).toBe('true')
+        expect(ownPill.classes()).toContain('is-selected')
+
+        const marketingPill = wrapper.find('[data-testid="tg-pill-2"]')
+        expect(marketingPill.attributes('aria-selected')).toBe('false')
+        expect(marketingPill.classes()).not.toContain('is-selected')
         wrapper.unmount()
+    })
+
+    it('clears selection when the principal switches', async () => {
+        const wrapper = mount(TeamGraphPage, { props: { hostContext } })
+        await flushPromises()
+
+        const selection = useSelectionStore()
+        selection.setSelected(11)
+        expect(selection.selectedId).toBe(11)
+
+        await wrapper.find('[data-testid="tg-pill-4"]').trigger('click')
+        await flushPromises()
+
+        // Different principal → ids aren't shared → selection should clear
+        // so the canvas doesn't keep the old agent visually highlighted.
+        expect(selection.selectedId).toBeNull()
+        wrapper.unmount()
+    })
+
+    it('renders the agent-detail panel for the selected agent', async () => {
+        const wrapper = mount(TeamGraphPage, { props: { hostContext } })
+        await flushPromises()
+        const selection = useSelectionStore()
+        selection.setSelected(11)
+        await flushPromises()
+        expect(wrapper.find('[data-testid="tg-agent-panel"]').exists()).toBe(true)
+        wrapper.unmount()
+    })
+
+    it('renders hierarchy info + tools + description + owner when an agent is selected', async () => {
+        const wrapper = mount(TeamGraphPage, { props: { hostContext } })
+        await flushPromises()
+        const selection = useSelectionStore()
+        selection.setSelected(11)
+        await flushPromises()
+
+        // /agents/11 was called by the detail panel for tools /
+        // description / owner — these come from /agents/{id}, not the
+        // graph payload.
+        expect(fetchAgentMetaMock).toHaveBeenCalledWith(11)
+
+        // Tool tiles rendered (one per configured tool) with a
+        // compact two-letter chip + tooltip via the parent's title=.
+        const tools = wrapper.find('[data-testid="tg-tool-tiles"]').findAll('.tg-tool-tile')
+        expect(tools.length).toBe(2)
+        expect(tools[0]!.attributes('title')).toBe('Web search')
+        expect(tools[0]!.text()).toBe('WE')
+
+        // Owner label says "Personal agent" because the agent is
+        // owned by the user's user-principal (the test mock's
+        // `principal.type === 'user'`).
+        expect(wrapper.text()).toContain('Owner')
+        expect(wrapper.text()).toContain('Personal agent')
+        // max_steps surfaces in the owner section.
+        expect(wrapper.text()).toContain('max 25 steps per run')
+
+        // Description renders the agent's body copy.
+        expect(wrapper.text()).toContain('Owns the marketing strategy')
+
+        // Outbound edge list distinguishes a "used in last 24h"
+        // edge from a "configured, never used" one via the new
+        // edgeActivity label.
+        expect(wrapper.text()).toContain('→ sub_agent · 3× / 24 h')
+        expect(wrapper.text()).toContain('→ sub_agent · configured, never used')
+
+        wrapper.unmount()
+    })
+
+    it('renders the empty state of the detail panel when no agent is selected', async () => {
+        const wrapper = mount(TeamGraphPage, { props: { hostContext } })
+        await flushPromises()
+        expect(wrapper.find('[data-testid="tg-agent-panel"]').exists()).toBe(true)
+        expect(wrapper.find('.tg-agent-panel-empty').exists()).toBe(true)
+        expect(wrapper.text()).toContain('No agent selected')
+        wrapper.unmount()
+    })
+})
+
+describe('principalLabel', () => {
+    it('returns "My Agents" for the user-owned user-principal', () => {
+        expect(principalLabel(PRINCIPALS[0]!)).toBe('My Agents')
+    })
+
+    it('returns the wire name for a group principal', () => {
+        expect(principalLabel(PRINCIPALS[1]!)).toBe('Marketing')
+    })
+
+    it('returns the wire name for a user-principal that is not the viewer', () => {
+        const otherUser: PrincipalSummary = {
+            id: 99,
+            type: 'user',
+            name: 'teammate@spora.local',
+            is_current_user_owned: false,
+        }
+        expect(principalLabel(otherUser)).toBe('teammate@spora.local')
     })
 })

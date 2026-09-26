@@ -11,7 +11,7 @@ const STATUS_LEGEND = [
     { key: 'pending', label: 'awaiting approval', color: '#6366f1' },
     { key: 'awaiting', label: 'awaiting sub-agent', color: '#f59e0b' },
     { key: 'failed', label: 'failed', color: '#ef4444' },
-    { key: 'aborted', label: 'aborted', color: '#a855f7' },
+    { key: 'aborted', label: 'aborted', color: '#d946ef' },
     { key: 'completed', label: 'idle', color: '#94a3b8' },
 ] as const
 </script>

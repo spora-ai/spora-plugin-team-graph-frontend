@@ -111,7 +111,18 @@ export function usePanZoom({ wrapRef, contentRef, onFit }: UsePanZoomOptions): U
         const wrap = wrapRef.value
         if (wrap === null) return
         const target = ev.target
-        if (target instanceof Element && target.closest('g.node')) return
+        if (target instanceof Element) {
+            /* Skip panning when the user is interacting with the chrome:
+             *  - `g.node` is a Mermaid card (its own click handler does
+             *    selection via stopPropagation),
+             *  - `button` is the zoom / fit toolbar,
+             *  - `[data-tg-no-pan]` is the opt-out marker for any future
+             *    overlay.
+             * Without this guard the wrap's `setPointerCapture` holds
+             * the pointer so the button never receives its `click`
+             * event. */
+            if (target.closest('g.node, button, [data-tg-no-pan]') !== null) return
+        }
         panning.value = {
             startX: ev.clientX,
             startY: ev.clientY,

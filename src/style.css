@@ -13,8 +13,8 @@
  *  - the Mermaid canvas (viewport + transformable content + zoom
  *    button stack) — the same composition Prototype E uses;
  *  - the per-node content template (`.m-node`, `.m-node-name`, etc.);
- *  - the selection-driven SVG styling (`g.node.selected`, `g.edgePath.out`,
- *    `g.edgePath.in`, `g.node.dimmed`, etc.);
+ *  - the selection-driven SVG styling (`g.node.selected`, `path.flowchart-link.out`,
+ *    `path.flowchart-link.in`, `g.node.dimmed`, etc.);
  *  - the modal + sidebar containers shared with the other plugin
  *    prototypes.
  *
@@ -59,18 +59,61 @@ body,
  * path inside a `<foreignObject>`. Sized so text stays readable on
  * first render; with `useMaxWidth:false` the SVG renders at its
  * natural size, so these sizes land directly on screen.
+ *
+ * The agent's icon colour is driven by the `tg-palette-<key>` class
+ * that Mermaid applies to the wrapping `<g class="node">` via the
+ * classDef system (see `lib/mermaidSource.ts`). We can't use inline
+ * `style=` on the inner div because Mermaid 10's HTML-label
+ * sanitiser strips `;` characters, concatenating adjacent
+ * declarations into invalid CSS — every colour lives in the
+ * stylesheet below, keyed off `tg-palette-*`.
  */
 .tg-node {
     padding: 14px 16px;
     min-width: 240px;
     text-align: left;
     line-height: 1.35;
-    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    border-radius: 12px;
+    background-color: var(--palette-bg, #475569);
+    color: var(--palette-fg, #F8FAFC);
 }
-.tg-node-name  { font-size: 16px; font-weight: 600; color: #0f172a; margin: 0; letter-spacing: -0.01em; }
-.tg-node-role  { font-size: 13px; color: #64748b; margin: 4px 0 10px; }
-.tg-node-stats { font-size: 13px; color: #475569; margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(15, 23, 41, 0.08); display: flex; justify-content: space-between; gap: 12px; }
-.tg-node-stats strong { color: #0f172a; font-weight: 600; }
+.tg-node-name  { font-size: 16px; font-weight: 600; margin: 0; letter-spacing: -0.01em; color: inherit; }
+.tg-node-role  { font-size: 13px; margin: 4px 0 10px; opacity: 0.85; }
+.tg-node-stats { font-size: 13px; margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(255, 255, 255, 0.18); display: flex; justify-content: space-between; gap: 12px; opacity: 0.9; }
+.tg-node-stats strong { color: inherit; font-weight: 600; opacity: 1; }
+
+/**
+ * Per-palette colour injection. Mermaid applies `tg-palette-<key>`
+ * to the `<g class="node">`; we expose the bg/fg as CSS variables
+ * so the inner `.tg-node` reads them via `var(--palette-*)`. The
+ * hex codes mirror `Spora\Services\AgentPictures\Palette` — keep
+ * in sync if a palette is renamed or its hex shifts upstream.
+ *
+ * `!important` is needed to win against Mermaid's inline
+ * `style="fill:…"` on the rect.
+ */
+.tg-canvas-content svg g.tg-palette-slate   rect { fill: #475569 !important; stroke: #475569 !important; }
+.tg-canvas-content svg g.tg-palette-red     rect { fill: #DC2626 !important; stroke: #DC2626 !important; }
+.tg-canvas-content svg g.tg-palette-orange  rect { fill: #EA580C !important; stroke: #EA580C !important; }
+.tg-canvas-content svg g.tg-palette-amber   rect { fill: #D97706 !important; stroke: #D97706 !important; }
+.tg-canvas-content svg g.tg-palette-green   rect { fill: #15803D !important; stroke: #15803D !important; }
+.tg-canvas-content svg g.tg-palette-teal    rect { fill: #0F766E !important; stroke: #0F766E !important; }
+.tg-canvas-content svg g.tg-palette-blue    rect { fill: #1D4ED8 !important; stroke: #1D4ED8 !important; }
+.tg-canvas-content svg g.tg-palette-indigo  rect { fill: #4338CA !important; stroke: #4338CA !important; }
+.tg-canvas-content svg g.tg-palette-violet  rect { fill: #6D28D9 !important; stroke: #6D28D9 !important; }
+.tg-canvas-content svg g.tg-palette-pink    rect { fill: #BE185D !important; stroke: #BE185D !important; }
+
+.tg-canvas-content svg g.tg-palette-slate   { --palette-bg: #475569; --palette-fg: #F8FAFC; }
+.tg-canvas-content svg g.tg-palette-red     { --palette-bg: #DC2626; --palette-fg: #FEF2F2; }
+.tg-canvas-content svg g.tg-palette-orange  { --palette-bg: #EA580C; --palette-fg: #FFF7ED; }
+.tg-canvas-content svg g.tg-palette-amber   { --palette-bg: #D97706; --palette-fg: #FFFBEB; }
+.tg-canvas-content svg g.tg-palette-green   { --palette-bg: #15803D; --palette-fg: #F0FDF4; }
+.tg-canvas-content svg g.tg-palette-teal    { --palette-bg: #0F766E; --palette-fg: #F0FDFA; }
+.tg-canvas-content svg g.tg-palette-blue    { --palette-bg: #1D4ED8; --palette-fg: #EFF6FF; }
+.tg-canvas-content svg g.tg-palette-indigo  { --palette-bg: #4338CA; --palette-fg: #EEF2FF; }
+.tg-canvas-content svg g.tg-palette-violet  { --palette-bg: #6D28D9; --palette-fg: #F5F3FF; }
+.tg-canvas-content svg g.tg-palette-pink    { --palette-bg: #BE185D; --palette-fg: #FDF2F8; }
 
 /**
  * Status pills — same shape as the other plugin prototypes. The
@@ -78,21 +121,27 @@ body,
  * `status-failed` / `status-completed` / `status-aborted` classes
  * are applied inside the `m-node` HTML block by
  * `lib/mermaidSource.ts`.
+ *
+ * The pill sits on top of an agent-coloured tile (the agent's
+ * `bg_color`), so we render it as a translucent-white bubble with
+ * a saturated status dot. This keeps the pill readable on every
+ * palette (slate, red, orange, green, teal, blue, indigo, violet,
+ * pink) without having to pick per-palette contrast colours.
+ *
+ * `!important` on `color` + `background` is necessary because
+ * Mermaid 10 auto-injects `#<svg-id> .tg-palette-<key> span`
+ * rules that win on specificity (1,1,1) and would otherwise force
+ * the pill text to the agent's `fg_color` — making "idle" sit
+ * white-on-white on the slate palette, for example.
  */
-.tg-status-pill { display: inline-flex; align-items: center; gap: 4px; font-size: 10px; font-weight: 600; padding: 2px 7px; border-radius: 999px; letter-spacing: 0.02em; white-space: nowrap; }
+.tg-status-pill { display: inline-flex; align-items: center; gap: 4px; font-size: 10px; font-weight: 600; padding: 2px 7px; border-radius: 999px; letter-spacing: 0.02em; white-space: nowrap; background: rgba(255, 255, 255, 0.92) !important; color: #0f172a !important; }
 .tg-status-pill .dot { width: 6px; height: 6px; border-radius: 999px; flex-shrink: 0; }
-.tg-status-running  { background: rgba(16, 185, 129, 0.12); color: #047857; }
 .tg-status-running  .dot { background: #10b981; }
-.tg-status-pending  { background: rgba(99, 102, 241, 0.12); color: #4338ca; }
 .tg-status-pending  .dot { background: #6366f1; }
-.tg-status-awaiting { background: rgba(245, 158, 11, 0.12); color: #b45309; }
 .tg-status-awaiting .dot { background: #f59e0b; }
-.tg-status-failed   { background: rgba(239, 68, 68, 0.12); color: #b91c1c; }
 .tg-status-failed   .dot { background: #ef4444; }
-.tg-status-completed { background: rgba(148, 163, 184, 0.18); color: #475569; }
 .tg-status-completed .dot { background: #94a3b8; }
-.tg-status-aborted   { background: rgba(168, 85, 247, 0.12); color: #6b21a8; }
-.tg-status-aborted   .dot { background: #a855f7; }
+.tg-status-aborted   .dot { background: #d946ef; }
 
 /**
  * Selection-driven SVG styling. Mermaid paints the entire diagram
@@ -120,51 +169,116 @@ body,
     stroke-width: 2.5px !important;
 }
 .tg-canvas-content svg g.node.dimmed { opacity: 0.28; }
-.tg-canvas-content svg g.edgePath.dim path { stroke-opacity: 0.15; }
-.tg-canvas-content svg g.edgePath.out path { stroke: #059669 !important; stroke-width: 2.6px !important; }
-.tg-canvas-content svg g.edgePath.in  path { stroke: #4f46e5 !important; stroke-width: 2.6px !important; }
-.tg-canvas-content svg g.edgeLabel.dim { opacity: 0.15; }
+.tg-canvas-content svg path.flowchart-link.dim { stroke-opacity: 0.15; }
+.tg-canvas-content svg path.flowchart-link.out { stroke: #059669 !important; stroke-width: 2.6px !important; }
+.tg-canvas-content svg path.flowchart-link.in  { stroke: #4f46e5 !important; stroke-width: 2.6px !important; }
 .tg-canvas-content svg .edgeLabel { transition: opacity 150ms; }
 
 /**
- * Modal + sidebar. The sidebar is `lg:` only; below `lg` the
- * agent detail is rendered as a centred modal so it doesn't
- * collide with the host's right-side sheet.
+ * Modal chrome was dropped in v0.1.1 (per user feedback: "details
+ * open in an overlay instead of the sidebar"). The detail panel
+ * now renders as a right sidebar at every breakpoint — see
+ * `<AgentDetailPanel />`'s sticky positioning below. What remains
+ * here are just the task-row + edge-row primitives the sidebar
+ * shares with the (now-deleted) modal.
+ *
+ * Task rows + edge rows used inside the right-side agent-detail
+ * sidebar. Edge rows are deep-link buttons — clicking one jumps
+ * selection to the other agent on the edge.
  */
-.tg-modal-backdrop { position: fixed; inset: 0; z-index: 50; display: flex; align-items: center; justify-content: center; }
-.tg-modal-backdrop .tg-backdrop-btn { position: absolute; inset: 0; background: rgba(0,0,0,0.5); border: none; padding: 0; cursor: pointer; }
-.tg-modal-panel {
-    position: relative; background: var(--background); border-radius: 12px;
-    border: 1px solid var(--border); box-shadow: 0 25px 50px -12px rgba(0,0,0,0.25);
-    width: 100%; max-width: 560px; max-height: 85vh; margin: 0 16px;
-    display: flex; flex-direction: column;
-}
-.tg-modal-header { display: flex; align-items: center; justify-content: space-between; padding: 14px 20px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
-.tg-modal-body   { flex: 1; overflow-y: auto; padding: 14px 20px; }
-.tg-modal-close  { display: flex; align-items: center; justify-content: center; width: 32px; height: 32px; border-radius: 8px;
-                   color: var(--muted-foreground); background: transparent; border: none; cursor: pointer; }
-.tg-modal-close:hover { color: var(--foreground); background: var(--muted); }
-
 .tg-task-row { padding: 10px 12px; border-radius: 8px; transition: background 150ms; }
 .tg-task-row:hover { background: var(--muted); }
 .tg-edge-row { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 8px; cursor: pointer; transition: background 150ms; }
 .tg-edge-row:hover { background: rgba(79, 70, 229, 0.06); }
+
+/**
+ * Hierarchy chain (root → ... → this agent). The links are inline
+ * `tg-edge-row`s — clickable, deep-link to the ancestor's node so
+ * the operator can hop back up the spawn tree without leaving the
+ * sidebar.
+ */
+.tg-hierarchy-link {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--foreground);
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-weight: 500;
+}
+.tg-hierarchy-link:hover {
+    background: rgba(79, 70, 229, 0.06);
+    border-color: rgba(79, 70, 229, 0.45);
+}
+
+/**
+ * Tool tiles in the detail panel. The host's icon-resolver cascade
+ * can give us a real lucide name per tool, but the plugin UI
+ * renders these as compact initials (two-letter) chips because
+ * (a) we don't depend on lucide icons in the plugin bundle, and
+ * (b) two letters of the tool name are more readable than a tiny
+ * 14 px icon at a glance. The tooltip (the parent's `title=`)
+ * carries the full tool name on hover.
+ */
+.tg-tool-tile {
+    display: inline-flex; align-items: center; justify-content: center;
+    min-width: 26px; height: 26px; padding: 0 6px;
+    border-radius: 6px; border: 1px solid var(--border);
+    background: var(--background); color: var(--muted-foreground);
+    font-size: 9px; font-weight: 700; letter-spacing: 0.04em;
+}
+.tg-tool-tile--more {
+    background: var(--muted); color: var(--foreground);
+}
 
 .tg-agent-panel { position: sticky; top: 16px; max-height: calc(100vh - 32px); display: flex; flex-direction: column; }
 .tg-agent-panel-body { overflow-y: auto; }
 .tg-agent-panel-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 280px; text-align: center; color: var(--muted-foreground); }
 
 /**
- * Group / principal selector. A native `<select>` styled to match
- * the host's chrome — the down-chevron is inlined as a data-URL
- * SVG so we don't pull in another asset.
+ * Principal pill row in the toolbar (replaces the dropped
+ * `<PrincipalListSidebar />`).
+ *
+ * Each pill is a button — pressing it tells the page to render the
+ * graph for that principal. The "MY" badge highlights the user's own
+ * user-principal so it's obvious which row is "you" without reading
+ * the label. Group rows get a quieter "G" badge.
+ *
+ * Picked pills over the prior list view because the toolbar is
+ * shared horizontal real-estate — pills read as a compact "tabs"
+ * affordance while the sidebar slot stays free for the agent-detail
+ * panel. Pills wrap when there are many principals so the toolbar
+ * never overflows horizontally.
  */
-.tg-select {
-    height: 36px; padding: 0 32px 0 12px; border-radius: 8px; border: 1px solid var(--border);
-    background: var(--background) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E") no-repeat right 10px center;
-    color: var(--foreground); font-size: 13px; cursor: pointer; appearance: none; -webkit-appearance: none; min-width: 160px;
+.tg-pill {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 4px 10px 4px 6px; border-radius: 999px;
+    background: transparent; color: var(--muted-foreground);
+    border: 1px solid transparent; cursor: pointer;
+    font-size: 12px; font-weight: 500; line-height: 1;
+    max-width: 240px; transition: background 100ms, color 100ms, border-color 100ms;
 }
-.tg-select:hover { background-color: var(--muted); }
+.tg-pill:hover:not(.is-selected):not(:disabled) {
+    background: var(--muted); color: var(--foreground);
+}
+.tg-pill.is-selected {
+    background: rgba(124, 58, 237, 0.10); /* violet-500 at 10% */
+    color: var(--foreground); border-color: rgba(124, 58, 237, 0.45);
+}
+.tg-pill:disabled { cursor: not-allowed; opacity: 0.5; }
+.tg-pill__badge {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 20px; height: 20px; border-radius: 999px;
+    font-size: 9px; font-weight: 700; letter-spacing: 0.04em;
+    flex-shrink: 0;
+}
+.tg-pill__badge--my {
+    background: rgba(124, 58, 237, 0.18); color: var(--foreground);
+    border: 1px solid rgba(124, 58, 237, 0.45);
+}
+.tg-pill__badge--group {
+    background: var(--muted); color: var(--muted-foreground);
+    border: 1px solid var(--border);
+}
 
 .tg-zoom-btn { width: 28px; height: 28px; display: flex; align-items: center; justify-content: center;
                color: var(--muted-foreground); background: transparent; border: none; cursor: pointer;

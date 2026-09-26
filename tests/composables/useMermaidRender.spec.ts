@@ -45,13 +45,12 @@ function makeSvgFixture(): string {
 const tinyStartup: GraphPayload = {
     principal: { id: 7, type: 'group', name: 'Tiny Startup', is_current_user_owned: true },
     nodes: [
-        { id: 1, name: 'Alex', role: 'Lead', picture_url: null, status: 'RUNNING', active_chats: 1, recent_chats_24h: 4 },
-        { id: 2, name: 'Blake', role: 'Writer', picture_url: null, status: 'RUNNING', active_chats: 1, recent_chats_24h: 3 },
+        { id: 1, name: 'Alex', role: 'Lead', picture_url: null, status: 'RUNNING', active_chats: 1, recent_chats_24h: 4, profile_picture: { palette_key: 'indigo', bg_color: '#4338CA', fg_color: '#EEF2FF' } },
+        { id: 2, name: 'Blake', role: 'Writer', picture_url: null, status: 'RUNNING', active_chats: 1, recent_chats_24h: 3, profile_picture: { palette_key: 'amber', bg_color: '#D97706', fg_color: '#FFFBEB' } },
     ],
     edges: [
-        { id: '1->2', source: 1, target: 2, op: 'sub_agent', count_24h: 3, last_invoked_at: '2026-09-23T10:14:00Z' },
+        { id: '1->2', source: 1, target: 2, op: 'sub_agent', configured: true, count_24h: 3, last_invoked_at: '2026-09-23T10:14:00Z' },
     ],
-    fixtures: [],
     generated_at: '2026-09-25T08:14:00Z',
 }
 
@@ -132,5 +131,25 @@ describe('useMermaidRender', () => {
         await vi.waitFor(() => {
             expect(error.value).toContain('mermaid parse error')
         })
+    })
+
+    it('fires onRender after every successful render (not on error)', async () => {
+        renderFn.mockRejectedValueOnce(new Error('boom'))
+        renderFn.mockResolvedValueOnce({ svg: makeSvgFixture() })
+        const host = document.createElement('div')
+        document.body.appendChild(host)
+        const hostRef = ref<HTMLElement | null>(host)
+        const graph = ref<GraphPayload | null>(tinyStartup)
+        const onRender = vi.fn()
+        useMermaidRender({ hostRef, graph, onRender })
+
+        // First render fails → onRender must NOT fire.
+        await vi.waitFor(() => expect(renderFn).toHaveBeenCalledTimes(1))
+        expect(onRender).not.toHaveBeenCalled()
+
+        // Trigger a second render with a successful response.
+        graph.value = { ...tinyStartup, principal: { ...tinyStartup.principal, name: 'Marketing' } }
+        await vi.waitFor(() => expect(renderFn).toHaveBeenCalledTimes(2))
+        expect(onRender).toHaveBeenCalledTimes(1)
     })
 })

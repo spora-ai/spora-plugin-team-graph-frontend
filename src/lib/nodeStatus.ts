@@ -9,7 +9,8 @@
  */
 import type { AgentStatus } from '../types'
 
-export function statusSlug(status: AgentStatus): string {
+export function statusSlug(status: AgentStatus | string | null | undefined): string {
+    if (status === null || status === undefined) return 'completed'
     switch (status) {
         case 'RUNNING':
         case 'APPROVED':
@@ -28,6 +29,8 @@ export function statusSlug(status: AgentStatus): string {
         case 'CANCELLED':
         case 'QUEUED':
             return 'completed'
+        default:
+            return 'completed'
     }
 }
 
@@ -37,7 +40,7 @@ export function statusSlug(status: AgentStatus): string {
  * they share the prefix `tg-status-` so they don't collide with
  * the host's `.status-*` Tailwind utilities.
  */
-export function statusPillClass(status: AgentStatus): string {
+export function statusPillClass(status: AgentStatus | string | null | undefined): string {
     return `tg-status-${statusSlug(status)}`
 }
 
@@ -45,8 +48,15 @@ export function statusPillClass(status: AgentStatus): string {
  * Human-readable label for the panel sub-header. Mirrors the
  * `STATUS_LABEL` map in Prototype E so the prototype and the
  * production plugin show the same text.
+ *
+ * The `default` branch catches statuses the wire carries but the
+ * TypeScript union doesn't (and unknown values like `null` /
+ * `undefined` from a wire bug). Returning the raw value (or a
+ * placeholder for nullish) keeps the canvas renderable instead of
+ * crashing on every node.
  */
-export function statusLabel(status: AgentStatus): string {
+export function statusLabel(status: AgentStatus | string | null | undefined): string {
+    if (status === null || status === undefined) return 'idle'
     switch (status) {
         case 'RUNNING':
             return 'running'
@@ -70,14 +80,26 @@ export function statusLabel(status: AgentStatus): string {
             return 'cancelled'
         case 'QUEUED':
             return 'queued'
+        default:
+            /* Unknown status — display the raw value so the operator
+             * sees what the wire actually carries. The status slug
+             * falls back to 'completed' (the neutral bucket) below. */
+            return typeof status === 'string' && status.length > 0 ? status : 'idle'
     }
 }
 
 /**
  * Background colour for the panel's avatar / pill dots. Mirrors the
  * `STATUS_PILL_BG` map in Prototype E.
+ *
+ * `ABORTED` uses fuchsia-500 instead of the original purple (#a855f7):
+ * the host's app accent is violet, so two near-blue swatches on the
+ * same canvas read as duplicates and the operator can't tell at a
+ * glance whether an aborted node belongs to the same colour family
+ * as the brand. Fuchsia lives far enough down the spectrum to remain
+ * distinct under both light/dark and never collides with our accent.
  */
-export function statusColor(status: AgentStatus): string {
+export function statusColor(status: AgentStatus | string | null | undefined): string {
     switch (status) {
         case 'RUNNING':
             return '#10b981'
@@ -92,11 +114,13 @@ export function statusColor(status: AgentStatus): string {
         case 'FAILED':
             return '#ef4444'
         case 'ABORTED':
-            return '#a855f7'
+            return '#d946ef'
         case 'COMPLETED':
         case 'CANCELLED':
             return '#94a3b8'
         case 'QUEUED':
             return '#cbd5e1'
+        default:
+            return '#94a3b8'
     }
 }
