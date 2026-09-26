@@ -33,12 +33,15 @@ export interface GraphNode {
      * (bg_color, fg_color) hex pair via `Spora\Services\AgentPictures\
      * Palette`. The canvas paints each node's tile with this colour
      * so the operator can tell agents apart at a glance — the same
-     * visual signal the dashboard avatar carries. Defaults to Slate
-     * when the host returns no row (mirrors
-     * `ProfilePictureService::defaultWireShape()`), so the canvas
-     * never renders a colourless node.
+     * visual signal the dashboard avatar carries. `palette_key`
+     * drives the Mermaid `classDef` so the styling lives in
+     * CSS (Mermaid 10's HTML-label sanitiser strips `;` from
+     * inline styles); `bg_color` / `fg_color` are also shipped for
+     * consumers that don't need the class machinery (e.g. the
+     * detail panel's avatar preview).
      */
     profile_picture: {
+        palette_key: string
         bg_color: string
         fg_color: string
     }

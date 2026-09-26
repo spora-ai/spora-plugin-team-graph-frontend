@@ -1,35 +1,39 @@
 /**
  * Build the Mermaid `flowchart TB` source for a `GraphPayload`.
  *
- * Mirrors `spora-workspace/prototypes/prototype-e-mermaid.html →
- * buildMermaidSyntax(fix)` (Prototype E) so the rendered diagram
- * is identical between the prototype and the production plugin.
- *
  * Output structure:
  *   flowchart TB
- *     n11["<div class='tg-node' style='background:…;color:…'>…</div>"]
+ *     classDef tg-palette-indigo fill:#4338CA,color:#EEF2FF,stroke:#4338CA
+ *     classDef tg-palette-teal    fill:#0F766E,color:#F0FDFA,stroke:#0F766E
+ *     …
+ *     n11["<div class='tg-node'>…</div>"]:::tg-palette-indigo
  *     n11 --> n4
  *
- * The agent's icon color (resolved server-side via
- * `Spora\Services\AgentPictures\Palette`) is applied via inline
- * `style="background:…;color:…"` on the label container, so each
- * node picks up its own `(bg_color, fg_color)` pair without relying
- * on Mermaid's classDef system. The rect Mermaid draws behind the
- * label is transparent (`fill:transparent`) so the HTML label owns
- * all the visible colour; the rect is still there for layout +
- * hit-testing.
+ * The agent's icon colour comes from the wire's
+ * `profile_picture.palette_key` (resolved server-side from
+ * `agent_pictures.palette_key` via
+ * `Spora\Services\AgentPictures\Palette`). We emit one Mermaid
+ * `classDef` per palette actually present in the payload — Mermaid
+ * applies the class to `<g class="node tg-palette-X">`, and the
+ * stylesheet (`style.css`) uses that class to paint the rect fill +
+ * the inner `.tg-node` background / text colour. This keeps the
+ * colour in CSS rather than the inline `style=` attribute, because
+ * Mermaid's HTML-label sanitiser strips `;` characters from inline
+ * styles (a known Mermaid 10 parser bug), which concatenates
+ * adjacent declarations into invalid CSS.
+ *
+ * The HTML label carries structured content (name / role / status
+ * pill / stats) but no colour — every visible colour is driven by
+ * the `tg-palette-X` class on the wrapping `<g>`.
  *
  * Status no longer drives the rect colour — the operator gets a
  * status pill inside the label (matching the dashboard's
  * `DashboardAgentCard.vue` pattern) so agent identity wins and
  * status remains glance-readable.
- *
- * HTML inside the `["…"]` label uses single quotes for attributes
- * — double quotes would terminate Mermaid's label string and
- * produce a parse error.
  */
-import type { GraphNode, GraphPayload } from '../types'
+import type { GraphPayload } from '../types'
 import { statusPillClass, statusLabel } from './nodeStatus'
+import { paletteByKey, PALETTES } from './palette'
 
 /**
  * Escape a string for safe inclusion in an HTML attribute value
@@ -40,62 +44,46 @@ import { statusPillClass, statusLabel } from './nodeStatus'
  *
  * Defensive: nullish / non-string input collapses to an empty string
  * so the canvas still renders when a node field is unexpectedly
- * undefined (the Mermaid renderer is strict about every `nX["…"]`
- * label being a well-formed HTML string).
+ * undefined.
  */
 function escapeAttr(s: unknown): string {
     if (typeof s !== 'string') return ''
     return s.replace(/'/g, '&#39;')
 }
 
-/**
- * Sanitize a hex color string before injecting it into the
- * Mermaid-sourced inline `style=`. Defense against a malformed wire
- * payload (e.g. someone hand-patching an agent_pictures row with
- * a CSS string) shipping a `background:url(javascript:…)`-style
- * injection into the canvas.
- *
- * Accepts `#RGB`, `#RRGGBB`, or `#RRGGBBAA`; everything else falls
- * back to slate-500 so the canvas always has a usable colour.
- */
-function safeHex(color: string | null | undefined, fallback: string): string {
-    if (typeof color !== 'string') return fallback
-    return /^#[0-9A-Fa-f]{3}([0-9A-Fa-f]{3})?([0-9A-Fa-f]{2})?$/.test(color)
-        ? color
-        : fallback
-}
-
 export function buildMermaidSource(graph: GraphPayload): string {
     const lines: string[] = ['flowchart TB']
 
     /*
-     * Default invisible-rect classDef. Mermaid still draws a rect
-     * for layout + hit-testing, but it carries no fill/stroke of
-     * its own — the agent's icon color is applied via inline style
-     * on the HTML label below. Every node references this same
-     * classDef so Mermaid doesn't pick up its default theme colour.
+     * Emit one classDef per palette_key actually used in this
+     * payload — a 20-agent principal that uses 3 palettes emits 3
+     * classDefs (vs. always emitting 10). The classDef's stroke is
+     * identical to fill so the rect has no visible border against
+     * the agent-coloured tile; the stylesheet can re-paint the
+     * stroke on hover / selection without a Mermaid re-render.
      */
-    lines.push('  classDef tg-node-rect fill:transparent,stroke:transparent,color:inherit')
+    const usedKeys = new Set<string>()
+    for (const node of graph.nodes) {
+        const key = node.profile_picture?.palette_key ?? 'slate'
+        usedKeys.add(key)
+    }
+    for (const key of usedKeys) {
+        const p = paletteByKey(key)
+        lines.push(`classDef tg-palette-${p.className} fill:${p.bg},color:${p.fg},stroke:${p.bg}`)
+    }
 
     for (const node of graph.nodes) {
         const name = escapeAttr(node.name)
         const role = escapeAttr(node.role ?? '')
         const pillClass = statusPillClass(node.status)
         const pillText = escapeAttr(statusLabel(node.status))
+        const paletteKey = paletteByKey(node.profile_picture?.palette_key).className
         const label = renderNodeLabel(node, name, role, pillClass, pillText)
-        lines.push(`  n${node.id}["${label}"]:::tg-node-rect`)
+        lines.push(`  n${node.id}["${label}"]:::tg-palette-${paletteKey}`)
     }
 
     for (const edge of graph.edges) {
         const isUninvoked = edge.count_24h === 0 && edge.last_invoked_at === null
-        /*
-         * Configured-but-never-fired edges render as Mermaid's
-         * dashed arrow syntax (`-.->`); the runtime CSS keeps them
-         * muted so the canvas distinguishes "live connection" from
-         * "configured, never used". Once the operator actually fires
-         * the edge the 24 h count will tick above 0 and the next
-         * render promotes it to a solid line.
-         */
         const arrow = isUninvoked ? '-.->' : '-->'
         lines.push(`  n${edge.source} ${arrow} n${edge.target}`)
     }
@@ -104,28 +92,22 @@ export function buildMermaidSource(graph: GraphPayload): string {
 }
 
 function renderNodeLabel(
-    node: GraphNode,
+    node: { id: number; active_chats: number; recent_chats_24h: number },
     name: string,
     role: string,
     pillClass: string,
     pillText: string,
 ): string {
-    const bg = safeHex(node.profile_picture?.bg_color, '#475569')
-    const fg = safeHex(node.profile_picture?.fg_color, '#F8FAFC')
     /*
-     * The dashboard Avatar applies a `linear-gradient(135deg, bg 60%,
-     * white → bg)` so the tile reads as a soft rounded gradient
-     * rather than a flat saturated block. Mermaid's HTML label can't
-     * accept a CSS gradient via the inline-style attribute alone —
-     * the parser drops `linear-gradient(` — so we apply the
-     * gradient via a CSS variable on the outer div and let the
-     * stylesheet do the rest. The CSS rule lives in style.css under
-     * `.tg-canvas-content svg foreignObject .tg-node`.
+     * The inner `.tg-node` div carries no colour inline — every
+     * visible colour is driven by the `tg-palette-X` class on the
+     * wrapping `<g>`, via CSS rules in style.css. This sidesteps
+     * Mermaid's known inline-style sanitiser bug (it strips `;`
+     * from `style=` values, which concatenates adjacent
+     * declarations into invalid CSS).
      */
-    const styleAttr =
-        `background-color:${bg};color:${fg};--tg-node-bg:${bg};--tg-node-fg:${fg}`
     return (
-        `<div class='tg-node' style='${styleAttr}'>` +
+        `<div class='tg-node'>` +
         `<div class='tg-node-name'>${name}</div>` +
         `<div class='tg-node-role'>#${node.id} · ${role}</div>` +
         `<span class='tg-status-pill ${pillClass}'><span class='dot'></span>${pillText}</span>` +
@@ -135,3 +117,6 @@ function renderNodeLabel(
         `</div>`
     )
 }
+
+/* Re-export the palette table for tests + style.css consumers. */
+export { PALETTES, paletteByKey }

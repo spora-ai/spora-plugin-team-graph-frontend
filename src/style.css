@@ -60,10 +60,13 @@ body,
  * first render; with `useMaxWidth:false` the SVG renders at its
  * natural size, so these sizes land directly on screen.
  *
- * The agent's icon colour (`bg_color` / `fg_color`) is applied
- * inline by `lib/mermaidSource.ts` on the wrapper — we only have
- * to set the inner text rules here, all of which inherit from
- * the wrapper's `color` property (the agent's `fg_color`).
+ * The agent's icon colour is driven by the `tg-palette-<key>` class
+ * that Mermaid applies to the wrapping `<g class="node">` via the
+ * classDef system (see `lib/mermaidSource.ts`). We can't use inline
+ * `style=` on the inner div because Mermaid 10's HTML-label
+ * sanitiser strips `;` characters, concatenating adjacent
+ * declarations into invalid CSS — every colour lives in the
+ * stylesheet below, keyed off `tg-palette-*`.
  */
 .tg-node {
     padding: 14px 16px;
@@ -72,11 +75,45 @@ body,
     line-height: 1.35;
     font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     border-radius: 12px;
+    background-color: var(--palette-bg, #475569);
+    color: var(--palette-fg, #F8FAFC);
 }
 .tg-node-name  { font-size: 16px; font-weight: 600; margin: 0; letter-spacing: -0.01em; color: inherit; }
 .tg-node-role  { font-size: 13px; margin: 4px 0 10px; opacity: 0.85; }
 .tg-node-stats { font-size: 13px; margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(255, 255, 255, 0.18); display: flex; justify-content: space-between; gap: 12px; opacity: 0.9; }
 .tg-node-stats strong { color: inherit; font-weight: 600; opacity: 1; }
+
+/**
+ * Per-palette colour injection. Mermaid applies `tg-palette-<key>`
+ * to the `<g class="node">`; we expose the bg/fg as CSS variables
+ * so the inner `.tg-node` reads them via `var(--palette-*)`. The
+ * hex codes mirror `Spora\Services\AgentPictures\Palette` — keep
+ * in sync if a palette is renamed or its hex shifts upstream.
+ *
+ * `!important` is needed to win against Mermaid's inline
+ * `style="fill:…"` on the rect.
+ */
+.tg-canvas-content svg g.tg-palette-slate   rect { fill: #475569 !important; stroke: #475569 !important; }
+.tg-canvas-content svg g.tg-palette-red     rect { fill: #DC2626 !important; stroke: #DC2626 !important; }
+.tg-canvas-content svg g.tg-palette-orange  rect { fill: #EA580C !important; stroke: #EA580C !important; }
+.tg-canvas-content svg g.tg-palette-amber   rect { fill: #D97706 !important; stroke: #D97706 !important; }
+.tg-canvas-content svg g.tg-palette-green   rect { fill: #15803D !important; stroke: #15803D !important; }
+.tg-canvas-content svg g.tg-palette-teal    rect { fill: #0F766E !important; stroke: #0F766E !important; }
+.tg-canvas-content svg g.tg-palette-blue    rect { fill: #1D4ED8 !important; stroke: #1D4ED8 !important; }
+.tg-canvas-content svg g.tg-palette-indigo  rect { fill: #4338CA !important; stroke: #4338CA !important; }
+.tg-canvas-content svg g.tg-palette-violet  rect { fill: #6D28D9 !important; stroke: #6D28D9 !important; }
+.tg-canvas-content svg g.tg-palette-pink    rect { fill: #BE185D !important; stroke: #BE185D !important; }
+
+.tg-canvas-content svg g.tg-palette-slate   { --palette-bg: #475569; --palette-fg: #F8FAFC; }
+.tg-canvas-content svg g.tg-palette-red     { --palette-bg: #DC2626; --palette-fg: #FEF2F2; }
+.tg-canvas-content svg g.tg-palette-orange  { --palette-bg: #EA580C; --palette-fg: #FFF7ED; }
+.tg-canvas-content svg g.tg-palette-amber   { --palette-bg: #D97706; --palette-fg: #FFFBEB; }
+.tg-canvas-content svg g.tg-palette-green   { --palette-bg: #15803D; --palette-fg: #F0FDF4; }
+.tg-canvas-content svg g.tg-palette-teal    { --palette-bg: #0F766E; --palette-fg: #F0FDFA; }
+.tg-canvas-content svg g.tg-palette-blue    { --palette-bg: #1D4ED8; --palette-fg: #EFF6FF; }
+.tg-canvas-content svg g.tg-palette-indigo  { --palette-bg: #4338CA; --palette-fg: #EEF2FF; }
+.tg-canvas-content svg g.tg-palette-violet  { --palette-bg: #6D28D9; --palette-fg: #F5F3FF; }
+.tg-canvas-content svg g.tg-palette-pink    { --palette-bg: #BE185D; --palette-fg: #FDF2F8; }
 
 /**
  * Status pills — same shape as the other plugin prototypes. The
