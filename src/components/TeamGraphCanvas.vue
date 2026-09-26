@@ -42,7 +42,16 @@ watch(
 )
 
 const selection = useSelectionStore()
-const { reRender } = useMermaidRender({ hostRef, graph: graphRef })
+const { reRender } = useMermaidRender({
+    hostRef,
+    graph: graphRef,
+    /* Two RAFs: the first lets the freshly committed SVG attach to
+     * the DOM, the second lets layout propagate so wrap.clientWidth
+     * and the SVG's width/height attributes are valid by the time
+     * fit() reads them. Without this double-rAF the first fit is
+     * sometimes called before the browser has sized the new node. */
+    onRender: () => requestAnimationFrame(() => requestAnimationFrame(() => fit())),
+})
 const { fit, zoomIn, zoomOut } = usePanZoom({
     wrapRef: canvasWrap,
     contentRef: canvasContent,

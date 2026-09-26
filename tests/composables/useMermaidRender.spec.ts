@@ -132,4 +132,24 @@ describe('useMermaidRender', () => {
             expect(error.value).toContain('mermaid parse error')
         })
     })
+
+    it('fires onRender after every successful render (not on error)', async () => {
+        renderFn.mockRejectedValueOnce(new Error('boom'))
+        renderFn.mockResolvedValueOnce({ svg: makeSvgFixture() })
+        const host = document.createElement('div')
+        document.body.appendChild(host)
+        const hostRef = ref<HTMLElement | null>(host)
+        const graph = ref<GraphPayload | null>(tinyStartup)
+        const onRender = vi.fn()
+        useMermaidRender({ hostRef, graph, onRender })
+
+        // First render fails → onRender must NOT fire.
+        await vi.waitFor(() => expect(renderFn).toHaveBeenCalledTimes(1))
+        expect(onRender).not.toHaveBeenCalled()
+
+        // Trigger a second render with a successful response.
+        graph.value = { ...tinyStartup, principal: { ...tinyStartup.principal, name: 'Marketing' } }
+        await vi.waitFor(() => expect(renderFn).toHaveBeenCalledTimes(2))
+        expect(onRender).toHaveBeenCalledTimes(1)
+    })
 })

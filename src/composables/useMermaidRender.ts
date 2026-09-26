@@ -36,6 +36,14 @@ import type { GraphEdge, GraphPayload } from '../types'
 export interface UseMermaidRenderOptions {
     hostRef: Ref<HTMLElement | null>
     graph: Ref<GraphPayload | null>
+    /**
+     * Called after every successful Mermaid render (post-processing
+     * included). The canvas wires this to its pan/zoom `fit()` so the
+     * diagram centres inside the viewport the moment it lands in the
+     * DOM, instead of relying on a prop-driven watcher that can race
+     * the async Mermaid render and silently no-op.
+     */
+    onRender?: () => void
 }
 
 export interface UseMermaidRenderReturn {
@@ -99,7 +107,7 @@ function ensureMermaidInit(): void {
     mermaidInitialised = true
 }
 
-export function useMermaidRender({ hostRef, graph }: UseMermaidRenderOptions): UseMermaidRenderReturn {
+export function useMermaidRender({ hostRef, graph, onRender }: UseMermaidRenderOptions): UseMermaidRenderReturn {
     const renderId = ref(0)
     const error = ref<string | null>(null)
     const selection = useSelectionStore()
@@ -188,6 +196,12 @@ export function useMermaidRender({ hostRef, graph }: UseMermaidRenderOptions): U
 
             selection.setEdges(payload.edges)
             applySelectionStyling(svgEl, payload.edges)
+            /* Notify the canvas so it can fit the viewport against the
+             * freshly committed SVG. Doing it here — instead of from
+             * a prop watcher that races the async render — means fit()
+             * runs the very first time a diagram lands, not just on
+             * subsequent principal/refresh switches. */
+            onRender?.()
             return svgEl
         } catch (e) {
             error.value = e instanceof Error ? e.message : String(e)
