@@ -59,18 +59,24 @@ body,
  * path inside a `<foreignObject>`. Sized so text stays readable on
  * first render; with `useMaxWidth:false` the SVG renders at its
  * natural size, so these sizes land directly on screen.
+ *
+ * The agent's icon colour (`bg_color` / `fg_color`) is applied
+ * inline by `lib/mermaidSource.ts` on the wrapper — we only have
+ * to set the inner text rules here, all of which inherit from
+ * the wrapper's `color` property (the agent's `fg_color`).
  */
 .tg-node {
     padding: 14px 16px;
     min-width: 240px;
     text-align: left;
     line-height: 1.35;
-    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    border-radius: 12px;
 }
-.tg-node-name  { font-size: 16px; font-weight: 600; color: #0f172a; margin: 0; letter-spacing: -0.01em; }
-.tg-node-role  { font-size: 13px; color: #64748b; margin: 4px 0 10px; }
-.tg-node-stats { font-size: 13px; color: #475569; margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(15, 23, 41, 0.08); display: flex; justify-content: space-between; gap: 12px; }
-.tg-node-stats strong { color: #0f172a; font-weight: 600; }
+.tg-node-name  { font-size: 16px; font-weight: 600; margin: 0; letter-spacing: -0.01em; color: inherit; }
+.tg-node-role  { font-size: 13px; margin: 4px 0 10px; opacity: 0.85; }
+.tg-node-stats { font-size: 13px; margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(255, 255, 255, 0.18); display: flex; justify-content: space-between; gap: 12px; opacity: 0.9; }
+.tg-node-stats strong { color: inherit; font-weight: 600; opacity: 1; }
 
 /**
  * Status pills — same shape as the other plugin prototypes. The
@@ -78,20 +84,20 @@ body,
  * `status-failed` / `status-completed` / `status-aborted` classes
  * are applied inside the `m-node` HTML block by
  * `lib/mermaidSource.ts`.
+ *
+ * The pill sits on top of an agent-coloured tile (the agent's
+ * `bg_color`), so we render it as a translucent-white bubble with
+ * a saturated status dot. This keeps the pill readable on every
+ * palette (slate, red, orange, green, teal, blue, indigo, violet,
+ * pink) without having to pick per-palette contrast colours.
  */
-.tg-status-pill { display: inline-flex; align-items: center; gap: 4px; font-size: 10px; font-weight: 600; padding: 2px 7px; border-radius: 999px; letter-spacing: 0.02em; white-space: nowrap; }
+.tg-status-pill { display: inline-flex; align-items: center; gap: 4px; font-size: 10px; font-weight: 600; padding: 2px 7px; border-radius: 999px; letter-spacing: 0.02em; white-space: nowrap; background: rgba(255, 255, 255, 0.92); color: #0f172a; }
 .tg-status-pill .dot { width: 6px; height: 6px; border-radius: 999px; flex-shrink: 0; }
-.tg-status-running  { background: rgba(16, 185, 129, 0.12); color: #047857; }
 .tg-status-running  .dot { background: #10b981; }
-.tg-status-pending  { background: rgba(99, 102, 241, 0.12); color: #4338ca; }
 .tg-status-pending  .dot { background: #6366f1; }
-.tg-status-awaiting { background: rgba(245, 158, 11, 0.12); color: #b45309; }
 .tg-status-awaiting .dot { background: #f59e0b; }
-.tg-status-failed   { background: rgba(239, 68, 68, 0.12); color: #b91c1c; }
 .tg-status-failed   .dot { background: #ef4444; }
-.tg-status-completed { background: rgba(148, 163, 184, 0.18); color: #475569; }
 .tg-status-completed .dot { background: #94a3b8; }
-.tg-status-aborted   { background: rgba(217, 70, 239, 0.12); color: #a21caf; }
 .tg-status-aborted   .dot { background: #d946ef; }
 
 /**

@@ -63,9 +63,9 @@ function buildPayload(principalId: number, principalName: string) {
     return {
         principal: { id: principalId, type: 'group', name: principalName, is_current_user_owned: principalId === 7 },
         nodes: [
-            { id: 11, name: 'Lead', role: 'Lead', picture_url: null, status: 'RUNNING', active_chats: 1, recent_chats_24h: 4 },
-            { id: 12, name: 'Helper', role: 'Helper', picture_url: null, status: 'COMPLETED', active_chats: 0, recent_chats_24h: 2 },
-            { id: 13, name: 'Writer', role: 'Writer', picture_url: null, status: 'COMPLETED', active_chats: 0, recent_chats_24h: 0 },
+            { id: 11, name: 'Lead', role: 'Lead', picture_url: null, status: 'RUNNING', active_chats: 1, recent_chats_24h: 4, profile_picture: { bg_color: '#4338CA', fg_color: '#EEF2FF' } },
+            { id: 12, name: 'Helper', role: 'Helper', picture_url: null, status: 'COMPLETED', active_chats: 0, recent_chats_24h: 2, profile_picture: { bg_color: '#D97706', fg_color: '#FFFBEB' } },
+            { id: 13, name: 'Writer', role: 'Writer', picture_url: null, status: 'COMPLETED', active_chats: 0, recent_chats_24h: 0, profile_picture: { bg_color: '#0D9488', fg_color: '#F0FDFA' } },
         ],
         edges: [
             // Used in the last 24h — solid line + "Nx / 24 h" label.

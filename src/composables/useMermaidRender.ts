@@ -193,10 +193,18 @@ export function useMermaidRender({ hostRef, graph, onRender }: UseMermaidRenderO
             }
 
             // Rounded corners + soft shadow on every node shape.
+            // The rect itself is transparent — `mermaidSource.ts`
+            // owns the colour via inline style on the HTML label
+            // wrapper, so we let it pass through. The border uses
+            // the agent's fg_color at low opacity for a soft frame
+            // that reads on both light + dark canvas backgrounds.
             svgEl.querySelectorAll('g.node rect, g.node polygon').forEach((shape) => {
                 shape.setAttribute('rx', '12')
                 shape.setAttribute('ry', '12')
                 ;(shape as SVGElement).style.filter = 'drop-shadow(0 2px 6px rgba(15, 23, 41, 0.12))'
+                ;(shape as SVGElement).style.fill = 'transparent'
+                ;(shape as SVGElement).style.stroke = 'rgba(15, 23, 41, 0.18)'
+                ;(shape as SVGElement).style.strokeWidth = '1px'
             })
 
             // Per-node click handler.

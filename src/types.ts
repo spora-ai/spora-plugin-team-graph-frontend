@@ -28,11 +28,25 @@ export interface GraphNode {
     name: string
     role: string | null
     picture_url: string | null
+    /**
+     * The agent's profile-picture palette, resolved server-side to a
+     * (bg_color, fg_color) hex pair via `Spora\Services\AgentPictures\
+     * Palette`. The canvas paints each node's tile with this colour
+     * so the operator can tell agents apart at a glance — the same
+     * visual signal the dashboard avatar carries. Defaults to Slate
+     * when the host returns no row (mirrors
+     * `ProfilePictureService::defaultWireShape()`), so the canvas
+     * never renders a colourless node.
+     */
+    profile_picture: {
+        bg_color: string
+        fg_color: string
+    }
     /** Node status may be null when no in-flight task exists for the
      *  agent — the frontend treats that as `COMPLETED` ("idle") via
      *  the lib/nodeStatus defensive defaults. The backend COALESCE'd
      * the value to COMPLETED in v0.1.2 — the runtime tolerance is
-     * belt-and-braces for older envelopes and any future schema drift. */
+     *  belt-and-braces for older envelopes and any future schema drift. */
     status: AgentStatus | string | null
     active_chats: number
     recent_chats_24h: number
