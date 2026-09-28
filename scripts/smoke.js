@@ -11,7 +11,11 @@
  *  - the bundle defines `mount(a, b)` and `unmount(a)`,
  *  - the stylesheet scopes every utility beneath `#spora-plugin-team-graph`
  *    (so plugin classes can't escape the slot),
- *  - the stylesheet omits Tailwind preflight (the host owns the reset).
+ *  - the stylesheet omits Tailwind preflight (the host owns the reset),
+ *  - the stylesheet still carries `@spora-ai/components`' rules
+ *    unrenamed inside `@layer components` (the Tailwind v3
+ *    `scopeVendorLayers` workaround must stay deleted),
+ *  - the stylesheet still carries the plugin's own `.tg-*` rules.
  */
 import { readFile } from 'node:fs/promises'
 import { resolve, dirname } from 'node:path'
@@ -62,9 +66,50 @@ if (unscopedTeamGraphUtilityRe.test(css)) {
     failures.push('stylesheet contains an unscoped team-graph utility (missing `important:` scope)')
 }
 
-const preflightRe = /box-sizing\s*:\s*border-box;\s*border-width\s*:\s*0;\s*border-style\s*:\s*solid/
-if (preflightRe.test(css)) {
-    failures.push('stylesheet contains the Tailwind preflight reset (host owns this)')
+// Preflight arrives in two different shapes depending on the Tailwind
+// major: v3 reset `*, ::before, ::after` with `border-width: 0; border-style: solid`,
+// v4 reset `*, ::after, ::before, ::backdrop, ::file-selector-button` with
+// `border: 0 solid`. Both are listed so a future major bump can't slip a
+// reset past this guard. The remaining probes are the distinctive markers
+// of v4's preflight block.
+const preflightRes = [
+    /box-sizing\s*:\s*border-box;\s*border-width\s*:\s*0;\s*border-style\s*:\s*solid/,
+    /-webkit-text-size-adjust\s*:\s*100%/,
+    /-webkit-tap-highlight-color\s*:\s*transparent/,
+    /::file-selector-button\s*\{/,
+]
+for (const re of preflightRes) {
+    if (re.test(css)) {
+        failures.push(`stylesheet contains the Tailwind preflight reset (host owns this): ${re}`)
+    }
+}
+
+/**
+ * `@spora-ai/components` ships every rule inside `@layer components`.
+ * Under Tailwind v3 the PostCSS `normalizeTailwindDirectives` guard threw
+ * on that bare at-rule, and the fix was a `scopeVendorLayers` pre-plugin
+ * renaming the layer to `vendor-components`. v4 has no such guard, so the
+ * workaround is gone and the layer name must be back to `components` —
+ * anything else means someone re-introduced the rename.
+ */
+if (/vendor-(components|utilities|base)/.test(css)) {
+    failures.push('stylesheet contains a `vendor-*` layer rename (the Tailwind v3 scopeVendorLayers workaround is gone)')
+}
+for (const sel of ['.avatar--sm', '.avatar--initials', '.spora-icon']) {
+    if (!css.includes(sel)) {
+        failures.push(`stylesheet is missing @spora-ai/components' ${sel} rule`)
+    }
+}
+if (!/@layer\s+components\s*\{/.test(css)) {
+    failures.push("stylesheet has no `@layer components` block (the package's layer name was rewritten)")
+}
+
+// The plugin's own Mermaid/graph chrome. If these vanish the canvas
+// renders unstyled, which is invisible in a bundle-size diff.
+for (const sel of ['.tg-node-accent', '.tg-status-running']) {
+    if (!css.includes(sel)) {
+        failures.push(`stylesheet is missing the plugin's own ${sel} rule`)
+    }
 }
 
 if (failures.length > 0) {

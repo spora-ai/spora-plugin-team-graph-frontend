@@ -1,5 +1,6 @@
 import { defineConfig } from 'vitest/config'
 import vue from '@vitejs/plugin-vue'
+import tailwindcss from '@tailwindcss/vite'
 
 /**
  * Vite config for the Team Graph IIFE bundle.
@@ -8,7 +9,17 @@ import vue from '@vitejs/plugin-vue'
  * for the shape (lib.formats/name/fileName/external/output.globals/
  * assetFileNames, server.port, test block); only the slug, lib.name
  * (must match `apps/registry.ts → globalFor('team-graph')` →
- * `SporaAppTeamGraph`) and the dev port differ.
+ * `SporaAppTeamGraph`), the dev port and the `tailwindcss()` plugin
+ * differ.
+ *
+ * Tailwind runs as a **Vite** plugin, not through PostCSS — v4 has no
+ * `normalizeTailwindDirectives` and therefore none of the
+ * `@layer components`-without-`@tailwind components` breakage that
+ * forced the old `scopeVendorLayers` pre-plugin in `postcss.config.js`.
+ * That file is gone; there is no PostCSS in the pipeline. All Tailwind
+ * configuration lives in `src/style.css` (with `important` shimmed
+ * through `tailwind.config.ts` via `@config`); see that file for the
+ * no-preflight and layer-ordering rationale.
  *
  * Mermaid 10 is bundled inside the IIFE — it's ~600 KB gz and only
  * loaded when the operator opens `/apps/team-graph`. CI size budget
@@ -18,7 +29,7 @@ import vue from '@vitejs/plugin-vue'
  * `@spora-ai/components`) is bundled.
  */
 export default defineConfig({
-    plugins: [vue()],
+    plugins: [vue(), tailwindcss()],
     // Must match the host's SPORA_PLUGIN_DEV_PORTS=team-graph:5180 for dev-proxy.
     base: '/plugins/team-graph/',
     build: {

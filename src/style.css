@@ -1,13 +1,156 @@
-@tailwind components;
-@tailwind utilities;
+/**
+ * Tailwind v4 entry point for the Team Graph plugin.
+ *
+ * Mirrors `spora-frontend/src/style.css` in shape (CSS-first config,
+ * no `content` glob, no `preflight` key) but deliberately deviates in
+ * two places, both because this bundle is injected into a host
+ * document rather than owning one:
+ *
+ * 1. **No preflight.** `@import "tailwindcss"` would pull in Tailwind's
+ *    CSS reset. The host SPA already applies its own reset, and
+ *    preflight's unlayered `*, ::before, ::after { margin: 0; padding: 0;
+ *    border: 0 solid }` would cascade straight into the host document
+ *    and wreck every surface outside the plugin slot. So we import only
+ *    the two halves we need — the theme variables and the utility
+ *    generator — and never `tailwindcss/preflight.css`. This is the
+ *    v4 equivalent of the v3 `@tailwind components; @tailwind
+ *    utilities;` pair, and `scripts/smoke.js` asserts the reset never
+ *    reaches `frontend/style.css`.
+ *
+ * 2. **Utilities are imported UNLAYERED (no `layer(utilities)`).**
+ *    `@spora-ai/components` ships its rules inside `@layer components`
+ *    and documents that consumer utilities should be able to override
+ *    them. Unlayered rules always beat layered ones, so leaving the
+ *    utilities unlayered keeps that contract with zero coupling to
+ *    Tailwind's layer ordering — and it reproduces v3's cascade exactly
+ *    (v3 also emitted its utilities unlayered, which is why the old
+ *    `vendor-components` rename still ranked below them). The
+ *    `layer(theme)` on the theme import is harmless and kept: theme
+ *    variables are `:root` custom properties with no competing rules.
+ *
+ * The plugin's own `.tg-*` rules below stay unlayered too, so the
+ * cascade is unchanged from v3: package `@layer components` loses to
+ * everything here, and `#spora-plugin-team-graph .<utility>`
+ * (1,1,0) outranks a bare `.tg-*` class (0,1,0) on the same element.
+ *
+ * Every generated utility is scoped under the plugin's mount slot by
+ * `tailwind.config.ts → important: '#spora-plugin-team-graph'`, wired
+ * in through the `@config` directive below (v4's supported way to keep
+ * a JS option that has no CSS equivalent).
+ */
+
+/**
+ * `important` is the one v3 option with no CSS-native v4 equivalent, so
+ * it stays in `tailwind.config.ts` and is pulled in here. Everything
+ * else this file configures lives in CSS.
+ */
+@config "../tailwind.config.ts";
+
+/**
+ * Content sources. v4 auto-detects, but auto-detection is *additive*
+ * and walks the whole git-tracked tree, which is wrong for a library
+ * build in two ways:
+ *
+ *  - It picks up prose. `.github/workflows/ci.yml` contains the
+ *    ordinary English words "contents" and "invisible", so the build
+ *    was emitting `.contents { display: contents }` and
+ *    `.invisible { visibility: hidden }` for a plugin that uses
+ *    neither. v3's explicit `content` glob never did this.
+ *  - `source(none)` — the flag that would switch auto-detection off
+ *    cleanly — is **incompatible** with the selector-scoped
+ *    `important` set in `tailwind.config.ts`. Verified on
+ *    tailwindcss 4.3.3: with `source(none)` the emitted rules silently
+ *    lose the `#spora-plugin-team-graph` prefix and ship as bare
+ *    `.flex { … }`, which would leak straight into the host SPA. So we
+ *    must keep auto-detection on and subtract from it instead.
+ *
+ * `@source not` below re-establishes the v3 `content` glob. The paths
+ * are relative to this file. Note `frontend/` is excluded: it holds the
+ * previous build's `main.js`/`style.css`, and scanning those would make
+ * the build feed on its own output.
+ *
+ * Pinning this matters at runtime: `useMermaidRender.ts` builds utility
+ * classes into an `innerHTML` string (`.p-4 .text-sm .text-red-500
+ * .mt-2 .text-xs .whitespace-pre-wrap`), so a missed glob would
+ * silently drop those rules.
+ */
+@source "../index.html";
+@source "../src/**/*.{vue,js,ts,jsx,tsx}";
+@source not "../.github";
+@source not "../coverage";
+@source not "../frontend";
+@source not "../scripts";
+@source not "../tests";
+
+/**
+ * The two halves of Tailwind this plugin needs, imported separately.
+ * This is deliberately NOT `@import "tailwindcss"`, which is
+ * `theme + preflight + utilities` — see note 1 at the top of this file
+ * for why preflight must stay out.
+ *
+ * The theme half carries the `layer(theme)` wrapper; the utility half
+ * is imported bare, for the layer-ordering reason in note 2 above.
+ */
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/utilities.css";
+
+/**
+ * `dark:` must follow the host's `<html class="dark">` toggle, not the
+ * OS `prefers-color-scheme` — v4's default is the media query, which
+ * would fire dark utilities even after the operator switched the host
+ * SPA to light. Mirrors `spora-frontend/src/style.css`.
+ */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/**
+ * Design tokens, ported from the v3 `tailwind.config.ts` `theme.extend`
+ * block. They resolve to the *host* SPA's CSS variables so the plugin
+ * renders in the same design language as the gallery, memories and
+ * typst surfaces without a per-plugin palette to keep in sync.
+ *
+ * v4 `@theme` merges with (rather than replaces) the default theme, so
+ * the stock palette from `tailwindcss/theme.css` — `--color-red-500`
+ * and friends — stays available. That matters: `useMermaidRender.ts`
+ * paints its error fallback with `text-red-500`.
+ *
+ * Note what is *not* here: `--color-card` / `--color-card-foreground`.
+ * v3's `theme.extend.colors` didn't define `card` either, so the
+ * `bg-card text-card-foreground surface-card` classes in the SFCs were
+ * already inert here and are styled by the host SPA. Adding the tokens
+ * would be a design change, not a build-tooling one.
+ */
+@theme {
+    --font-sans: 'Barlow', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', 'Noto Sans', Arial, sans-serif;
+    --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
+
+    --color-border: hsl(var(--border));
+    --color-input: hsl(var(--input));
+    --color-ring: hsl(var(--ring));
+    --color-background: hsl(var(--background));
+    --color-foreground: hsl(var(--foreground));
+    --color-primary: hsl(var(--primary));
+    --color-primary-foreground: hsl(var(--primary-foreground));
+    --color-secondary: hsl(var(--secondary));
+    --color-secondary-foreground: hsl(var(--secondary-foreground));
+    --color-destructive: hsl(var(--destructive));
+    --color-destructive-foreground: hsl(var(--destructive-foreground));
+    --color-muted: hsl(var(--muted));
+    --color-muted-foreground: hsl(var(--muted-foreground));
+    --color-accent: hsl(var(--accent));
+    --color-accent-foreground: hsl(var(--accent-foreground));
+
+    --radius-lg: var(--radius);
+    --radius-md: calc(var(--radius) - 2px);
+    --radius-sm: calc(var(--radius) - 4px);
+}
 
 /**
  * Global plugin chrome. Scoped to the plugin's mount slot — the
  * host SPA's styles are not affected because Tailwind's preflight
- * uses CSS resets that scope themselves to the cascade. The plugin
- * itself sits inside the `<div id="spora-plugin-team-graph">`
- * wrapper mounted by `App.vue`, so every `important: '#spora-plugin-team-graph'`
- * utility is auto-scoped.
+ * is not imported at all, and every generated utility is scoped by
+ * `important: '#spora-plugin-team-graph'`. The plugin itself sits
+ * inside the `<div id="spora-plugin-team-graph">` wrapper mounted by
+ * `App.vue`.
  *
  * The CSS below paints:
  *  - the Mermaid canvas (viewport + transformable content + zoom
