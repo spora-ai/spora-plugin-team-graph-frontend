@@ -12,7 +12,13 @@
  *   4. Owner / Principal (live /agents/{id} payload)
  *   5. Description (line-clamped, from /agents/{id})
  *   6. Outbound + Inbound edges, capped at MAX_EDGES_DISPLAYED = 4
- *      each, with a "+N more" overflow line
+ *      each, with a "+N more" overflow line. Each row leads with the
+ *      shared `@spora-ai/components` `AgentAvatar` (size `sm`), which
+ *      supersedes the hand-written `w-7 h-7 rounded-full` div + inline
+ *      `statusColor()` background this panel used to paint. The tile
+ *      itself is owned by the package, so the status swatch moved to a
+ *      `.tg-agent-tile` ring — see `lib/agentAvatar.ts` and the
+ *      `style.css` rule.
  *   7. Active chats, capped at MAX_CHATS_DISPLAYED = 4
  *   8. Recent chats, capped at MAX_CHATS_DISPLAYED = 4
  *
@@ -25,8 +31,9 @@
  * target and the panel re-renders for the new agent.
  */
 import { computed, ref, watch } from 'vue'
+import { AgentAvatar } from '@spora-ai/components/avatar'
 import { Icon } from '@spora-ai/components/icons'
-import { formatRelativeTime, useInitials } from '@spora-ai/components/composables'
+import { formatRelativeTime } from '@spora-ai/components/composables'
 import { useSelectionStore } from '../stores/selection'
 import {
     fetchActiveChats,
@@ -34,6 +41,7 @@ import {
     fetchRecentChats,
     type AgentMeta,
 } from '../api/agentDetail'
+import { avatarSubject, statusRingColor, type AgentAvatarSubject } from '../lib/agentAvatar'
 import { statusColor } from '../lib/nodeStatus'
 import { inDegree, outDegree } from '../lib/stats'
 import type { ChatSummary, GraphEdge, GraphNode, GraphPayload } from '../types'
@@ -58,19 +66,64 @@ const selectedNode = computed<GraphNode | null>(() => {
     return props.graph.nodes.find((n) => n.id === id) ?? null
 })
 
+/**
+ * Node lookup for the edge lists below. Built once per payload so
+ * each row resolves its `otherEnd` agent with a Map hit instead of
+ * three `Array.find` scans (name, status, initials) inside the
+ * render function.
+ */
+const nodesById = computed<Map<number, GraphNode>>(
+    () => new Map(props.graph.nodes.map((n) => [n.id, n])),
+)
+
+function otherEnd(edge: GraphEdge, direction: 'out' | 'in'): number {
+    return direction === 'out' ? edge.target : edge.source
+}
+
+/**
+ * One rendered edge row: the edge, the agent at its far end, and the
+ * two values the avatar needs from that agent.
+ *
+ * `agent` / `ring` are resolved once per payload rather than per
+ * render. `agent` in particular has to be a stable object reference —
+ * building it inline in the template (`avatarSubject(row.node)`)
+ * would hand `AgentAvatar` a fresh object on every parent render and
+ * defeat its prop diffing.
+ */
+interface EdgeRow {
+    edge: GraphEdge
+    node: GraphNode | undefined
+    agent: AgentAvatarSubject
+    ring: string
+}
+
+function toEdgeRow(edge: GraphEdge, direction: 'out' | 'in'): EdgeRow {
+    const node = nodesById.value.get(otherEnd(edge, direction))
+    return {
+        edge,
+        node,
+        agent: avatarSubject(node),
+        ring: statusRingColor(node?.status),
+    }
+}
+
 const outboundEdges = computed<GraphEdge[]>(() =>
     selectedNode.value === null ? [] : outDegree(props.graph.edges, selectedNode.value.id),
 )
 const inboundEdges = computed<GraphEdge[]>(() =>
     selectedNode.value === null ? [] : inDegree(props.graph.edges, selectedNode.value.id),
 )
-const visibleOutbound = computed<GraphEdge[]>(() => outboundEdges.value.slice(0, MAX_EDGES_DISPLAYED))
-const visibleInbound = computed<GraphEdge[]>(() => inboundEdges.value.slice(0, MAX_EDGES_DISPLAYED))
+const visibleOutboundRows = computed<EdgeRow[]>(() =>
+    outboundEdges.value.slice(0, MAX_EDGES_DISPLAYED).map((edge) => toEdgeRow(edge, 'out')),
+)
+const visibleInboundRows = computed<EdgeRow[]>(() =>
+    inboundEdges.value.slice(0, MAX_EDGES_DISPLAYED).map((edge) => toEdgeRow(edge, 'in')),
+)
 const hiddenOutboundCount = computed<number>(() =>
-    Math.max(0, outboundEdges.value.length - visibleOutbound.value.length),
+    Math.max(0, outboundEdges.value.length - visibleOutboundRows.value.length),
 )
 const hiddenInboundCount = computed<number>(() =>
-    Math.max(0, inboundEdges.value.length - visibleInbound.value.length),
+    Math.max(0, inboundEdges.value.length - visibleInboundRows.value.length),
 )
 
 /**
@@ -150,27 +203,6 @@ watch(
     },
     { immediate: true },
 )
-
-/**
- * Two-letter avatar initials per node id, memoised per graph commit.
- *
- * Delegates to the shared `useInitials` so the panel's tiles match
- * the dashboard's (a single-word name yields two letters there, not
- * one). The map is built once per payload instead of per render so
- * the composable isn't re-invoked on every unrelated re-render.
- */
-const nodeInitials = computed<Record<number, string>>(() => {
-    const entries = props.graph.nodes.map((n) => [n.id, useInitials(() => n.name).value] as const)
-    return Object.fromEntries(entries)
-})
-
-function initialsFor(nodeId: number): string {
-    return nodeInitials.value[nodeId] ?? '?'
-}
-
-function otherEnd(edge: GraphEdge, direction: 'out' | 'in'): number {
-    return direction === 'out' ? edge.target : edge.source
-}
 
 /**
  * Three states for a configured sub-agent edge:
@@ -315,24 +347,24 @@ const ownerLabel = computed<string>(() => {
                     <p v-if="outboundEdges.length === 0" class="text-xs text-muted-foreground">None.</p>
                     <div v-else class="space-y-1">
                         <button
-                            v-for="edge in visibleOutbound"
-                            :key="edge.id"
+                            v-for="row in visibleOutboundRows"
+                            :key="row.edge.id"
                             type="button"
                             class="tg-edge-row w-full text-left"
-                            @click="jumpTo(otherEnd(edge, 'out'))"
+                            @click="jumpTo(otherEnd(row.edge, 'out'))"
                         >
-                            <div
-                                class="w-7 h-7 rounded-full flex items-center justify-center text-white text-[10px] font-semibold shrink-0"
-                                :style="{ background: statusColor(props.graph.nodes.find((n) => n.id === otherEnd(edge, 'out'))?.status ?? 'COMPLETED') }"
+                            <span
+                                class="tg-agent-tile shrink-0"
+                                :style="{ '--tg-status-ring': row.ring }"
                             >
-                                {{ initialsFor(otherEnd(edge, 'out')) }}
-                            </div>
+                                <AgentAvatar size="sm" :agent="row.agent" />
+                            </span>
                             <div class="flex-1 min-w-0">
                                 <p class="text-sm font-medium truncate">
-                                    {{ props.graph.nodes.find((n) => n.id === otherEnd(edge, 'out'))?.name ?? 'Unknown' }}
+                                    {{ row.node?.name ?? 'Unknown' }}
                                 </p>
                                 <p class="text-[11px] text-muted-foreground">
-                                    → sub_agent · {{ edgeActivity(edge) }}
+                                    → sub_agent · {{ edgeActivity(row.edge) }}
                                 </p>
                             </div>
                             <Icon
@@ -358,24 +390,24 @@ const ownerLabel = computed<string>(() => {
                     <p v-if="inboundEdges.length === 0" class="text-xs text-muted-foreground">None.</p>
                     <div v-else class="space-y-1">
                         <button
-                            v-for="edge in visibleInbound"
-                            :key="edge.id"
+                            v-for="row in visibleInboundRows"
+                            :key="row.edge.id"
                             type="button"
                             class="tg-edge-row w-full text-left"
-                            @click="jumpTo(otherEnd(edge, 'in'))"
+                            @click="jumpTo(otherEnd(row.edge, 'in'))"
                         >
-                            <div
-                                class="w-7 h-7 rounded-full flex items-center justify-center text-white text-[10px] font-semibold shrink-0"
-                                :style="{ background: statusColor(props.graph.nodes.find((n) => n.id === otherEnd(edge, 'in'))?.status ?? 'COMPLETED') }"
+                            <span
+                                class="tg-agent-tile shrink-0"
+                                :style="{ '--tg-status-ring': row.ring }"
                             >
-                                {{ initialsFor(otherEnd(edge, 'in')) }}
-                            </div>
+                                <AgentAvatar size="sm" :agent="row.agent" />
+                            </span>
                             <div class="flex-1 min-w-0">
                                 <p class="text-sm font-medium truncate">
-                                    {{ props.graph.nodes.find((n) => n.id === otherEnd(edge, 'in'))?.name ?? 'Unknown' }}
+                                    {{ row.node?.name ?? 'Unknown' }}
                                 </p>
                                 <p class="text-[11px] text-muted-foreground">
-                                    ← sub_agent · {{ edgeActivity(edge) }}
+                                    ← sub_agent · {{ edgeActivity(row.edge) }}
                                 </p>
                             </div>
                             <Icon

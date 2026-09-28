@@ -232,6 +232,26 @@ body,
 .tg-edge-row:hover { background: rgba(79, 70, 229, 0.06); }
 
 /**
+ * Edge-row avatar tile — a thin status ring around the shared
+ * `@spora-ai/components` `AgentAvatar`.
+ *
+ * The package's `AgentAvatar` has no `status` prop: it forwards
+ * `agent.name` / `agent.profile_picture` to `Avatar` and stops
+ * there, so the tile itself cannot carry a status swatch. The ring
+ * restores that signal without re-implementing the avatar — same
+ * inline-custom-property shape as `--palette-bg` on
+ * `.tg-node-accent` above, so the resolved colour stays in the
+ * markup and this rule owns only the geometry.
+ *
+ * `--tg-status-ring` is written by `statusRingColor()`
+ * (`lib/agentAvatar.ts`): the package's `ringColor` for a status it
+ * covers, a `color-mix` tint of the plugin's `statusColor()`
+ * otherwise. `box-shadow` rather than `border` so the ring adds no
+ * layout box and the row's 8 px gap stays 8 px.
+ */
+.tg-agent-tile { display: inline-flex; border-radius: 9999px; box-shadow: 0 0 0 2px var(--tg-status-ring, transparent); }
+
+/**
  * Hierarchy chain (root → ... → this agent). The links are inline
  * `tg-edge-row`s — clickable, deep-link to the ancestor's node so
  * the operator can hop back up the spawn tree without leaving the

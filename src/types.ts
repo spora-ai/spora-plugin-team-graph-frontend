@@ -56,6 +56,26 @@ export interface GraphNode {
         palette_key: string
         bg_color: string
         fg_color: string
+        /**
+         * The remaining `ProfilePicture` fields, mirroring
+         * `spora-plugin-team-graph/src/Services/NodeResolver.php` and
+         * the shared `ProfilePicture` interface. They were previously
+         * dropped on the floor by this type even though the endpoint
+         * has always sent them; the canvas only ever reads the three
+         * palette keys above, so they are declared optional rather
+         * than required — an older envelope (or a hand-written
+         * fixture) without them still typechecks and still renders.
+         *
+         * `kind` is the discriminant the shared `Avatar` branches on:
+         * without it there is no way to tell an archetype tile from an
+         * uploaded image, so `lib/agentAvatar.ts` treats its absence
+         * as "no picture" and lets the initials branch render.
+         */
+        kind?: 'avatar' | 'image'
+        archetype?: string | null
+        variant_key?: string | null
+        image_url?: string | null
+        image_updated_at?: string | null
     }
     /** Node status may be null when no in-flight task exists for the
      *  agent — the frontend treats that as `COMPLETED` ("idle") via

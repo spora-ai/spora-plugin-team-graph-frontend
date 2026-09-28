@@ -16,7 +16,7 @@
     "clean": "node scripts/clean.js"
   },
   "dependencies": {
-    "@spora-ai/components": "^0.1.0",
+    "@spora-ai/components": "^0.1.1",
     "mermaid": "^10.9.1",
     "pinia": "^2.3.0",
     "vue": "^3.5.0"
