@@ -23,6 +23,18 @@ export type AgentStatus =
     | 'CANCELLED'
     | 'QUEUED'
 
+/**
+ * A status as it arrives on the wire: one of the known `AgentStatus`
+ * cases, any other string (the backend can add a case before this
+ * plugin redeploys — `lib/nodeStatus.ts` falls back to the neutral
+ * bucket instead of throwing), or nullish (no in-flight task, an
+ * older envelope, or a future schema drift).
+ *
+ * `(string & {})` rather than a bare `string` so the editor still
+ * offers the `AgentStatus` literals at every call site.
+ */
+export type WireStatus = AgentStatus | (string & {}) | null | undefined
+
 export interface GraphNode {
     id: number
     name: string
@@ -48,9 +60,9 @@ export interface GraphNode {
     /** Node status may be null when no in-flight task exists for the
      *  agent — the frontend treats that as `COMPLETED` ("idle") via
      *  the lib/nodeStatus defensive defaults. The backend COALESCE'd
-     * the value to COMPLETED in v0.1.2 — the runtime tolerance is
+     *  the value to COMPLETED in v0.1.2 — the runtime tolerance is
      *  belt-and-braces for older envelopes and any future schema drift. */
-    status: AgentStatus | string | null
+    status: WireStatus
     active_chats: number
     recent_chats_24h: number
 }

@@ -148,11 +148,36 @@ describe('TeamGraphCanvas — view reset on principal change', () => {
     })
 
     it('fits when shouldFit flips to true (Refresh button path)', async () => {
-        /* The shouldFit branch is exercised by the `principal-change`
-         * test above — same code path (scheduleFit → onRender → fit)
-         * since both trigger pendingFit=true. We cover this case
-         * manually in the browser (TeamGraphCanvas's headless probe
-         * confirmed scale(3) is overwritten after setProps) but
-         * happy-dom's rAF polyfill doesn't drain reliably for the
-         * "no render in flight" branch, so we don't pin it here. */ })
+        /* The graph must be rendered before a fit can measure it, and
+         * the initial mount's render is skipped (the composable's
+         * immediate watcher runs before `hostRef` binds), so we flip
+         * to a second graph first — that lands a real <svg> in the
+         * wrap. The Refresh click itself then dedup's: no new payload
+         * means no re-render, so the double-rAF fallback inside
+         * scheduleFit() is the only path that can run the fit. */
+        const graphA = makeGraph(1, [1, 2, 3])
+        const graphB = makeGraph(1, [4, 5, 6, 7])
+
+        const wrapper = mount(TeamGraphCanvas, { props: { graph: graphA } })
+        await flushPromises()
+        await wrapper.setProps({ graph: graphB })
+        await flushPromises()
+        await flushRafs()
+        await flushRafs() // onRender uses double-rAF
+        expect(wrapper.find('[data-testid="tg-mermaid-host"]').html()).toContain('<svg')
+
+        // Operator zoomed in — the explicit reset request must
+        // overwrite the manual transform.
+        const content = wrapper.find('.tg-canvas-content').element as HTMLElement
+        content.style.transform = 'translate(50px, 50px) scale(1.75)'
+        await nextTick()
+
+        await wrapper.setProps({ shouldFit: true })
+        await flushRafs()
+        await flushRafs()
+
+        const transform = (wrapper.find('.tg-canvas-content').element as HTMLElement).style.transform
+        expect(transform).not.toBe('translate(50px, 50px) scale(1.75)')
+        expect(transform).toMatch(/scale\(/)
+    })
 })

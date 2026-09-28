@@ -31,13 +31,15 @@
  * (the 5-second polling is independent).
  */
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { Icon } from '@spora-ai/components/icons'
 import { useSelectionStore } from '../stores/selection'
 import { usePrincipalList } from '../composables/usePrincipalList'
 import { useTeamGraph } from '../composables/useTeamGraph'
+import { countBidirectional } from '../lib/stats'
 import { principalLabel, type PrincipalSummary } from '../api/principals'
 import TeamGraphCanvas from './TeamGraphCanvas.vue'
 import AgentDetailPanel from './AgentDetailPanel.vue'
-import Legend from './Legend.vue'
+import StatusLegend from './StatusLegend.vue'
 import GraphErrorFallback from './GraphErrorFallback.vue'
 
 defineProps<{
@@ -93,15 +95,7 @@ interface GraphStats {
 const stats = computed<GraphStats>(() => {
     const g = graph.value
     if (g === null) return { nodes: 0, edges: 0, bidirectional: 0 }
-    const seen = new Set<string>()
-    let bidirectional = 0
-    for (const e of g.edges) {
-        const key = [e.source, e.target].sort((a, b) => a - b).join('-')
-        if (seen.has(key)) continue
-        seen.add(key)
-        if (g.edges.some((o) => o.source === e.target && o.target === e.source)) bidirectional++
-    }
-    return { nodes: g.nodes.length, edges: g.edges.length, bidirectional }
+    return { nodes: g.nodes.length, edges: g.edges.length, bidirectional: countBidirectional(g.edges) }
 })
 
 async function refresh(): Promise<void> {
@@ -179,18 +173,10 @@ function onTapEmptyCanvas(): void {
                         :disabled="loading"
                         @click="refresh"
                     >
-                        <svg
+                        <Icon
+                            name="refresh"
                             class="w-4 h-4"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            stroke-width="1.5"
-                            stroke-linecap="round"
-                            stroke-linejoin="round"
-                        >
-                            <path d="M21 12a9 9 0 1 1-9-9c2.4 0 4.6 1 6.3 2.6L21 8" />
-                            <path d="M21 3v5h-5" />
-                        </svg>
+                        />
                         Refresh
                     </button>
                 </div>
@@ -231,7 +217,7 @@ function onTapEmptyCanvas(): void {
                 No principals available for this user.
             </p>
 
-            <Legend />
+            <StatusLegend />
         </header>
 
         <div class="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_340px] gap-4 items-start">

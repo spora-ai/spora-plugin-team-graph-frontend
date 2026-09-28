@@ -63,7 +63,7 @@ export function nodeIdFromMermaidId(domId: string): number | null {
     const m = /^flowchart-(n\d+)-\d+$/.exec(domId)
     if (m === null) return null
     const cap = m[1]
-    if (cap === undefined || !cap.startsWith('n')) return null
+    if (!cap?.startsWith('n')) return null
     const n = Number(cap.slice(1))
     return Number.isFinite(n) ? n : null
 }

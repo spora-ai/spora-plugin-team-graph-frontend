@@ -64,7 +64,7 @@ describe('fetchRecentChats', () => {
         const longResponse = 'b'.repeat(200)
         getMock.mockResolvedValueOnce({ tasks: [rawTask({ user_prompt: longPrompt, final_response: longResponse })] })
         const chats = await fetchRecentChats(3)
-        expect(chats[0]!.title.length).toBe(50)
+        expect(chats[0]!.title).toHaveLength(50)
         expect(chats[0]!.title.endsWith('…')).toBe(true)
         expect(chats[0]!.preview?.length).toBe(120)
         expect(chats[0]!.preview?.endsWith('…')).toBe(true)

@@ -109,8 +109,12 @@ body,
  * Per-palette accent colour injection. Mermaid applies
  * `tg-palette-<key>` to the `<g class="node">`; the inner
  * `.tg-node-accent` reads `--palette-bg` to paint the left stripe.
- * The hex codes mirror `Spora\Services\AgentPictures\Palette` —
- * keep in sync if a palette is renamed or its hex shifts upstream.
+ * The hex codes mirror `PALETTES` in `@spora-ai/components` (the
+ * TS side reads that table directly) — keep this block in sync if a
+ * palette is renamed or its hex shifts upstream. The inline
+ * `style='--palette-bg:…'` on the node label wins over these
+ * declarations; they are the stylesheet-side mirror of the same
+ * table and the hook for any future SVG-level use.
  */
 .tg-canvas-content svg g.tg-palette-slate   { --palette-bg: #475569; }
 .tg-canvas-content svg g.tg-palette-red     { --palette-bg: #DC2626; }

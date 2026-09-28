@@ -17,8 +17,6 @@ import { onBeforeUnmount, ref, watch, type Ref } from 'vue'
 export interface UsePanZoomOptions {
     wrapRef: Ref<HTMLElement | null>
     contentRef: Ref<HTMLElement | null>
-    /** Called once on mount + after every render so the SVG starts centred. */
-    onFit?: () => void
 }
 
 export interface UsePanZoomReturn {
@@ -36,7 +34,7 @@ interface View {
 const MIN_SCALE = 0.2
 const MAX_SCALE = 3
 
-export function usePanZoom({ wrapRef, contentRef, onFit }: UsePanZoomOptions): UsePanZoomReturn {
+export function usePanZoom({ wrapRef, contentRef }: UsePanZoomOptions): UsePanZoomReturn {
     const view = ref<View>({ x: 0, y: 0, k: 1 })
     const panning = ref<{
         startX: number
@@ -152,7 +150,7 @@ export function usePanZoom({ wrapRef, contentRef, onFit }: UsePanZoomOptions): U
         applyView()
     }
 
-    function onPointerUp(ev: PointerEvent): void {
+    function onPointerUp(_ev: PointerEvent): void {
         const wrap = wrapRef.value
         const p = panning.value
         if (p === null) return
@@ -168,8 +166,6 @@ export function usePanZoom({ wrapRef, contentRef, onFit }: UsePanZoomOptions): U
                 // release may fail if the pointer was already released by the browser
             }
         }
-        // suppress unused-param warning while keeping the PointerEvent type signature
-        void ev
     }
 
     function onWheel(ev: WheelEvent): void {
@@ -228,13 +224,6 @@ export function usePanZoom({ wrapRef, contentRef, onFit }: UsePanZoomOptions): U
         detach()
         window.removeEventListener('resize', onResize)
     })
-
-    if (typeof onFit === 'function') {
-        // Caller can override default fit behaviour via onFit; the
-        // button-stack in `TeamGraphCanvas.vue` binds the "Fit" button
-        // to `fit` directly.
-        void onFit
-    }
 
     return { fit, zoomIn, zoomOut }
 }

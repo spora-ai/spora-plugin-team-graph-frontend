@@ -37,9 +37,9 @@
  * `DashboardAgentCard.vue` pattern) so agent identity wins and
  * status remains glance-readable.
  */
+import { paletteFor, safeHex } from '@spora-ai/components/lib'
 import type { GraphPayload } from '../types'
 import { statusPillClass, statusLabel } from './nodeStatus'
-import { paletteByKey } from './palette'
 
 /**
  * Escape a string for safe inclusion in an HTML attribute value
@@ -54,7 +54,7 @@ import { paletteByKey } from './palette'
  */
 function escapeAttr(s: unknown): string {
     if (typeof s !== 'string') return ''
-    return s.replace(/'/g, '&#39;')
+    return s.replaceAll("'", '&#39;')
 }
 
 export function buildMermaidSource(graph: GraphPayload): string {
@@ -73,14 +73,14 @@ export function buildMermaidSource(graph: GraphPayload): string {
         usedKeys.add(key)
     }
     for (const key of usedKeys) {
-        lines.push(`classDef tg-palette-${paletteByKey(key).className} fill:transparent,stroke:transparent`)
+        lines.push(`classDef tg-palette-${paletteFor(key).key} fill:transparent,stroke:transparent`)
     }
 
     for (const node of graph.nodes) {
         const name = escapeAttr(node.name)
         const pillClass = statusPillClass(node.status)
         const pillText = escapeAttr(statusLabel(node.status))
-        const paletteKey = paletteByKey(node.profile_picture?.palette_key).className
+        const paletteKey = paletteFor(node.profile_picture?.palette_key ?? '').key
         const paletteBg = safeHex(node.profile_picture?.bg_color, '#475569')
         const label = renderNodeLabel(name, paletteBg, pillClass, pillText)
         lines.push(`  n${node.id}["${label}"]:::tg-palette-${paletteKey}`)
@@ -124,21 +124,3 @@ function renderNodeLabel(
         `</div>`
     )
 }
-
-/**
- * Sanitize a hex color string before injecting it into the
- * Mermaid-sourced inline `style=`. Defense against a malformed wire
- * payload shipping a CSS-injection string.
- *
- * Accepts `#RGB`, `#RRGGBB`, or `#RRGGBBAA`; everything else falls
- * back to slate-500 so the canvas always has a usable colour.
- */
-function safeHex(color: string | null | undefined, fallback: string): string {
-    if (typeof color !== 'string') return fallback
-    return /^#[0-9A-Fa-f]{3}([0-9A-Fa-f]{3})?([0-9A-Fa-f]{2})?$/.test(color)
-        ? color
-        : fallback
-}
-
-/* Re-export the palette table for tests + style.css consumers. */
-export { paletteByKey }

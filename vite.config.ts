@@ -13,8 +13,9 @@ import vue from '@vitejs/plugin-vue'
  * Mermaid 10 is bundled inside the IIFE — it's ~600 KB gz and only
  * loaded when the operator opens `/apps/team-graph`. CI size budget
  * is 800 KB pre-gzip (see `.github/workflows/ci.yml`). The host
- * publishes Vue / Pinia / vue-router on `window.*` via
- * `publishPluginGlobals()` so they stay external.
+ * publishes Vue / Pinia on `window.*` via `publishPluginGlobals()`
+ * so they stay external; everything else (Mermaid, and
+ * `@spora-ai/components`) is bundled.
  */
 export default defineConfig({
     plugins: [vue()],
@@ -30,12 +31,11 @@ export default defineConfig({
             fileName: () => 'main.js',
         },
         rollupOptions: {
-            external: ['vue', 'pinia', 'vue-router'],
+            external: ['vue', 'pinia'],
             output: {
                 globals: {
                     vue: 'window.Vue',
                     pinia: 'window.Pinia',
-                    'vue-router': 'window.VueRouter',
                 },
                 assetFileNames: (assetInfo) => {
                     if (assetInfo.name?.endsWith('.css')) {

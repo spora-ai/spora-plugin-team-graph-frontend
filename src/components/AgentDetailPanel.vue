@@ -25,6 +25,8 @@
  * target and the panel re-renders for the new agent.
  */
 import { computed, ref, watch } from 'vue'
+import { Icon } from '@spora-ai/components/icons'
+import { formatRelativeTime, useInitials } from '@spora-ai/components/composables'
 import { useSelectionStore } from '../stores/selection'
 import {
     fetchActiveChats,
@@ -149,28 +151,25 @@ watch(
     { immediate: true },
 )
 
-function initials(name: string): string {
-    return name
-        .split(/\s+/)
-        .map((w) => w[0] ?? '')
-        .slice(0, 2)
-        .join('')
-        .toUpperCase()
+/**
+ * Two-letter avatar initials per node id, memoised per graph commit.
+ *
+ * Delegates to the shared `useInitials` so the panel's tiles match
+ * the dashboard's (a single-word name yields two letters there, not
+ * one). The map is built once per payload instead of per render so
+ * the composable isn't re-invoked on every unrelated re-render.
+ */
+const nodeInitials = computed<Record<number, string>>(() => {
+    const entries = props.graph.nodes.map((n) => [n.id, useInitials(() => n.name).value] as const)
+    return Object.fromEntries(entries)
+})
+
+function initialsFor(nodeId: number): string {
+    return nodeInitials.value[nodeId] ?? '?'
 }
 
 function otherEnd(edge: GraphEdge, direction: 'out' | 'in'): number {
     return direction === 'out' ? edge.target : edge.source
-}
-
-function relTime(iso: string | null): string {
-    if (iso === null || iso === '') return ''
-    const then = new Date(iso).getTime()
-    if (!Number.isFinite(then)) return iso
-    const mins = Math.round((Date.now() - then) / 60_000)
-    if (mins < 1) return 'just now'
-    if (mins < 60) return `${mins} min ago`
-    if (mins < 1440) return `${Math.round(mins / 60)} h ago`
-    return 'yesterday'
 }
 
 /**
@@ -181,10 +180,10 @@ function relTime(iso: string | null): string {
  */
 function edgeActivity(edge: GraphEdge): string {
     if (edge.count_24h > 0) {
-        return `${edge.count_24h}× / 24 h · ${relTime(edge.last_invoked_at)}`
+        return `${edge.count_24h}× / 24 h · ${formatRelativeTime(edge.last_invoked_at)}`
     }
     if (edge.last_invoked_at !== null) {
-        return `last seen ${relTime(edge.last_invoked_at)}`
+        return `last seen ${formatRelativeTime(edge.last_invoked_at)}`
     }
     return 'configured, never used'
 }
@@ -205,16 +204,10 @@ const ownerLabel = computed<string>(() => {
     <div data-testid="tg-agent-panel" class="tg-agent-panel surface-card border border-border rounded-xl bg-card text-card-foreground">
         <div v-if="selectedNode === null" class="tg-agent-panel-empty px-6 py-10">
             <div class="w-10 h-10 rounded-full bg-muted flex items-center justify-center mb-3">
-                <svg
+                <Icon
+                    name="clock"
                     class="w-5 h-5 text-muted-foreground"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="1.5"
-                >
-                    <circle cx="12" cy="12" r="9" />
-                    <path d="M12 7v5l3 2" />
-                </svg>
+                />
             </div>
             <p class="text-sm font-medium text-foreground">No agent selected</p>
             <p class="text-xs text-muted-foreground mt-1 max-w-[220px]">
@@ -332,7 +325,7 @@ const ownerLabel = computed<string>(() => {
                                 class="w-7 h-7 rounded-full flex items-center justify-center text-white text-[10px] font-semibold shrink-0"
                                 :style="{ background: statusColor(props.graph.nodes.find((n) => n.id === otherEnd(edge, 'out'))?.status ?? 'COMPLETED') }"
                             >
-                                {{ initials(props.graph.nodes.find((n) => n.id === otherEnd(edge, 'out'))?.name ?? '?') }}
+                                {{ initialsFor(otherEnd(edge, 'out')) }}
                             </div>
                             <div class="flex-1 min-w-0">
                                 <p class="text-sm font-medium truncate">
@@ -342,15 +335,10 @@ const ownerLabel = computed<string>(() => {
                                     → sub_agent · {{ edgeActivity(edge) }}
                                 </p>
                             </div>
-                            <svg
+                            <Icon
+                                name="chevron-right"
                                 class="w-4 h-4 text-muted-foreground"
-                                viewBox="0 0 24 24"
-                                fill="none"
-                                stroke="currentColor"
-                                stroke-width="2"
-                            >
-                                <path d="m9 18 6-6-6-6" />
-                            </svg>
+                            />
                         </button>
                         <p
                             v-if="hiddenOutboundCount > 0"
@@ -380,7 +368,7 @@ const ownerLabel = computed<string>(() => {
                                 class="w-7 h-7 rounded-full flex items-center justify-center text-white text-[10px] font-semibold shrink-0"
                                 :style="{ background: statusColor(props.graph.nodes.find((n) => n.id === otherEnd(edge, 'in'))?.status ?? 'COMPLETED') }"
                             >
-                                {{ initials(props.graph.nodes.find((n) => n.id === otherEnd(edge, 'in'))?.name ?? '?') }}
+                                {{ initialsFor(otherEnd(edge, 'in')) }}
                             </div>
                             <div class="flex-1 min-w-0">
                                 <p class="text-sm font-medium truncate">
@@ -390,15 +378,10 @@ const ownerLabel = computed<string>(() => {
                                     ← sub_agent · {{ edgeActivity(edge) }}
                                 </p>
                             </div>
-                            <svg
+                            <Icon
+                                name="chevron-right"
                                 class="w-4 h-4 text-muted-foreground"
-                                viewBox="0 0 24 24"
-                                fill="none"
-                                stroke="currentColor"
-                                stroke-width="2"
-                            >
-                                <path d="m9 18 6-6-6-6" />
-                            </svg>
+                            />
                         </button>
                         <p
                             v-if="hiddenInboundCount > 0"

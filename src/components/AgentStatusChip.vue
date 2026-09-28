@@ -14,10 +14,10 @@
  * stays untouched.
  */
 import { statusPillClass, statusLabel } from '../lib/nodeStatus'
-import type { AgentStatus } from '../types'
+import type { WireStatus } from '../types'
 
 defineProps<{
-    status: AgentStatus | string | null
+    status: WireStatus
 }>()
 </script>
 

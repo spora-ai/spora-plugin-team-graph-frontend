@@ -13,9 +13,10 @@
  *                collide with the host's stores).
  *   - `theme`   — `'light' | 'dark'` snapshot at mount.
  *   - `route`   — current host route, used by back-links.
- *   - `router`  — host's Vue Router. We re-declare a local one for
- *                plugin-internal navigation but expose `push` so the
- *                host router is reachable.
+ *   - `router`  — the host's router instance, declared structurally.
+ *                This plugin never navigates on its own and does not
+ *                import `vue-router` (the dependency was dropped with
+ *                the last router call site).
  */
 export interface PluginHostContext {
     api: {

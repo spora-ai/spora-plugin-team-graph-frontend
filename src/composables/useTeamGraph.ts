@@ -30,7 +30,7 @@
 import { onBeforeUnmount, ref, watch, type Ref } from 'vue'
 import { fetchGraph } from '../api/teamGraph'
 import { ApiError } from '../api/client'
-import type { GraphPayload } from '../types'
+import type { GraphEdge, GraphNode, GraphPayload } from '../types'
 
 export interface UseTeamGraph {
     graph: Ref<GraphPayload | null>
@@ -117,6 +117,12 @@ export function useTeamGraph(principalId: Ref<number | null>): UseTeamGraph {
     return { graph, loading, error, refetch, lastUpdatedAt }
 }
 
+/** The node fields the canvas renders — anything else is ignored. */
+const NODE_FIELDS = ['id', 'status', 'active_chats', 'recent_chats_24h'] as const
+const NODE_PALETTE_FIELDS = ['palette_key', 'bg_color', 'fg_color'] as const
+/** The edge fields the canvas renders. */
+const EDGE_FIELDS = ['id', 'count_24h', 'last_invoked_at'] as const
+
 /**
  * Structural equality for a graph payload. We only compare the
  * fields that actually drive the canvas — `generated_at` (a
@@ -130,25 +136,21 @@ export function useTeamGraph(principalId: Ref<number | null>): UseTeamGraph {
 function payloadEquals(a: GraphPayload | null, b: GraphPayload): boolean {
     if (a === null) return false
     if (a.principal.id !== b.principal.id) return false
-    if (a.nodes.length !== b.nodes.length) return false
-    if (a.edges.length !== b.edges.length) return false
-    for (let i = 0; i < a.nodes.length; i++) {
-        const na = a.nodes[i]!
-        const nb = b.nodes[i]!
-        if (na.id !== nb.id) return false
-        if (na.status !== nb.status) return false
-        if (na.active_chats !== nb.active_chats) return false
-        if (na.recent_chats_24h !== nb.recent_chats_24h) return false
-        if (na.profile_picture.palette_key !== nb.profile_picture.palette_key) return false
-        if (na.profile_picture.bg_color !== nb.profile_picture.bg_color) return false
-        if (na.profile_picture.fg_color !== nb.profile_picture.fg_color) return false
-    }
-    for (let i = 0; i < a.edges.length; i++) {
-        const ea = a.edges[i]!
-        const eb = b.edges[i]!
-        if (ea.id !== eb.id) return false
-        if (ea.count_24h !== eb.count_24h) return false
-        if (ea.last_invoked_at !== eb.last_invoked_at) return false
-    }
-    return true
+    return nodesEqual(a.nodes, b.nodes) && edgesEqual(a.edges, b.edges)
+}
+
+function nodesEqual(a: GraphNode[], b: GraphNode[]): boolean {
+    if (a.length !== b.length) return false
+    return a.every((na, i) => {
+        const nb = b[i]!
+        return (
+            NODE_FIELDS.every((field) => na[field] === nb[field]) &&
+            NODE_PALETTE_FIELDS.every((field) => na.profile_picture[field] === nb.profile_picture[field])
+        )
+    })
+}
+
+function edgesEqual(a: GraphEdge[], b: GraphEdge[]): boolean {
+    if (a.length !== b.length) return false
+    return a.every((ea, i) => EDGE_FIELDS.every((field) => ea[field] === b[i]![field]))
 }

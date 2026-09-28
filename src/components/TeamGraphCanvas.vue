@@ -38,9 +38,9 @@
  * other sees the flag cleared and no-ops.
  */
 import { onMounted, ref, watch } from 'vue'
+import { Icon } from '@spora-ai/components/icons'
 import { useMermaidRender } from '../composables/useMermaidRender'
 import { usePanZoom } from '../composables/usePanZoom'
-import { useSelectionStore } from '../stores/selection'
 import type { GraphPayload } from '../types'
 
 const props = defineProps<{
@@ -64,8 +64,6 @@ watch(
         graphRef.value = next
     },
 )
-
-const selection = useSelectionStore()
 
 /*
  * `pendingFit` is the one-bit contract between the trigger
@@ -96,7 +94,7 @@ function scheduleFit(): void {
     }))
 }
 
-const { reRender } = useMermaidRender({
+useMermaidRender({
     hostRef,
     graph: graphRef,
     /*
@@ -167,16 +165,6 @@ onMounted(() => {
     if (wrap === null) return
     wrap.addEventListener('tg-canvas-tap', onTapEmptyCanvas)
 })
-
-watch(
-    () => selection.selectedId,
-    () => {
-        // Selection-driven styling is reapplied by `useMermaidRender`'s
-        // own watcher; the canvas just needs to clear any pending
-        // fit when a re-render fires after selection changes.
-        void reRender
-    },
-)
 </script>
 
 <template>
@@ -207,16 +195,10 @@ watch(
                 data-testid="tg-zoom-in"
                 @click="zoomIn"
             >
-                <svg
+                <Icon
+                    name="plus"
                     class="w-3.5 h-3.5"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="2"
-                    stroke-linecap="round"
-                >
-                    <path d="M12 5v14M5 12h14" />
-                </svg>
+                />
             </button>
             <button
                 type="button"
@@ -225,16 +207,10 @@ watch(
                 data-testid="tg-zoom-out"
                 @click="zoomOut"
             >
-                <svg
+                <Icon
+                    name="minus"
                     class="w-3.5 h-3.5"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="2"
-                    stroke-linecap="round"
-                >
-                    <path d="M5 12h14" />
-                </svg>
+                />
             </button>
             <button
                 type="button"
@@ -243,17 +219,10 @@ watch(
                 data-testid="tg-zoom-fit"
                 @click="fit"
             >
-                <svg
+                <Icon
+                    name="maximize"
                     class="w-3.5 h-3.5"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="2"
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                >
-                    <path d="M3 8V3h5M21 8V3h-5M3 16v5h5M21 16v5h-5" />
-                </svg>
+                />
             </button>
         </div>
         <p class="absolute bottom-3 left-4 right-24 text-[11px] text-muted-foreground pointer-events-none">

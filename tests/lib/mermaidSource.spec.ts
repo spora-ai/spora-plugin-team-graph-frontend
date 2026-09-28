@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
+import { PALETTES } from '@spora-ai/components/lib'
 import { buildMermaidSource } from '../../src/lib/mermaidSource'
 import type { GraphPayload } from '../../src/types'
-import { PALETTES } from '../../src/lib/palette'
 
 /**
  * Snapshot test for `buildMermaidSource()`.
@@ -14,6 +14,11 @@ import { PALETTES } from '../../src/lib/palette'
  *
  * Compact variant (v0.1.x): nodes carry only an accent bar + name
  * + status pill — no #ID, no role, no stats line.
+ *
+ * The palette table itself now lives in `@spora-ai/components`; the
+ * `PALETTES` block below pins the key list and hexes the generated
+ * Mermaid classes depend on, so a package bump that renames a key or
+ * shifts a hex fails here instead of silently repainting nodes.
  */
 const tinyStartup: GraphPayload = {
     principal: { id: -1, type: 'group', name: 'Tiny Startup', is_current_user_owned: true },
@@ -159,28 +164,28 @@ describe('buildMermaidSource', () => {
 
 describe('PALETTES table', () => {
     it('has 10 entries matching the host Palette enum (slate/red/orange/amber/green/teal/blue/indigo/violet/pink)', () => {
-        expect(PALETTES.map((p) => p.className)).toEqual([
+        expect(PALETTES.map((p) => p.key)).toEqual([
             'slate', 'red', 'orange', 'amber', 'green', 'teal', 'blue', 'indigo', 'violet', 'pink',
         ])
     })
 
     it('matches the host Palette hex codes exactly', () => {
-        const expected: Record<string, { bg: string; fg: string }> = {
-            slate:  { bg: '#475569', fg: '#F8FAFC' },
-            red:    { bg: '#DC2626', fg: '#FEF2F2' },
-            orange: { bg: '#EA580C', fg: '#FFF7ED' },
-            amber:  { bg: '#D97706', fg: '#FFFBEB' },
-            green:  { bg: '#15803D', fg: '#F0FDF4' },
-            teal:   { bg: '#0F766E', fg: '#F0FDFA' },
-            blue:   { bg: '#1D4ED8', fg: '#EFF6FF' },
-            indigo: { bg: '#4338CA', fg: '#EEF2FF' },
-            violet: { bg: '#6D28D9', fg: '#F5F3FF' },
-            pink:   { bg: '#BE185D', fg: '#FDF2F8' },
+        const expected: Record<string, { background: string; foreground: string }> = {
+            slate:  { background: '#475569', foreground: '#F8FAFC' },
+            red:    { background: '#DC2626', foreground: '#FEF2F2' },
+            orange: { background: '#EA580C', foreground: '#FFF7ED' },
+            amber:  { background: '#D97706', foreground: '#FFFBEB' },
+            green:  { background: '#15803D', foreground: '#F0FDF4' },
+            teal:   { background: '#0F766E', foreground: '#F0FDFA' },
+            blue:   { background: '#1D4ED8', foreground: '#EFF6FF' },
+            indigo: { background: '#4338CA', foreground: '#EEF2FF' },
+            violet: { background: '#6D28D9', foreground: '#F5F3FF' },
+            pink:   { background: '#BE185D', foreground: '#FDF2F8' },
         }
         for (const [key, hex] of Object.entries(expected)) {
-            const entry = PALETTES.find((p) => p.className === key)
-            expect(entry?.bg).toBe(hex.bg)
-            expect(entry?.fg).toBe(hex.fg)
+            const entry = PALETTES.find((p) => p.key === key)
+            expect(entry?.background).toBe(hex.background)
+            expect(entry?.foreground).toBe(hex.foreground)
         }
     })
 })

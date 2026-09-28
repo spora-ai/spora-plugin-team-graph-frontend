@@ -7,9 +7,9 @@
  * Output slugs: `running`, `pending`, `awaiting`, `failed`,
  * `aborted`, `completed`.
  */
-import type { AgentStatus } from '../types'
+import type { WireStatus } from '../types'
 
-export function statusSlug(status: AgentStatus | string | null | undefined): string {
+export function statusSlug(status: WireStatus): string {
     if (status === null || status === undefined) return 'completed'
     switch (status) {
         case 'RUNNING':
@@ -40,7 +40,7 @@ export function statusSlug(status: AgentStatus | string | null | undefined): str
  * they share the prefix `tg-status-` so they don't collide with
  * the host's `.status-*` Tailwind utilities.
  */
-export function statusPillClass(status: AgentStatus | string | null | undefined): string {
+export function statusPillClass(status: WireStatus): string {
     return `tg-status-${statusSlug(status)}`
 }
 
@@ -55,7 +55,7 @@ export function statusPillClass(status: AgentStatus | string | null | undefined)
  * placeholder for nullish) keeps the canvas renderable instead of
  * crashing on every node.
  */
-export function statusLabel(status: AgentStatus | string | null | undefined): string {
+export function statusLabel(status: WireStatus): string {
     if (status === null || status === undefined) return 'idle'
     switch (status) {
         case 'RUNNING':
@@ -99,7 +99,7 @@ export function statusLabel(status: AgentStatus | string | null | undefined): st
  * as the brand. Fuchsia lives far enough down the spectrum to remain
  * distinct under both light/dark and never collides with our accent.
  */
-export function statusColor(status: AgentStatus | string | null | undefined): string {
+export function statusColor(status: WireStatus): string {
     switch (status) {
         case 'RUNNING':
             return '#10b981'

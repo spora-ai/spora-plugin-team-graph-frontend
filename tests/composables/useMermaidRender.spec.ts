@@ -90,7 +90,7 @@ describe('useMermaidRender', () => {
         // bubbles up the DOM event so the composable's
         // `selection.setSelected` runs.
         const nodes = host.querySelectorAll('g.node')
-        expect(nodes.length).toBe(2)
+        expect(nodes).toHaveLength(2)
 
         // Ensure rounded corners + drop-shadow got applied to shapes.
         const rect = host.querySelector('g.node rect') as SVGElement | null
