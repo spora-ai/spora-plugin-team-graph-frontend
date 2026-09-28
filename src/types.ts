@@ -35,6 +35,14 @@ export type AgentStatus =
  */
 export type WireStatus = AgentStatus | (string & {}) | null | undefined
 
+/**
+ * The `kind` discriminant the shared `Avatar` branches on: `avatar` is
+ * a generated archetype tile, `image` an uploaded picture. Named so
+ * the union has one home (it is referenced from `lib/agentAvatar.ts`'s
+ * guard as well as from `GraphNode` below).
+ */
+export type ProfilePictureKind = 'avatar' | 'image'
+
 export interface GraphNode {
     id: number
     name: string
@@ -71,7 +79,7 @@ export interface GraphNode {
          * uploaded image, so `lib/agentAvatar.ts` treats its absence
          * as "no picture" and lets the initials branch render.
          */
-        kind?: 'avatar' | 'image'
+        kind?: ProfilePictureKind
         archetype?: string | null
         variant_key?: string | null
         image_url?: string | null

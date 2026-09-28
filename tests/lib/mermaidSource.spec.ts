@@ -6,19 +6,21 @@ import type { GraphPayload } from '../../src/types'
 /**
  * Snapshot test for `buildMermaidSource()`.
  *
- * The Mermaid source is the contract with the renderer; a
- * regression that drops a `classDef` or mangles the
- * `n<id>["…"]:::tg-palette-<key>` line would surface as the wrong
- * palette or a render error. We pin the entire source string for
- * one representative payload (Tiny Startup fixture, minus chats).
+ * The Mermaid source is the contract with the renderer; a regression
+ * that mangles the `n<id>["…"]` line would surface as a parse error
+ * or a missing node. We pin the entire source string for one
+ * representative payload.
  *
- * Compact variant (v0.1.x): nodes carry only an accent bar + name
- * + status pill — no #ID, no role, no stats line.
+ * Since the node cards moved to a Vue overlay (`Option C`), the
+ * source is deliberately minimal: Mermaid is a *layout* engine here
+ * and nothing more. There is no HTML label, no `classDef`, and no
+ * palette machinery — `style.css` hides Mermaid's node boxes and the
+ * shared `AgentAvatar` paints the agent's identity on the card.
  *
- * The palette table itself now lives in `@spora-ai/components`; the
- * `PALETTES` block below pins the key list and hexes the generated
- * Mermaid classes depend on, so a package bump that renames a key or
- * shifts a hex fails here instead of silently repainting nodes.
+ * The palette table itself lives in `@spora-ai/components`; the
+ * `PALETTES` block at the bottom pins the key list and hexes the
+ * cards depend on, so a package bump that renames a key or shifts a
+ * hex fails here instead of silently repainting agents.
  */
 const tinyStartup: GraphPayload = {
     principal: { id: -1, type: 'group', name: 'Tiny Startup', is_current_user_owned: true },
@@ -42,65 +44,46 @@ describe('buildMermaidSource', () => {
         expect(src.split('\n')[0]).toBe('flowchart TB')
     })
 
-    it('emits transparent-fill classDefs (CSS owns the rect styling)', () => {
+    it('emits no classDef — the node boxes are hidden from style.css, not from Mermaid', () => {
         const src = buildMermaidSource(tinyStartup)
-        // Every classDef uses fill:transparent + stroke:transparent
-        // so Mermaid's per-palette CSS injection can't fight our
-        // stylesheet's white-fill + violet-outline rules.
-        for (const palette of ['indigo', 'amber', 'teal', 'pink', 'green']) {
-            expect(src).toContain(`classDef tg-palette-${palette} fill:transparent,stroke:transparent`)
-        }
-        expect(src).not.toContain('classDef tg-palette-slate')
-        expect(src).not.toContain('classDef tg-palette-red')
-        expect(src).not.toContain('classDef tg-palette-violet')
+        // Mermaid's own theme (primaryColor / primaryTextColor) has to
+        // survive as the fallback for a stylesheet that fails to load,
+        // which a `classDef fill:transparent` would destroy.
+        expect(src).not.toContain('classDef')
+        expect(src).not.toContain(':::')
     })
 
-    it('emits one n<id> line per node with the expected tg-palette-<key> class', () => {
+    it('emits one n<id>["name"] line per node and no HTML label', () => {
         const src = buildMermaidSource(tinyStartup)
-        expect(src).toContain('n1["')
-        expect(src).toContain(':::tg-palette-indigo')
-        expect(src).toContain('n3["')
-        expect(src).toContain(':::tg-palette-teal')
-        expect(src).toContain('n4["')
-        expect(src).toContain(':::tg-palette-pink')
-        expect(src).toContain('n5["')
-        expect(src).toContain(':::tg-palette-green')
+        expect(src).toContain('  n1["Alex"]')
+        expect(src).toContain('  n3["Casey"]')
+        expect(src).not.toContain('<div')
+        expect(src).not.toContain('tg-node')
+        expect(src).not.toContain('--palette-bg')
     })
 
-    it('does NOT inline background-color or fill on the label div', () => {
-        /* Inline `style=` was tried first and rejected: Mermaid 10's
-         * HTML-label sanitiser strips `;` characters from inline
-         * styles, which concatenates adjacent declarations into
-         * invalid CSS. Every colour lives in CSS variables driven
-         * by the wrapping `<g class="tg-palette-*">`. The compact
-         * variant only carries a single inline property:
-         * `--palette-bg` for the accent bar. */
-        const src = buildMermaidSource(tinyStartup)
-        expect(src).not.toContain('background-color:')
-        // classDefs legitimately use `fill:transparent` — the
-        // assertion has to look for an actual colour, not just
-        // the property prefix.
-        expect(src).not.toMatch(/fill:\s*(?!transparent)[^,)]+/)
-    })
-
-    it('passes the agent palette_key via --palette-bg (inline) so the accent bar can read it', () => {
-        const src = buildMermaidSource(tinyStartup)
-        expect(src).toContain("style='--palette-bg:#4338CA'") // indigo
-        expect(src).toContain("style='--palette-bg:#D97706'") // amber
-    })
-
-    it('falls back to Slate palette when a node\'s wire payload omits palette_key', () => {
+    it('escapes double quotes and collapses newlines so the label cannot break the lexer', () => {
         const payload: GraphPayload = {
             ...tinyStartup,
+            edges: [],
             nodes: [
-                { id: 99, name: 'Default', role: null, picture_url: null, status: 'COMPLETED', active_chats: 0, recent_chats_24h: 0, profile_picture: { palette_key: '', bg_color: '', fg_color: '' } },
+                { id: 99, name: 'O"Reilly\nOps', role: null, picture_url: null, status: 'RUNNING', active_chats: 0, recent_chats_24h: 0, profile_picture: { palette_key: 'green', bg_color: '#15803D', fg_color: '#F0FDF4' } },
             ],
         }
         const src = buildMermaidSource(payload)
-        expect(src).toContain('classDef tg-palette-slate fill:transparent,stroke:transparent')
-        expect(src).toContain(':::tg-palette-slate')
-        // safeHex('') falls back to #475569 (Slate bg_color).
-        expect(src).toContain("style='--palette-bg:#475569'")
+        // Exactly one quoted label, with the quote and the newline
+        // collapsed to a single space so the lexer cannot split it.
+        expect(src.split('\n')).toEqual(['flowchart TB', '  n99["O Reilly Ops"]'])
+    })
+
+    it('falls back to a placeholder label so an empty name still sizes a node box', () => {
+        const payload: GraphPayload = {
+            ...tinyStartup,
+            nodes: [
+                { id: 98, name: '   ', role: null, picture_url: null, status: 'COMPLETED', active_chats: 0, recent_chats_24h: 0, profile_picture: { palette_key: 'slate', bg_color: '#475569', fg_color: '#F8FAFC' } },
+            ],
+        }
+        expect(buildMermaidSource(payload)).toContain('  n98["agent"]')
     })
 
     it('emits one solid arrow line per edge, regardless of last_invoked_at', () => {
@@ -115,47 +98,22 @@ describe('buildMermaidSource', () => {
         expect(srcUnfired).not.toContain('  n1 -.-> n2')
     })
 
-    it('escapes single quotes in node names', () => {
-        const payload: GraphPayload = {
-            ...tinyStartup,
-            nodes: [
-                { id: 99, name: "O'Reilly", role: "Engineer", picture_url: null, status: 'RUNNING', active_chats: 0, recent_chats_24h: 0, profile_picture: { palette_key: 'green', bg_color: '#15803D', fg_color: '#F0FDF4' } },
-            ],
-        }
+    it('declares isolated nodes so a node with no edges is still laid out', () => {
+        const payload: GraphPayload = { ...tinyStartup, edges: [] }
         const src = buildMermaidSource(payload)
-        expect(src).toContain('O&#39;Reilly')
-    })
-
-    it('does not include #ID, role, or stats line in the compact label', () => {
-        const src = buildMermaidSource(tinyStartup)
-        // The user asked to drop the stats line and the agent ID from
-        // the canvas nodes. The compact label carries only the
-        // accent bar + agent name + status pill.
-        expect(src).not.toContain('tg-node-stats')
-        expect(src).not.toContain('tg-node-role')
-        expect(src).not.toContain('active · <strong>')
-        expect(src).not.toContain('24h')
-        // `#ID` rendering would look like "#1 · Marketing Lead".
-        // `#1` itself shows up in hex colours (e.g. #15803D) so we
-        // check for the rendered interpolation pattern, not the raw
-        // substring.
-        expect(src).not.toMatch(/#\d+\s+·\s+\w/)  // "#1 · Marketing"
+        expect(src).toContain('  n5["Ellis"]')
+        expect(src.split('\n')).toHaveLength(1 + 5)
     })
 
     it('produces a stable, line-ordered output', () => {
         const src = buildMermaidSource(tinyStartup)
         expect(src).toBe([
             'flowchart TB',
-            'classDef tg-palette-indigo fill:transparent,stroke:transparent',
-            'classDef tg-palette-amber fill:transparent,stroke:transparent',
-            'classDef tg-palette-teal fill:transparent,stroke:transparent',
-            'classDef tg-palette-pink fill:transparent,stroke:transparent',
-            'classDef tg-palette-green fill:transparent,stroke:transparent',
-            '  n1["<div class=\'tg-node\' style=\'--palette-bg:#4338CA\'><div class=\'tg-node-accent\'></div><div class=\'tg-node-body\'><div class=\'tg-node-name\'>Alex</div><span class=\'tg-status-pill tg-status-running\'><span class=\'dot\'></span>running</span></div></div>"]:::tg-palette-indigo',
-            '  n2["<div class=\'tg-node\' style=\'--palette-bg:#D97706\'><div class=\'tg-node-accent\'></div><div class=\'tg-node-body\'><div class=\'tg-node-name\'>Blake</div><span class=\'tg-status-pill tg-status-running\'><span class=\'dot\'></span>running</span></div></div>"]:::tg-palette-amber',
-            '  n3["<div class=\'tg-node\' style=\'--palette-bg:#0F766E\'><div class=\'tg-node-accent\'></div><div class=\'tg-node-body\'><div class=\'tg-node-name\'>Casey</div><span class=\'tg-status-pill tg-status-completed\'><span class=\'dot\'></span>idle</span></div></div>"]:::tg-palette-teal',
-            '  n4["<div class=\'tg-node\' style=\'--palette-bg:#BE185D\'><div class=\'tg-node-accent\'></div><div class=\'tg-node-body\'><div class=\'tg-node-name\'>Dakota</div><span class=\'tg-status-pill tg-status-awaiting\'><span class=\'dot\'></span>awaiting sub-agent</span></div></div>"]:::tg-palette-pink',
-            '  n5["<div class=\'tg-node\' style=\'--palette-bg:#15803D\'><div class=\'tg-node-accent\'></div><div class=\'tg-node-body\'><div class=\'tg-node-name\'>Ellis</div><span class=\'tg-status-pill tg-status-pending\'><span class=\'dot\'></span>awaiting approval</span></div></div>"]:::tg-palette-green',
+            '  n1["Alex"]',
+            '  n2["Blake"]',
+            '  n3["Casey"]',
+            '  n4["Dakota"]',
+            '  n5["Ellis"]',
             '  n1 --> n2',
             '  n1 --> n4',
         ].join('\n'))
@@ -163,7 +121,7 @@ describe('buildMermaidSource', () => {
 })
 
 describe('PALETTES table', () => {
-    it('has 10 entries matching the host Palette enum (slate/red/orange/amber/green/teal/blue/indigo/violet/pink)', () => {
+    it('has 10 entries matching the host Palette enum', () => {
         expect(PALETTES.map((p) => p.key)).toEqual([
             'slate', 'red', 'orange', 'amber', 'green', 'teal', 'blue', 'indigo', 'violet', 'pink',
         ])

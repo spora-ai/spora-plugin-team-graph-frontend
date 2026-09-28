@@ -1,11 +1,30 @@
 <script setup lang="ts">
 /**
- * TeamGraphCanvas — the Mermaid viewport.
+ * TeamGraphCanvas — the Mermaid viewport plus the Vue node overlay.
  *
- * Composes `useMermaidRender` (SVG lifecycle) and `usePanZoom`
- * (pan/zoom driver). Emits `tap-empty-canvas` when the operator
- * taps the empty area without dragging — the page wires this to
- * `selection.clear()`.
+ * Composes `useMermaidRender` (SVG lifecycle + node positioning)
+ * and `usePanZoom` (pan/zoom driver). Emits `tap-empty-canvas` when
+ * the operator taps the empty area without dragging — the page wires
+ * this to `selection.clear()`.
+ *
+ * **The two-layer arrangement (Option C).**
+ *
+ *   .tg-canvas-wrap          viewport; owns pointer/wheel events
+ *   └── .tg-canvas-content   the single transformed element
+ *       ├── [data-testid=tg-mermaid-host]   <svg> — EDGES only
+ *       └── .tg-node-overlay                HTML — one AgentNodeCard
+ *
+ * The overlay is a *sibling* of the SVG inside the same element that
+ * `usePanZoom` applies `translate(x, y) scale(k)` to, so panning,
+ * zooming, `fit()` and the window-resize clamp move the cards and
+ * the edges together with **no JavaScript** — that is the whole
+ * reason the card layer is HTML and not a `<foreignObject>`.
+ *
+ * Card positions come from `useMermaidRender`'s `positions` map,
+ * which is recomputed from scratch on every successful Mermaid
+ * render. Cards whose id has no measured position are not rendered
+ * at all, so a re-render (poll, principal switch, dedup) can never
+ * leave a card behind at a stale coordinate.
  *
  * **View reset semantics.**
  *
@@ -21,7 +40,9 @@
  *
  * Data refreshes (the 30 s polling in `useTeamGraph`) DO NOT fit:
  * the operator's zoom + pan survive, and `useTeamGraph`'s dedup
- * means identical payloads don't re-render anyway.
+ * means identical payloads don't re-render anyway. Because the cards
+ * live in the transformed content layer, "preserve the view" also
+ * preserves the card positions for free.
  *
  * Implementation: a single `pendingFit` ref is the contract. Both
  * the principal-change watcher and the shouldFit watcher set it to
@@ -37,11 +58,15 @@
  * Whichever path fires first clears the flag + calls `fit()`; the
  * other sees the flag cleared and no-ops.
  */
-import { onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { Icon } from '@spora-ai/components/icons'
+import AgentNodeCard from './AgentNodeCard.vue'
 import { useMermaidRender } from '../composables/useMermaidRender'
 import { usePanZoom } from '../composables/usePanZoom'
-import type { GraphPayload } from '../types'
+import { edgeDegrees, isAdjacent } from '../lib/stats'
+import type { NodePosition } from '../lib/nodeLayout'
+import { useSelectionStore } from '../stores/selection'
+import type { GraphNode, GraphPayload } from '../types'
 
 const props = defineProps<{
     graph: GraphPayload | null
@@ -94,7 +119,7 @@ function scheduleFit(): void {
     }))
 }
 
-useMermaidRender({
+const { positions } = useMermaidRender({
     hostRef,
     graph: graphRef,
     /*
@@ -119,6 +144,63 @@ const { fit, zoomIn, zoomOut } = usePanZoom({
     wrapRef: canvasWrap,
     contentRef: canvasContent,
 })
+
+const selection = useSelectionStore()
+
+/** One entry per node that Mermaid actually placed, in payload order. */
+interface PlacedNode {
+    node: GraphNode
+    position: NodePosition
+}
+
+const placedNodes = computed<PlacedNode[]>(() => {
+    const graph = graphRef.value
+    if (graph === null) return []
+    const out: PlacedNode[] = []
+    for (const node of graph.nodes) {
+        const position = positions.value[node.id]
+        if (position === undefined) continue
+        out.push({ node, position })
+    }
+    return out
+})
+
+/**
+ * Badge counts, derived from the payload's `edges` (see
+ * `lib/stats.ts → edgeDegrees`). Recomputed only when the payload
+ * changes, not on every selection toggle.
+ */
+const degrees = computed(() => {
+    const graph = graphRef.value
+    if (graph === null) return new Map<number, { inbound: number; outbound: number }>()
+    return edgeDegrees(graph.nodes, graph.edges)
+})
+
+function degreesFor(id: number): { inbound: number; outbound: number } {
+    return degrees.value.get(id) ?? { inbound: 0, outbound: 0 }
+}
+
+function isSelected(id: number): boolean {
+    return selection.selectedId === id
+}
+
+function isAdjacentToSelection(id: number): boolean {
+    const sel = selection.selectedId
+    if (sel === null) return false
+    return isAdjacent(selection.edges, id, sel)
+}
+
+function isDimmedBySelection(id: number): boolean {
+    return selection.selectedId !== null && !isSelected(id) && !isAdjacentToSelection(id)
+}
+
+function onToggleNode(id: number): void {
+    if (selection.selectedId === id) {
+        selection.clear()
+    } else {
+        selection.setSelected(id)
+    }
+}
 
 /*
  * Principal-change detection. `graph.principal.id` flips the
@@ -176,6 +258,7 @@ onMounted(() => {
     >
         <div
             ref="canvasContent"
+            data-testid="tg-canvas-content"
             class="tg-canvas-content"
             style="position: absolute; left: 0; top: 0;"
         >
@@ -184,6 +267,34 @@ onMounted(() => {
                 data-testid="tg-mermaid-host"
                 class="inline-block"
             />
+            <!--
+                Sibling HTML overlay. Same transformed parent as the
+                SVG above, so `usePanZoom`'s transform moves both
+                layers in lockstep. `pointer-events: none` on the
+                layer (see style.css) keeps the gaps between cards
+                clickable for panning; the cards themselves opt back
+                in and are marked `data-tg-no-pan` so a click selects
+                instead of starting a drag — the same trade-off the
+                Mermaid node boxes made before Option C.
+            -->
+            <div
+                data-testid="tg-node-overlay"
+                class="tg-node-overlay"
+            >
+                <AgentNodeCard
+                    v-for="placed in placedNodes"
+                    :key="placed.node.id"
+                    :node="placed.node"
+                    :inbound="degreesFor(placed.node.id).inbound"
+                    :outbound="degreesFor(placed.node.id).outbound"
+                    :x="placed.position.x"
+                    :y="placed.position.y"
+                    :selected="isSelected(placed.node.id)"
+                    :adjacent="isAdjacentToSelection(placed.node.id)"
+                    :dimmed="isDimmedBySelection(placed.node.id)"
+                    @toggle="onToggleNode"
+                />
+            </div>
         </div>
         <div
             class="absolute top-3 right-3 flex flex-col surface-card rounded-lg shadow-sm overflow-hidden border border-border"

@@ -66,7 +66,7 @@ describe('fetchRecentChats', () => {
         const chats = await fetchRecentChats(3)
         expect(chats[0]!.title).toHaveLength(50)
         expect(chats[0]!.title.endsWith('…')).toBe(true)
-        expect(chats[0]!.preview?.length).toBe(120)
+        expect(chats[0]!.preview).toHaveLength(120)
         expect(chats[0]!.preview?.endsWith('…')).toBe(true)
     })
 

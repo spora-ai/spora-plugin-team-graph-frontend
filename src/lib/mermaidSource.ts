@@ -1,89 +1,62 @@
 /**
  * Build the Mermaid `flowchart TB` source for a `GraphPayload`.
  *
- * Output structure:
+ * **Mermaid is a layout engine here, not a renderer.** It draws the
+ * edges and it decides where every node sits; the visible node card
+ * is a Vue component in the sibling HTML overlay (see
+ * `lib/nodeLayout.ts`). The node lines are therefore reduced to an
+ * id and a plain-text label:
+ *
  *   flowchart TB
- *     classDef tg-palette-indigo fill:transparent,stroke:transparent
- *     classDef tg-palette-teal    fill:transparent,stroke:transparent
- *     …
- *     n11["<div class='tg-node'><div class='tg-node-accent'>|name|</div>…</div>"]:::tg-palette-indigo
+ *     n11["Marketing Lead"]
  *     n11 --> n4
  *
- * The agent's icon colour comes from the wire's
- * `profile_picture.palette_key` (resolved server-side from
- * `agent_pictures.palette_key` via
- * `Spora\Services\AgentPictures\Palette`). We emit one Mermaid
- * `classDef` per palette actually used in the payload. The
- * classDef drives the wrapping `<g class="tg-palette-X">` so the
- * stylesheet can paint:
+ * **No `htmlLabels`.** `useMermaidRender.ts` initialises Mermaid with
+ * `htmlLabels: false`, so the label becomes a real `<text>` node
+ * instead of a `<foreignObject>` wrapper. That matters beyond
+ * tidiness: a Vue app cannot mount into an element nested inside
+ * `<svg>` (`createApp().mount()` needs an `HTMLDivElement`), so any
+ * HTML label would be a dead end for the card component.
  *
- *   - the rect's fill + stroke (transparent — the stylesheet
- *     applies the actual white fill + violet outline via
- *     `.tg-canvas-content svg g[class*="tg-palette-"] rect`)
- *   - the left accent bar's colour via the inline `--palette-bg`
- *     CSS variable the HTML label sets
+ * **No `classDef`.** The node boxes are hidden from `style.css`
+ * (`.tg-canvas-content svg g.node rect { fill: transparent }`), not
+ * from Mermaid's own theme. Keeping Mermaid's default theme colours
+ * means the canvas still degrades to a readable — if plain — diagram
+ * if the plugin stylesheet ever fails to load, instead of to a blank
+ * rectangle. The agent's palette colour reaches the card through the
+ * shared `AgentAvatar`, which reads `profile_picture` directly.
  *
- * The HTML label is intentionally compact: a 6 px wide accent bar
- * (the agent's palette bg_color) on the left edge, the agent name,
- * and the status pill on the right. No #ID, no role, no stats
- * line — those moved to the detail panel's right sidebar where
- * they have room to breathe. The canvas is now a uniform grid of
- * white-tiled boxes with violet outlines + a coloured stripe per
- * agent, so the operator can scan it like a leaderboard rather
- * than a mood-board.
- *
- * Status no longer drives the rect colour — the operator gets a
- * status pill inside the label (matching the dashboard's
- * `DashboardAgentCard.vue` pattern) so agent identity wins and
- * status remains glance-readable.
+ * **No escaping of the old kind.** The previous version inlined an
+ * HTML `<div>` tree into the label, which only had to dodge `'` (the
+ * attribute delimiter). A quoted Mermaid string only has to dodge
+ * `"`, plus line breaks (they would split the label across
+ * `<tspan>`s and inflate the measured box). Everything else is
+ * decoded and sanitised by Mermaid. The one residual artefact is
+ * Mermaid's `#word;` HTML-entity escape hatch, which round-trips
+ * such a name as `&word;` in the SVG text — a purely cosmetic
+ * change to a label that is `aria-hidden` and painted transparent,
+ * with the real name always on the Vue card.
  */
-import { paletteFor, safeHex } from '@spora-ai/components/lib'
 import type { GraphPayload } from '../types'
-import { statusPillClass, statusLabel } from './nodeStatus'
 
 /**
- * Escape a string for safe inclusion in an HTML attribute value
- * delimited by single quotes. We only need to replace `'` because
- * that's the only character that can break out of the attribute;
- * Mermaid's parser already handles `<`, `>`, and `&` inside
- * `["…"]` labels.
+ * Make an agent name safe to sit inside `["…"]`.
  *
- * Defensive: nullish / non-string input collapses to an empty string
- * so the canvas still renders when a node field is unexpectedly
- * undefined.
+ * A nullish / empty name still needs *something* in the label —
+ * Mermaid measures the text to size the node box, and an empty
+ * `<text>` measures as 0 × 0, which would collapse the node's
+ * contribution to the layout.
  */
-function escapeAttr(s: unknown): string {
-    if (typeof s !== 'string') return ''
-    return s.replaceAll("'", '&#39;')
+function nodeLabel(name: string): string {
+    const cleaned = name.replace(/["\r\n\t]+/g, ' ').trim()
+    return cleaned === '' ? 'agent' : cleaned
 }
 
 export function buildMermaidSource(graph: GraphPayload): string {
     const lines: string[] = ['flowchart TB']
 
-    /*
-     * Emit one classDef per palette_key actually used in this
-     * payload. Every classDef sets fill:transparent,stroke:transparent
-     * so the stylesheet owns the visible rect styling — Mermaid's
-     * per-class CSS injection would otherwise fight our overrides
-     * on specificity.
-     */
-    const usedKeys = new Set<string>()
     for (const node of graph.nodes) {
-        const key = node.profile_picture?.palette_key ?? 'slate'
-        usedKeys.add(key)
-    }
-    for (const key of usedKeys) {
-        lines.push(`classDef tg-palette-${paletteFor(key).key} fill:transparent,stroke:transparent`)
-    }
-
-    for (const node of graph.nodes) {
-        const name = escapeAttr(node.name)
-        const pillClass = statusPillClass(node.status)
-        const pillText = escapeAttr(statusLabel(node.status))
-        const paletteKey = paletteFor(node.profile_picture?.palette_key ?? '').key
-        const paletteBg = safeHex(node.profile_picture?.bg_color, '#475569')
-        const label = renderNodeLabel(name, paletteBg, pillClass, pillText)
-        lines.push(`  n${node.id}["${label}"]:::tg-palette-${paletteKey}`)
+        lines.push(`  n${node.id}["${nodeLabel(node.name)}"]`)
     }
 
     for (const edge of graph.edges) {
@@ -100,27 +73,4 @@ export function buildMermaidSource(graph: GraphPayload): string {
     }
 
     return lines.join('\n')
-}
-
-function renderNodeLabel(
-    name: string,
-    paletteBg: string,
-    pillClass: string,
-    pillText: string,
-): string {
-    /*
-     * Compact label — accent bar + name + status pill. The accent
-     * bar reads --palette-bg (set inline by buildMermaidSource) so
-     * each node still carries the agent's icon colour, just on a
-     * 6 px wide stripe instead of saturating the whole tile.
-     */
-    return (
-        `<div class='tg-node' style='--palette-bg:${paletteBg}'>` +
-        `<div class='tg-node-accent'></div>` +
-        `<div class='tg-node-body'>` +
-        `<div class='tg-node-name'>${name}</div>` +
-        `<span class='tg-status-pill ${pillClass}'><span class='dot'></span>${pillText}</span>` +
-        `</div>` +
-        `</div>`
-    )
 }

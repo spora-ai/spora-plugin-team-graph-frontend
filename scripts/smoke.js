@@ -106,7 +106,12 @@ if (!/@layer\s+components\s*\{/.test(css)) {
 
 // The plugin's own Mermaid/graph chrome. If these vanish the canvas
 // renders unstyled, which is invisible in a bundle-size diff.
-for (const sel of ['.tg-node-accent', '.tg-status-running']) {
+// The list tracks the *current* chrome: the Variant M node card
+// (`.tg-node-card`) replaced the Mermaid HTML label template
+// (`.tg-node-accent`) when node cards moved to a Vue overlay, and the
+// edge-degree badges (`.tg-edge-badge`) are new. Swapping a selector
+// out is fine; dropping a check is not.
+for (const sel of ['.tg-node-card', '.tg-status-running', '.tg-edge-badge']) {
     if (!css.includes(sel)) {
         failures.push(`stylesheet is missing the plugin's own ${sel} rule`)
     }

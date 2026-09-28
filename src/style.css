@@ -40,6 +40,24 @@
  */
 
 /**
+ * The two halves of Tailwind this plugin needs, imported separately.
+ * This is deliberately NOT `@import "tailwindcss"`, which is
+ * `theme + preflight + utilities` — see note 1 at the top of this file
+ * for why preflight must stay out.
+ *
+ * The theme half carries the `layer(theme)` wrapper; the utility half
+ * is imported bare, for the layer-ordering reason in note 2 above.
+ *
+ * They sit above every other at-rule on purpose. CSS requires all
+ * `@import` to precede any rule that isn't a `@charset` or a `@layer`
+ * statement, so trailing them after `@config` / `@source` produced an
+ * invalid stylesheet (Sonar `css:S8778`) that only happened to work
+ * because Tailwind's build step re-orders the at-rules itself.
+ */
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/utilities.css";
+
+/**
  * `important` is the one v3 option with no CSS-native v4 equivalent, so
  * it stays in `tailwind.config.ts` and is pulled in here. Everything
  * else this file configures lives in CSS.
@@ -81,18 +99,6 @@
 @source not "../frontend";
 @source not "../scripts";
 @source not "../tests";
-
-/**
- * The two halves of Tailwind this plugin needs, imported separately.
- * This is deliberately NOT `@import "tailwindcss"`, which is
- * `theme + preflight + utilities` — see note 1 at the top of this file
- * for why preflight must stay out.
- *
- * The theme half carries the `layer(theme)` wrapper; the utility half
- * is imported bare, for the layer-ordering reason in note 2 above.
- */
-@import "tailwindcss/theme.css" layer(theme);
-@import "tailwindcss/utilities.css";
 
 /**
  * `dark:` must follow the host's `<html class="dark">` toggle, not the
@@ -198,160 +204,220 @@ body,
 .tg-canvas-content { transform-origin: 0 0; will-change: transform; }
 
 /**
- * Per-node content template — rendered by Mermaid's `htmlLabels: true`
- * path inside a `<foreignObject>`. Sized so text stays readable on
- * first render; with `useMaxWidth:false` the SVG renders at its
- * natural size, so these sizes land directly on screen.
+ * Mermaid node boxes — geometry only, never seen.
  *
- * Compact variant (v0.1.x): the rect is white with a violet outline
- * (the team's primary accent — `TeamGraphApp::accent() === 'violet'`).
- * The agent's palette colour shows only as a 6 px wide accent bar on
- * the left edge — the canvas reads as a unified grid of white-tiled
- * boxes with violet outlines, and each agent still carries its
- * icon colour as a discrete accent.
+ * `useMermaidRender.ts` renders the diagram with `htmlLabels: false`
+ * and then grows every `g.node` rect to the Variant M card footprint
+ * (240 × 76 px, mirrored by `NODE_CARD_WIDTH` / `NODE_CARD_HEIGHT` in
+ * `lib/nodeLayout.ts`) so the SVG's own bounding box — and therefore
+ * the `viewBox` / `fit()` calculation — encloses the cards the HTML
+ * overlay is about to paint.
  *
- * The status pill remains translucent-white with dark text, so
- * it's readable on every palette. (Mermaid's HTML-label
- * sanitiser strips `;` from inline styles, which is why we don't
- * inline the bg colour here — every colour is in CSS.)
+ * The visible card is `AgentNodeCard.vue`, a sibling of the SVG
+ * inside the same transformed `.tg-canvas-content` element, so pan /
+ * zoom / fit / resize move both layers together with no JavaScript.
+ *
+ * These boxes and their `<text>` labels are therefore painted fully
+ * transparent. Deliberately done from the stylesheet rather than with
+ * a Mermaid `classDef fill:transparent`: Mermaid's own theme
+ * (`primaryColor` / `primaryTextColor`) then survives as the fallback,
+ * so a stylesheet that fails to load degrades to a plain but readable
+ * diagram instead of a blank canvas. `!important` is still required —
+ * Mermaid ships an inline `style="fill:…"` on each shape and a
+ * `.node rect` rule in the SVG's own <style>.
  */
-.tg-node {
-    position: relative;
-    padding: 8px 12px 8px 18px;
-    min-width: 180px;
-    text-align: left;
-    line-height: 1.3;
-    font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-    border-radius: 10px;
-    background-color: transparent;
-    color: #0f172a;
+#spora-plugin-team-graph .tg-canvas-content svg g.node rect,
+#spora-plugin-team-graph .tg-canvas-content svg g.node polygon,
+#spora-plugin-team-graph .tg-canvas-content svg g.node circle,
+#spora-plugin-team-graph .tg-canvas-content svg g.node ellipse {
+    fill: transparent !important;
+    stroke: transparent !important;
 }
-.tg-node-body {
-    display: flex; align-items: center; gap: 8px;
+#spora-plugin-team-graph .tg-canvas-content svg g.node text,
+#spora-plugin-team-graph .tg-canvas-content svg g.node tspan {
+    fill: transparent !important;
 }
-.tg-node-name {
-    font-size: 14px; font-weight: 600; margin: 0; letter-spacing: -0.01em;
-    color: #0f172a; line-height: 1.2;
-    flex: 1 1 auto; min-width: 0;
-}
+/* The 240 × 76 boxes are exactly under the cards, which are a
+ * separate HTML layer above the SVG, so nothing needs to hit-test
+ * them. Switching them off keeps every pointerdown outside a card on
+ * the SVG background (and therefore pan-capable). */
+.tg-canvas-content svg g.node { pointer-events: none; }
+
 /**
- * 6 px wide accent bar on the left edge — reads the agent's
- * palette bg_color from the inline `--palette-bg` set by
- * buildMermaidSource. The rounded corners only show on the left
- * side so the bar visually attaches to the rounded rect outline.
+ * Node-card overlay layer.
+ *
+ * A zero-size anchor: every card inside it is absolutely positioned
+ * against the content layer's origin, so adding or removing cards
+ * never reflows anything. `pointer-events: none` keeps the gaps
+ * between cards clickable (the wrap below needs them to pan); the
+ * cards opt back in individually.
  */
-.tg-node-accent {
+.tg-node-overlay {
     position: absolute;
-    left: 0; top: 0; bottom: 0;
+    top: 0;
+    left: 0;
+    width: 0;
+    height: 0;
+    pointer-events: none;
+}
+
+/**
+ * Variant M card — `prototype-m-edge-counts.html`.
+ *
+ * Avatar tile left, name top-right, status pill bottom-left,
+ * edge-count badges bottom-right; fixed 240 px width, name
+ * ellipsised. The accent bar of the previous compact variant is
+ * gone: the shared `AgentAvatar` tile is the agent's identity, and
+ * it reads `profile_picture` straight off the wire payload.
+ *
+ * `translate3d(x, y, 0)` is written inline by `AgentNodeCard.vue`
+ * from the measured node centre; `position: absolute` keeps every
+ * card out of flow.
+ */
+.tg-node-card {
+    position: absolute;
+    top: 0;
+    left: 0;
+    box-sizing: border-box;
+    width: 240px;
+    height: 76px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 9px 13px;
+    background: #fff;
+    color: #0f172a;
+    border: 1.5px solid #7c3aed;
+    border-radius: 10px;
+    box-shadow: 0 2px 6px -2px rgba(15, 23, 41, 0.08);
+    font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    cursor: pointer;
+    pointer-events: auto;
+    text-align: left;
+    transition: box-shadow 150ms, border-color 150ms, opacity 150ms;
+}
+.tg-node-card:hover { border-color: #4f46e5; }
+.tg-node-card:focus-visible { outline: 2px solid #4f46e5; outline-offset: 2px; }
+.tg-node-card.is-selected {
+    border-color: #4f46e5;
+    box-shadow: 0 0 0 2px rgba(79, 70, 229, 0.25);
+}
+.tg-node-card.is-adjacent { border-color: rgba(79, 70, 229, 0.55); }
+.tg-node-card.is-dimmed { opacity: 0.28; }
+
+/**
+ * `.avatar--sm` from `@spora-ai/components` is already 32 × 32 px,
+ * which is exactly the prototype's tile; the rule only pins the
+ * flex behaviour so the tile never shrinks in a narrow card and
+ * keeps the prototype's own shadow.
+ */
+.tg-node-card-avatar { flex-shrink: 0; box-shadow: 0 1px 2px rgba(15, 23, 41, 0.18); }
+
+.tg-node-card-body { flex: 1 1 auto; min-width: 0; }
+.tg-node-card-row1 { display: flex; align-items: center; gap: 6px; }
+.tg-node-card-row2 {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+    margin-top: 4px;
+    min-height: 34px;
+}
+.tg-node-card-name {
+    font-size: 13px;
+    font-weight: 600;
+    line-height: 1.2;
+    color: #0f172a;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.tg-node-card-badges { display: flex; gap: 4px; flex-shrink: 0; }
+
+/**
+ * Status pill — Variant M shape (a tinted capsule that wraps to two
+ * lines inside the fixed-width card) on top of the colour map the
+ * plugin has always used. `--tg-status-color` is the single knob:
+ * the six `.tg-status-*` slugs below set it and everything else
+ * derives from it via `color-mix`, so there is exactly one
+ * status → colour table in the plugin (the one `lib/nodeStatus.ts →
+ * statusPillClass()` names) shared with `AgentStatusChip.vue`.
+ *
+ * `color-mix()` is the same idiom `Avatar` uses for its archetype
+ * gradient and `lib/agentAvatar.ts` for the status ring, so the
+ * tints sit in the same lightness band as the package's swatches.
+ */
+.tg-status-pill {
+    --tg-status-color: #94a3b8;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 1.2;
+    letter-spacing: 0.02em;
+    padding: 3px 9px;
+    border-radius: 10px;
+    background: color-mix(in srgb, var(--tg-status-color) 14%, white);
+    color: color-mix(in srgb, var(--tg-status-color) 45%, #0f172a);
+    /* Long status labels ("awaiting final approval") wrap inside the
+     * fixed-width card instead of pushing the badges off it. */
+    max-width: 92px;
+    white-space: normal;
+    text-align: center;
+    flex-shrink: 1;
+}
+.tg-status-pill .dot {
     width: 6px;
-    background: var(--palette-bg, #475569);
-    border-radius: 10px 0 0 10px;
+    height: 6px;
+    border-radius: 999px;
+    flex-shrink: 0;
+    /* Anchor the dot to the first text line when the label wraps. */
+    align-self: flex-start;
+    margin-top: 2px;
+    background: var(--tg-status-color);
 }
+.tg-status-running  { --tg-status-color: #10b981; }
+.tg-status-pending  { --tg-status-color: #6366f1; }
+.tg-status-awaiting { --tg-status-color: #f59e0b; }
+.tg-status-failed   { --tg-status-color: #ef4444; }
+.tg-status-completed { --tg-status-color: #94a3b8; }
+.tg-status-aborted   { --tg-status-color: #d946ef; }
 
 /**
- * Per-palette accent colour injection. Mermaid applies
- * `tg-palette-<key>` to the `<g class="node">`; the inner
- * `.tg-node-accent` reads `--palette-bg` to paint the left stripe.
- * The hex codes mirror `PALETTES` in `@spora-ai/components` (the
- * TS side reads that table directly) — keep this block in sync if a
- * palette is renamed or its hex shifts upstream. The inline
- * `style='--palette-bg:…'` on the node label wins over these
- * declarations; they are the stylesheet-side mirror of the same
- * table and the hook for any future SVG-level use.
+ * Edge-degree badges. `--in` is emerald, `--out` violet, and
+ * `--zero` slate — the prototype's "don't shout" treatment, kept
+ * because a 0-inbound node is an entry-point agent and a 0-outbound
+ * node is a terminus, and that difference is the whole point of
+ * showing counts on the card. The variant is chosen per badge by
+ * `AgentNodeCard.vue`, not per pair.
  */
-.tg-canvas-content svg g.tg-palette-slate   { --palette-bg: #475569; }
-.tg-canvas-content svg g.tg-palette-red     { --palette-bg: #DC2626; }
-.tg-canvas-content svg g.tg-palette-orange  { --palette-bg: #EA580C; }
-.tg-canvas-content svg g.tg-palette-amber   { --palette-bg: #D97706; }
-.tg-canvas-content svg g.tg-palette-green   { --palette-bg: #15803D; }
-.tg-canvas-content svg g.tg-palette-teal    { --palette-bg: #0F766E; }
-.tg-canvas-content svg g.tg-palette-blue    { --palette-bg: #1D4ED8; }
-.tg-canvas-content svg g.tg-palette-indigo  { --palette-bg: #4338CA; }
-.tg-canvas-content svg g.tg-palette-violet  { --palette-bg: #6D28D9; }
-.tg-canvas-content svg g.tg-palette-pink    { --palette-bg: #BE185D; }
+.tg-edge-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    padding: 1px 6px;
+    border-radius: 4px;
+    font-size: 10px;
+    font-weight: 700;
+    line-height: 1.4;
+}
+.tg-edge-badge--in   { background: #d1fae5; color: #047857; }
+.tg-edge-badge--out  { background: #ede9fe; color: #6d28d9; }
+.tg-edge-badge--zero { background: #f1f5f9; color: #94a3b8; }
 
 /**
- * Rect styling — every node gets a white fill + the team's primary
- * violet outline. A single wildcard selector covers all 10 palettes
- * (the classDef sets fill/stroke:transparent so Mermaid doesn't
- * inject per-palette overrides; we paint the actual values here).
+ * Selection-driven *edge* styling.
  *
- * `!important` is needed to win against Mermaid's inline
- * `style="fill:…"` on the rect, which is the source of a long
- * sequence of past "the rect is the wrong colour" bugs.
- *
- * The `#spora-plugin-team-graph` ID-prefixed selector bumps
- * specificity above Mermaid's injected
- * `#m-N .tg-palette-<key> > * { fill: transparent; … }` rule
- * (1,1,0) so our white fill + violet outline survive the
- * automatic cascade.
+ * Node highlighting is gone from the SVG: the node boxes are
+ * transparent and `AgentNodeCard` paints `is-selected` /
+ * `is-adjacent` / `is-dimmed` on itself from the same Pinia store.
+ * Edges are the one thing Mermaid still draws, so
+ * `useMermaidRender.ts` tags each `path.flowchart-link` with
+ * `out` / `in` / `dim` on every render and every selection change.
+ * `!important` is required to win against Mermaid's inline
+ * `style="stroke:…"` on each path.
  */
-#spora-plugin-team-graph .tg-canvas-content svg g[class*="tg-palette-"] rect {
-    fill: #ffffff !important;
-    stroke: #7c3aed !important;        /* violet-600 — the team's primary accent */
-    stroke-width: 1.5px !important;
-}
-/* Selected / adjacent overrides win because the `!important`
- * declarations here are more specific. */
-#spora-plugin-team-graph .tg-canvas-content svg g.node.selected rect,
-#spora-plugin-team-graph .tg-canvas-content svg g.node.selected polygon,
-#spora-plugin-team-graph .tg-canvas-content svg g.node.selected .basic.label-container {
-    stroke: #4f46e5 !important;
-    stroke-width: 3px !important;
-    filter: drop-shadow(0 0 0 2px rgba(79, 70, 229, 0.25));
-}
-
-/**
- * Status pills — same shape as the other plugin prototypes. The
- * `status-running` / `status-pending` / `status-awaiting` /
- * `status-failed` / `status-completed` / `status-aborted` classes
- * are applied inside the `m-node` HTML block by
- * `lib/mermaidSource.ts`.
- *
- * The pill sits on top of an agent-coloured tile (the agent's
- * `bg_color`), so we render it as a translucent-white bubble with
- * a saturated status dot. This keeps the pill readable on every
- * palette (slate, red, orange, green, teal, blue, indigo, violet,
- * pink) without having to pick per-palette contrast colours.
- *
- * `!important` on `color` + `background` is necessary because
- * Mermaid 10 auto-injects `#<svg-id> .tg-palette-<key> span`
- * rules that win on specificity (1,1,1) and would otherwise force
- * the pill text to the agent's `fg_color` — making "idle" sit
- * white-on-white on the slate palette, for example.
- */
-.tg-status-pill { display: inline-flex; align-items: center; gap: 4px; font-size: 10px; font-weight: 600; padding: 2px 7px; border-radius: 999px; letter-spacing: 0.02em; white-space: nowrap; background: rgba(255, 255, 255, 0.92) !important; color: #0f172a !important; }
-.tg-status-pill .dot { width: 6px; height: 6px; border-radius: 999px; flex-shrink: 0; }
-.tg-status-running  .dot { background: #10b981; }
-.tg-status-pending  .dot { background: #6366f1; }
-.tg-status-awaiting .dot { background: #f59e0b; }
-.tg-status-failed   .dot { background: #ef4444; }
-.tg-status-completed .dot { background: #94a3b8; }
-.tg-status-aborted   .dot { background: #d946ef; }
-
-/**
- * Selection-driven SVG styling. Mermaid paints the entire diagram
- * inside `<svg>`; nodes are `<g class="node" id="flowchart-nX-Y">`,
- * edges are `<g class="edgePath" id="flowchart-nX-nY-N">`. The
- * `selected` / `adjacent` / `dimmed` classes are toggled
- * imperatively by `useMermaidRender.ts` after every render and on
- * every selection change. `out` / `in` / `dim` do the same for
- * edges (emerald for outgoing, indigo for incoming, dim for the
- * rest). `!important` is required to win against Mermaid's
- * inline `style="stroke:…"` on each shape.
- *
- * Selected / adjacent overrides live in the rect-fill section
- * above (alongside the violet outline) to keep the styling
- * co-located; the rules here only cover opacity + edge styling.
- */
-.tg-canvas-content svg g.node { cursor: pointer; transition: opacity 150ms; }
-#spora-plugin-team-graph .tg-canvas-content svg g.node.adjacent rect,
-#spora-plugin-team-graph .tg-canvas-content svg g.node.adjacent polygon,
-#spora-plugin-team-graph .tg-canvas-content svg g.node.adjacent .basic.label-container {
-    stroke: rgba(79, 70, 229, 0.55) !important;
-    stroke-width: 2.5px !important;
-}
-.tg-canvas-content svg g.node.dimmed { opacity: 0.28; }
 .tg-canvas-content svg path.flowchart-link.dim { stroke-opacity: 0.15; }
 .tg-canvas-content svg path.flowchart-link.out { stroke: #059669 !important; stroke-width: 2.6px !important; }
 .tg-canvas-content svg path.flowchart-link.in  { stroke: #4f46e5 !important; stroke-width: 2.6px !important; }
