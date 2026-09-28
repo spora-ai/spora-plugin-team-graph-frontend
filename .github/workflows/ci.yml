@@ -210,7 +210,7 @@ jobs:
           cache-dependency-path: package-lock.json
 
       - name: Install
-        run: npm ci
+        run: npm ci --ignore-scripts
 
       - name: Build
         # vue-tsc + vite build, output goes to frontend/ (per vite.config.ts).
