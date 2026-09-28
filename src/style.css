@@ -270,6 +270,15 @@ body,
  * gone: the shared `AgentAvatar` tile is the agent's identity, and
  * it reads `profile_picture` straight off the wire payload.
  *
+ * The card element is a real `<button type="button">` (see
+ * `AgentNodeCard.vue`), so this rule also has to undo what the UA
+ * stylesheet does to every button: drop the native chrome with
+ * `appearance: none` (otherwise Safari/WebKit keeps `buttonface` and
+ * Firefox its inner focus ring), and opt back in to the inherited
+ * font, because `font` is one of the properties a `<button>` does
+ * *not* inherit. The `font:` shorthand comes before `font-family` so
+ * the prototype's own stack still wins.
+ *
  * `translate3d(x, y, 0)` is written inline by `AgentNodeCard.vue`
  * from the measured node centre; `position: absolute` keeps every
  * card out of flow.
@@ -284,12 +293,16 @@ body,
     display: flex;
     align-items: center;
     gap: 10px;
+    margin: 0;
     padding: 9px 13px;
+    appearance: none;
+    -webkit-appearance: none;
     background: #fff;
     color: #0f172a;
     border: 1.5px solid #7c3aed;
     border-radius: 10px;
     box-shadow: 0 2px 6px -2px rgba(15, 23, 41, 0.08);
+    font: inherit;
     font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     cursor: pointer;
     pointer-events: auto;
@@ -313,7 +326,11 @@ body,
  */
 .tg-node-card-avatar { flex-shrink: 0; box-shadow: 0 1px 2px rgba(15, 23, 41, 0.18); }
 
-.tg-node-card-body { flex: 1 1 auto; min-width: 0; }
+/* The body and the two rows are `<span>`s so the card can be a
+ * `<button>` (whose content model is phrasing content). `flex` is
+ * therefore load-bearing here, not cosmetic: an inline body would
+ * split the rows across lines instead of stacking them. */
+.tg-node-card-body { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; }
 .tg-node-card-row1 { display: flex; align-items: center; gap: 6px; }
 .tg-node-card-row2 {
     display: flex;
@@ -391,6 +408,16 @@ body,
  * node is a terminus, and that difference is the whole point of
  * showing counts on the card. The variant is chosen per badge by
  * `AgentNodeCard.vue`, not per pair.
+ *
+ * The badge text is 10 px at weight 700, which is *normal* text as
+ * far as WCAG is concerned (large text starts at 18.66 px bold), so
+ * every pair needs 4.5:1. `--zero` is slate-600 on slate-100
+ * (6.92:1), not the slate-400 `#94a3b8` it used to be (2.34:1, a
+ * clear fail) — "muted" is carried by the slate *background* and by
+ * the neighbouring emerald/violet badges, so darkening the text to
+ * meet AA costs the badge nothing visually. Do not "harmonise" it
+ * back to `#94a3b8` to match `--tg-status-color` for the completed
+ * status: that hue equality is worth less than the readability.
  */
 .tg-edge-badge {
     display: inline-flex;
@@ -404,7 +431,7 @@ body,
 }
 .tg-edge-badge--in   { background: #d1fae5; color: #047857; }
 .tg-edge-badge--out  { background: #ede9fe; color: #6d28d9; }
-.tg-edge-badge--zero { background: #f1f5f9; color: #94a3b8; }
+.tg-edge-badge--zero { background: #f1f5f9; color: #475569; }
 
 /**
  * Selection-driven *edge* styling.

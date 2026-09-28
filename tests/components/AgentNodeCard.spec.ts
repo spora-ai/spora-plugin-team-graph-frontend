@@ -188,22 +188,41 @@ describe('AgentNodeCard — selection state', () => {
         expect(wrapper.emitted('toggle')).toEqual([[7]])
     })
 
-    it('emits toggle on Enter and Space so the card is keyboard-operable', async () => {
+    it('emits toggle when the click lands on a child, not just the card root', async () => {
+        // The card's body / rows are `<span>`s so the `<button>` keeps
+        // its phrasing-content model; the handler is on the button
+        // itself, so a click on any descendant still bubbles up.
         const wrapper = mountCard()
-        await wrapper.find('.tg-node-card').trigger('keydown.enter')
-        await wrapper.find('.tg-node-card').trigger('keydown.space')
+        await wrapper.find('.tg-node-card-name').trigger('click')
+        await wrapper.find('.tg-edge-badge').trigger('click')
         expect(wrapper.emitted('toggle')).toEqual([[7], [7]])
     })
 
-    it('is exposed as a button and opts out of pan gestures', () => {
+    it('is a native <button type="button">, so the browser owns Enter/Space activation', () => {
+        /*
+         * The card used to be a `<div role="button" tabindex="0">` with
+         * `@keydown.enter` / `@keydown.space` handlers. happy-dom (like
+         * a raw DOM) does not run a button's activation behaviour, so
+         * this test cannot fire a synthetic keypress the way the old one
+         * did — what it pins instead is the contract that replaces it:
+         * a real button needs no `role`, no `tabindex` and no key
+         * handlers, and a `keydown` handler left in place would
+         * double-fire the toggle on top of the browser's own click.
+         */
+        const card = mountCard().find('.tg-node-card')
+        expect(card.element.tagName).toBe('BUTTON')
+        expect(card.attributes('type')).toBe('button')
+        // No ARIA role and no tabindex: both are native on <button>.
+        expect(card.attributes('role')).toBeUndefined()
+        expect(card.attributes('tabindex')).toBeUndefined()
+    })
+
+    it('opts out of pan gestures so a click selects instead of dragging', () => {
         const wrapper = mountCard()
-        const card = wrapper.find('.tg-node-card')
-        expect(card.attributes('role')).toBe('button')
-        expect(card.attributes('tabindex')).toBe('0')
-        // usePanZoom skips pointer capture for [data-tg-no-pan], so a
-        // click selects instead of starting a drag — the same trade-off
-        // the Mermaid node boxes made before Option C.
-        expect(card.attributes('data-tg-no-pan')).toBe('')
+        // usePanZoom skips pointer capture for `button` and for
+        // [data-tg-no-pan] — the marker keeps the opt-out explicit and
+        // independent of the element type.
+        expect(wrapper.find('.tg-node-card').attributes('data-tg-no-pan')).toBe('')
     })
 })
 

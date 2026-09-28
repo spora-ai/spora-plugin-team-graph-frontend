@@ -190,4 +190,25 @@ describe('statusRingColor', () => {
         expect(statusRingColor(null)).toBe(STATUS_PALETTE.COMPLETED.ringColor)
         expect(statusRingColor(undefined)).toBe(STATUS_PALETTE.COMPLETED.ringColor)
     })
+
+    it('treats a missing argument and an explicit null the same, via the default parameter', () => {
+        /*
+         * `statusRingColor` takes a default parameter for `undefined`
+         * and folds `null` in the body — a default parameter does NOT
+         * fire for `null`, and the wire sends `null` for "no
+         * in-flight task". Both must reach the *packaged* COMPLETED
+         * swatch, not the unpackaged `color-mix` tint that the `null`
+         * would otherwise fall through to.
+         */
+        const neutral = STATUS_PALETTE.COMPLETED.ringColor
+        const explicit = statusRingColor('COMPLETED')
+        expect(statusRingColor()).toBe(neutral)
+        expect(statusRingColor(undefined)).toBe(neutral)
+        expect(statusRingColor(null)).toBe(neutral)
+        // …and all four agree, i.e. no arm leaks to the tint fallback.
+        for (const ring of [explicit, statusRingColor(), statusRingColor(undefined), statusRingColor(null)]) {
+            expect(ring).toBe(neutral)
+            expect(ring).not.toContain('color-mix')
+        }
+    })
 })

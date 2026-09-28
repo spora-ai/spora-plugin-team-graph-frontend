@@ -101,6 +101,13 @@ export function avatarSubject(node: GraphNode | undefined): AgentAvatarSubject {
 const UNPACKAGED_TINT_MIX = 60
 
 /**
+ * The neutral status a nullish wire value resolves to, named so the
+ * default parameter and the `null` fold in `statusRingColor` cannot
+ * drift apart.
+ */
+const NEUTRAL_STATUS = 'COMPLETED'
+
+/**
  * Ring colour for an avatar tile, painted by the panel's
  * `.tg-agent-tile` wrapper (see `AgentDetailPanel.vue`).
  *
@@ -112,13 +119,17 @@ const UNPACKAGED_TINT_MIX = 60
  * same lightness band the package's own `ringColor` values occupy
  * (e.g. emerald-100 `#d1fae5` against emerald-500 `#10b981`).
  *
- * A nullish status resolves to `COMPLETED` rather than to
- * `statusColor(null)`'s `default` arm so the packaged and
- * unpackaged paths agree on the same neutral swatch.
+ * **A nullish status resolves to the packaged `COMPLETED` swatch**
+ * rather than to `statusColor(null)`'s `default` arm, so the packaged
+ * and unpackaged paths agree on the same neutral swatch. The two
+ * halves of that are deliberately separate: the default parameter
+ * covers a *missing* / `undefined` argument, and the `??` in the body
+ * covers the wire's own `null`, which a default parameter does not
+ * catch (it only fires for `undefined`).
  */
-export function statusRingColor(status: WireStatus | undefined): string {
-    const key = status ?? 'COMPLETED'
-    if (typeof key === 'string' && Object.hasOwn(STATUS_PALETTE, key)) {
+export function statusRingColor(status: WireStatus = NEUTRAL_STATUS): string {
+    const key: Exclude<WireStatus, null | undefined> = status ?? NEUTRAL_STATUS
+    if (Object.hasOwn(STATUS_PALETTE, key)) {
         const display = statusDisplay(key)
         if (display !== null) return display.ringColor
     }

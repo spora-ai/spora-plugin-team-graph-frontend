@@ -229,6 +229,21 @@ describe('TeamGraphCanvas — edge counts and selection', () => {
         expect(cards(w)[0]!.classes()).not.toContain('is-selected')
     })
 
+    it('selects when the click lands on the agent name inside the card', async () => {
+        // The card is a <button> whose body/rows are <span>s, so the
+        // operator's click usually targets a descendant. The selection
+        // must still toggle, and a click on a *different* card must
+        // still land on that card rather than the first one.
+        const w = await mountCanvas(makeGraph(1, [1, 2], [[1, 2]]))
+        const selection = useSelectionStore()
+
+        await cards(w)[1]!.find('.tg-node-card-name').trigger('click')
+        await nextTick()
+        expect(selection.selectedId).toBe(2)
+        expect(cards(w)[1]!.classes()).toContain('is-selected')
+        expect(cards(w)[0]!.classes()).not.toContain('is-selected')
+    })
+
     it('marks the neighbours of the selection adjacent and the rest dimmed', async () => {
         const w = await mountCanvas(makeGraph(1, [1, 2], [[1, 2]]))
         useSelectionStore().setSelected(1)
@@ -248,7 +263,12 @@ describe('TeamGraphCanvas — edge counts and selection', () => {
         const w = await mountCanvas(makeGraph(1, [1, 2], [[1, 2]]))
         const svg = w.find('[data-testid="tg-mermaid-host"] svg')
         expect(svg.attributes('aria-hidden')).toBe('true')
-        expect(cards(w)[0]!.attributes('role')).toBe('button')
+        // The card is the accessible representation of a node, so it
+        // is a native <button> — not a <div role="button"> that has to
+        // re-implement focus, the focus ring and Enter/Space itself.
+        const first = cards(w)[0]!
+        expect(first.element.tagName).toBe('BUTTON')
+        expect(first.attributes('aria-pressed')).toBe('false')
     })
 })
 

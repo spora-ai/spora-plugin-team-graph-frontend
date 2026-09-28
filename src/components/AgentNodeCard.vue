@@ -25,6 +25,20 @@
  * expressed. `NODE_CARD_WIDTH` / `NODE_CARD_HEIGHT` are shared with
  * the layout maths in `lib/nodeLayout.ts` and must match the CSS.
  *
+ * **The card is a real `<button>`.** Selecting an agent is an
+ * activation, so the card is a native toggle button
+ * (`type="button"` + `aria-pressed`) rather than a `<div
+ * role="button">` with hand-written `tabindex` and Enter/Space
+ * handlers. The browser then owns the button role, the focus ring and
+ * the keyboard activation on every device, and the manual handlers
+ * cannot drift out of sync (a native button already synthesises a
+ * `click` from Enter and Space, so a `keydown` handler on top of it
+ * would fire the toggle twice). Nothing interactive encloses the
+ * card — `.tg-canvas-wrap` → `.tg-canvas-content` → `.tg-node-overlay`
+ * are all plain divs — so no control is nested inside a control. The
+ * subtree is all `<span>` so the button keeps its phrasing-content
+ * content model. See the comment above the template for the detail.
+ *
  * **The pieces are the shared ones.** The tile is the package's
  * `AgentAvatar` (fed through `lib/agentAvatar.ts → avatarSubject()`,
  * the same snake_case→camelCase coercion the detail panel uses), the
@@ -92,32 +106,47 @@ function onActivate(): void {
 </script>
 
 <template>
-    <div
+    <!--
+        A real `<button type="button">`, not a `<div role="button">`:
+        the card is the only interactive element in its whole ancestor
+        chain (`.tg-canvas-wrap` → `.tg-canvas-content` →
+        `.tg-node-overlay` are all plain divs), so nothing nests inside
+        another control and the native element costs nothing. In return
+        the browser owns focus, the focus ring, Enter/Space activation
+        and the `button` role on every device — no `role`, no
+        `tabindex`, and no hand-rolled `keydown` handlers to keep in
+        sync (a native button synthesises a `click` from Enter and
+        Space, so a `keydown` handler would double-fire the toggle).
+        `aria-pressed` is the one attribute kept: it is what makes this
+        a *toggle* button rather than a plain action button.
+
+        Everything inside is a `<span>` so the subtree stays phrasing
+        content, which is the content model `<button>` allows.
+        `AgentAvatar` and `Icon` already render `span` / `svg` roots.
+    -->
+    <button
+        type="button"
         :class="cardClass"
         :style="{ transform: `translate3d(${x}px, ${y}px, 0)` }"
         :data-testid="`tg-node-${node.id}`"
         :data-node-id="node.id"
         :aria-pressed="selected"
-        role="button"
-        tabindex="0"
         data-tg-no-pan
         @click="onActivate"
-        @keydown.enter.prevent="onActivate"
-        @keydown.space.prevent="onActivate"
     >
         <AgentAvatar
             :agent="avatar"
             size="sm"
             class="tg-node-card-avatar"
         />
-        <div class="tg-node-card-body">
-            <div class="tg-node-card-row1">
+        <span class="tg-node-card-body">
+            <span class="tg-node-card-row1">
                 <span
                     class="tg-node-card-name"
                     :title="node.name"
                 >{{ node.name }}</span>
-            </div>
-            <div class="tg-node-card-row2">
+            </span>
+            <span class="tg-node-card-row2">
                 <span
                     class="tg-status-pill tg-node-card-pill"
                     :class="pillClass"
@@ -149,7 +178,7 @@ function onActivate(): void {
                         <span class="sr-only">outbound</span>{{ outbound }}
                     </span>
                 </span>
-            </div>
-        </div>
-    </div>
+            </span>
+        </span>
+    </button>
 </template>
