@@ -188,6 +188,59 @@ describe('AgentNodeCard — status pill', () => {
         expect(pill.classes()).toContain('tg-status-completed')
         expect(pill.text()).toBe('idle')
     })
+
+    /**
+     * All eleven wire statuses, on the card that has to stay one fixed box.
+     *
+     * The card's status row is sized to a *single* line, and the pill
+     * ellipsises whatever does not fit — so the label is still in the DOM
+     * in full (a screen reader reads it whole, and the `title` shows it on
+     * hover) even where the visible text is truncated. That is the whole
+     * trade this card makes for being a fixed box, and this is the test
+     * that says the *label* is never lost even when the pixels are.
+     *
+     * The rendered pixel width/height of the pill is a browser
+     * measurement (reported in the change that introduced this); what is
+     * assertable here is that every status reaches the DOM whole, carries
+     * the single-line class, and hands the full string to `title`.
+     */
+    it('renders all 11 statuses in full, on a single-line pill, with the label in the title', () => {
+        const ALL: GraphNode['status'][] = [
+            'RUNNING',
+            'PENDING_APPROVAL',
+            'AWAITING_SUB_AGENTS',
+            'AWAITING_INPUT',
+            'AWAITING_FINAL_APPROVAL',
+            'APPROVED',
+            'FAILED',
+            'ABORTED',
+            'COMPLETED',
+            'CANCELLED',
+            'QUEUED',
+        ]
+        const labels = new Set<string>()
+        for (const status of ALL) {
+            const wrapper = mountCard({}, makeNode({ status }))
+            const pill = wrapper.find('.tg-status-pill')
+            // `WireStatus` is nullable, so it cannot be a vitest assertion
+            // message; every entry here is a real enum case, so `String()`
+            // is exact.
+            const which = String(status)
+            // The card's own class is what makes the label one line; it has
+            // to be on the element, not merely implied by the shared pill.
+            expect(pill.classes(), which).toContain('tg-node-card-pill')
+            const text = pill.text().trim()
+            expect(text.length, which).toBeGreaterThan(0)
+            expect(pill.attributes('title'), which).toBe(text)
+            labels.add(text)
+        }
+        // 11 statuses, 11 distinct labels — none of them collapses onto
+        // another's text (three of them share the `awaiting` colour slug,
+        // so their text is the only thing that tells them apart).
+        expect(labels.size).toBe(11)
+        // The label that used to need a three-line reserve.
+        expect(labels).toContain('awaiting final approval')
+    })
 })
 
 describe('AgentNodeCard — edge-degree badges', () => {

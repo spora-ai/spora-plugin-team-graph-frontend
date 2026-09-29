@@ -365,6 +365,17 @@
  * `translate3d(x, y, 0)` is written inline by `AgentNodeCard.vue`
  * from the measured node centre; `position: absolute` keeps every
  * card out of flow.
+ *
+ * **`padding: 9px 13px` is the prototype's and is unchanged**, even
+ * though the tile is 44 px where the prototype's is 32: the padding
+ * was never what was wrong. The card read as badly padded because the
+ * status row reserved 46 px for a label that needs 19.2, leaving a
+ * hole in front of the bottom padding — see `.tg-node-card-row2` and
+ * `.tg-node-card-pill` below. With the reserve gone the four insets
+ * render at the prototype's own values again (measured 10 / 11 / 14 /
+ * 14 px, top / bottom / left / right, in both themes — the extra pixel
+ * at the bottom is the 1.5 px border rounded to a whole one, and it was
+ * there before this change too).
  */
 .tg-node-card {
     position: absolute;
@@ -485,13 +496,24 @@
  * centre and the tile's centre is 0.000 px, in both themes.
  */
 .tg-node-card-row1 { display: flex; align-items: center; gap: 6px; block-size: var(--tg-avatar-size); }
+/**
+ * Row 2 is the pill and the edge-count badges, and its `min-height` is
+ * the status row's *content* height, not a reserve for a label that
+ * might wrap: `NODE_CARD_ROW2_HEIGHT` in `lib/nodeLayout.ts` derives it
+ * as the taller of the pill's own box (11 px × 1.2 + 2 × 3 = 19.2 px)
+ * and the badges' (10 px × 1.4 + 2 × 1 = 16 px), and `NODE_CARD_HEIGHT`
+ * adds it in. The two numbers have to move together or the card either
+ * grows a hole or clips its own pill — asserted in
+ * `tests/lib/nodeLayout.spec.ts`. See `.tg-node-card-pill` below for why
+ * the label no longer wraps.
+ */
 .tg-node-card-row2 {
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 6px;
     margin-top: 4px;
-    min-height: 46px;
+    min-height: 19.2px;
 }
 .tg-node-card-name {
     font-size: 13px;
@@ -505,10 +527,9 @@
 .tg-node-card-badges { display: flex; gap: 4px; flex-shrink: 0; }
 
 /**
- * Status pill — Variant M shape (a tinted capsule that wraps to two
- * lines inside the fixed-width card) on top of the colour map the
- * plugin has always used. `--tg-status-color` is the single knob:
- * the six `.tg-status-*` slugs below set it and everything else
+ * Status pill — Variant M shape (a tinted capsule) on top of the colour
+ * map the plugin has always used. `--tg-status-color` is the single
+ * knob: the six `.tg-status-*` slugs below set it and everything else
  * derives from it via `color-mix`, so there is exactly one
  * status → colour table in the plugin (the one `lib/nodeStatus.ts →
  * statusPillClass()` names) shared with `AgentStatusChip.vue`.
@@ -516,6 +537,12 @@
  * `color-mix()` is the same idiom `Avatar` uses for its archetype
  * gradient and `lib/agentAvatar.ts` for the status ring, so the
  * tints sit in the same lightness band as the package's swatches.
+ *
+ * `max-width` / `white-space: normal` are the prototype's, and they are
+ * here for the **panel** pills (the detail header), not the card's: the
+ * card overrides both in `.tg-node-card-pill` below, because a label
+ * that wraps makes the card a different height for a different status
+ * and a fixed box cannot afford that.
  */
 .tg-status-pill {
     --tg-status-color: #94a3b8;
@@ -530,13 +557,6 @@
     border-radius: 10px;
     background: color-mix(in srgb, var(--tg-status-color) 14%, white);
     color: color-mix(in srgb, var(--tg-status-color) 45%, #0f172a);
-    /* Long status labels ("awaiting final approval") wrap inside the
-     * fixed-width card instead of pushing the badges off it. At 92 px
-     * the longest label the shared `STATUS_PALETTE` can produce is
-     * three lines (measured 45.563 px), which is the height
-     * `NODE_CARD_ROW2_MIN_HEIGHT` reserves in `lib/nodeLayout.ts` —
-     * so a wrapped pill can never grow past the row, and the row can
-     * never grow past the card. */
     max-width: 92px;
     white-space: normal;
     text-align: center;
@@ -551,6 +571,42 @@
     align-self: flex-start;
     margin-top: 2px;
     background: var(--tg-status-color);
+}
+
+/**
+ * The card's own pill: **one line, always**, so the card is one box for
+ * every status.
+ *
+ * This is what removed the 46 px worst-case status-row reserve. The
+ * shared pill above wraps a long label — measured, "awaiting approval"
+ * and "awaiting sub-agent" take two lines and "awaiting final approval"
+ * three — and a card whose height then depends on its status cannot be
+ * the fixed box `nodeLayout.ts` / `edgeGeometry.ts` /
+ * `useMermaidRender.ts` all agree on. So the label is taken on a single
+ * line and the overflow is ellipsised, which is what
+ * `.tg-chat-row-status` already did for the same reason: a truncated
+ * status is better than a card that changes size, and the full string
+ * is still on the card (`title`) and in the detail panel.
+ *
+ * `min-width: 0` is load-bearing, not tidy-up. A flex item's automatic
+ * minimum size is its **min-content** width, and a `nowrap` item's
+ * min-content width is the whole label — so without it the pill refuses
+ * to shrink, blows past its share of the row and pushes the edge-count
+ * badges off the right edge of the card. With it, `text-overflow` can
+ * engage and the row's `justify-content: space-between` still holds.
+ *
+ * `max-width: 92px` is inherited from the shared rule above and the
+ * arithmetic in the row is tighter than it anyway: the row is 158 px
+ * wide and the two badges take 67.5 of it, so the pill can never get
+ * more than 84.5 px (measured 84.469 for every one of the eleven
+ * labels). The declared cap is kept because it is the number that keeps
+ * the label column recognisable if the card is ever widened.
+ */
+.tg-node-card-pill {
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 .tg-status-running  { --tg-status-color: #10b981; }
 .tg-status-pending  { --tg-status-color: #6366f1; }

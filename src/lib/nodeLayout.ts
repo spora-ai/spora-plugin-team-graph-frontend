@@ -75,46 +75,96 @@ export const NODE_CARD_WIDTH = 240
 export const NODE_CARD_AVATAR_SIZE = 44
 
 /**
- * The card's block padding, its border, the gap between the two rows
- * and the status row's reserved height — the four terms of
- * `NODE_CARD_HEIGHT` below. They are named (rather than inlined into
- * the sum) so the height reads as the equation the stylesheet
- * implements, and so a future resize changes one line.
+ * The card's block padding, its border, and the gap between the two
+ * rows — three of the terms of `NODE_CARD_HEIGHT` below. They are named
+ * (rather than inlined into the sum) so the height reads as the
+ * equation the stylesheet implements, and so a future resize changes
+ * one line.
  *
- * `NODE_CARD_ROW2_MIN_HEIGHT` is not cosmetic: the status pill wraps to
- * two or three lines inside the fixed-width card, so the row's height
- * would otherwise vary with the *status* and the card would stop being a
- * fixed box. Reserving the pill's **three**-line height is what makes one
- * `NODE_CARD_HEIGHT` correct for every agent. Three, not two, because the
- * shared `STATUS_PALETTE`'s longest label ("awaiting final approval")
- * does not fit on two inside the pill's 92 px `max-width` beside the
- * edge badges: measured at 45.563 px tall — 3 × the 13.2 px line box
- * plus 6 px of block padding — where a two-line reserve is 32.4 px, and
- * the two-line card put that pill 0.563 px *below* its bottom edge. The
- * team-graph endpoint only ever emits `RUNNING` /
- * `AWAITING_SUB_AGENTS` / `PENDING_APPROVAL` / `COMPLETED` (see
- * `NodeResolver::resolveNodes`'s `status IN (…)` sub-select), whose
- * longest label is two lines, so the third line is headroom for the
- * `AWAITING_FINAL_APPROVAL` row `WireStatus` is widened to tolerate —
- * bought here rather than paid for as a card that overflows.
+ * `9px 13px` is the Variant M prototype's own block/inline padding, and
+ * `1.5px` its own border. The prototype sized those for a **32 px**
+ * tile; this card carries the 44 px one, so it is worth being explicit
+ * that the padding is unchanged on purpose: with the dead status-row
+ * reserve gone (below) the four insets render at the prototype's own
+ * values again — measured, in a headless browser in both themes, 10 px
+ * from the top border to row 1, 11 px from row 2 to the bottom border,
+ * and 14 px on the left and right (1 px painted border + 9 / 13 px
+ * padding). Chromium rounds the 1.5 px border down to a whole pixel at
+ * every device-pixel-ratio; the half pixel that costs lands as slack
+ * inside the `border-box` height, so the bottom inset reads one pixel
+ * deeper than the top. That 1 px is pre-existing (the 115 px card
+ * measured 10 / 11 / 14 / 14 too) and is a browser rounding artefact,
+ * not a padding the stylesheet got wrong — changing the declared border
+ * to a whole pixel would move the card's visual weight in engines I
+ * cannot measure here, to fix a difference no one can see.
  */
 export const NODE_CARD_BORDER = 1.5
 export const NODE_CARD_PADDING_BLOCK = 9
 export const NODE_CARD_ROW_GAP = 4
-export const NODE_CARD_ROW2_MIN_HEIGHT = 46
+
+/**
+ * The status row's height, derived from the two boxes that sit in it.
+ *
+ * **This replaces a worst-case reserve, and that is the whole point.**
+ * The row used to claim `min-height: 46px` — the status pill's
+ * *three*-line height — so that one `NODE_CARD_HEIGHT` could be correct
+ * for every agent, which is what a fixed-box card needs when its status
+ * can wrap. It is measured dead space: the longest label
+ * `statusLabel()` can produce, "awaiting final approval", needs
+ * 45.563 px (3 × the 13.2 px line box + 6 px of block padding), and
+ * **seven of the eleven** labels are one line (19.188 px). So every
+ * card — including the seven that had nothing to wrap — carried 26.8 px
+ * of empty row under the pill, and `NODE_CARD_HEIGHT` came out at 115
+ * where its own contents add up to 88.2. That is the 28 px the operator
+ * read as "the paddings are off": the top and inline padding were
+ * already right, and the bottom *looked* wrong because there was a hole
+ * in front of it.
+ *
+ * The reserve bought one thing: that a label which wraps cannot grow
+ * past a fixed box. It is no longer needed, because the pill no longer
+ * wraps. `.tg-node-card-pill` takes the label on **one** line
+ * (`white-space: nowrap` + `text-overflow: ellipsis`, the treatment
+ * `.tg-chat-row-status` already used for exactly this reason) and
+ * `min-width: 0`, which is the part that actually makes it work: a
+ * flex item's automatic minimum size is its min-content width, so
+ * without it a `nowrap` pill refuses to shrink below its full label and
+ * pushes the edge badges off the card. The label survives intact in the
+ * DOM — `textContent`, the `title` on the card's pill, and the detail
+ * panel all carry it in full — so nothing is lost, and a card can no
+ * longer overflow however long a status string the wire grows.
+ *
+ * So the row is now exactly as tall as its content, and the content is
+ * the taller of the two boxes it holds. Measuring both is what keeps
+ * the equation true: raise the badge's font size and the row, the card
+ * and the dagre spacing all move together.
+ */
+export const NODE_CARD_PILL_FONT_SIZE = 11
+export const NODE_CARD_PILL_LINE_HEIGHT = 1.2
+export const NODE_CARD_PILL_PADDING_BLOCK = 3
+export const NODE_CARD_PILL_HEIGHT =
+    NODE_CARD_PILL_FONT_SIZE * NODE_CARD_PILL_LINE_HEIGHT + NODE_CARD_PILL_PADDING_BLOCK * 2
+
+export const NODE_CARD_BADGE_FONT_SIZE = 10
+export const NODE_CARD_BADGE_LINE_HEIGHT = 1.4
+export const NODE_CARD_BADGE_PADDING_BLOCK = 1
+export const NODE_CARD_BADGE_HEIGHT =
+    NODE_CARD_BADGE_FONT_SIZE * NODE_CARD_BADGE_LINE_HEIGHT + NODE_CARD_BADGE_PADDING_BLOCK * 2
+
+/** The status row: the taller of the pill and the edge-count badges. 19.2 px. */
+export const NODE_CARD_ROW2_HEIGHT = Math.max(NODE_CARD_PILL_HEIGHT, NODE_CARD_BADGE_HEIGHT)
 
 /**
  * Card height in content-layer pixels, *derived* from the parts above
  * rather than authored beside them: border + block padding + the
  * headline row (which is exactly the tile's edge, so the headline is
- * centred on the tile) + the row gap + the status row.
+ * centred on the tile) + the row gap + the status row. 88.2 px.
  */
 export const NODE_CARD_HEIGHT =
     NODE_CARD_BORDER * 2 +
     NODE_CARD_PADDING_BLOCK * 2 +
     NODE_CARD_AVATAR_SIZE +
     NODE_CARD_ROW_GAP +
-    NODE_CARD_ROW2_MIN_HEIGHT
+    NODE_CARD_ROW2_HEIGHT
 
 /**
  * Padding between the rendered content's bounding box and the

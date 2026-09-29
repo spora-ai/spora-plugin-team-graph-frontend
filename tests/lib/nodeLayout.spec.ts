@@ -3,10 +3,12 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import {
     NODE_CARD_AVATAR_SIZE,
+    NODE_CARD_BADGE_HEIGHT,
     NODE_CARD_BORDER,
     NODE_CARD_HEIGHT,
     NODE_CARD_PADDING_BLOCK,
-    NODE_CARD_ROW2_MIN_HEIGHT,
+    NODE_CARD_PILL_HEIGHT,
+    NODE_CARD_ROW2_HEIGHT,
     NODE_CARD_ROW_GAP,
     NODE_CARD_WIDTH,
     SVG_PADDING,
@@ -16,6 +18,8 @@ import {
     parseTranslate,
     viewBoxOrigin,
 } from '../../src/lib/nodeLayout'
+import { statusLabel } from '../../src/lib/nodeStatus'
+import type { WireStatus } from '../../src/types'
 
 /**
  * `lib/nodeLayout.ts` — the Option C coordinate bridge.
@@ -31,17 +35,21 @@ describe('node card constants', () => {
     it('keeps the Variant M width and derives the height from the box\'s own parts', () => {
         // 240 px of width is the prototype's and is not negotiable; the
         // height is *computed*, so the tile, the padding, the border, the
-        // row gap and the reserved status row can never add up to less
-        // than the box they have to fit inside.
+        // row gap and the status row can never add up to less than
+        // the box they have to fit inside. Every term is a named constant,
+        // so a resize is a one-line change in all three consumers
+        // (`nodeLayout`, `edgeGeometry`, `useMermaidRender`) and this
+        // arithmetic follows.
         expect(NODE_CARD_WIDTH).toBe(240)
         expect(NODE_CARD_HEIGHT).toBe(
             NODE_CARD_BORDER * 2 +
             NODE_CARD_PADDING_BLOCK * 2 +
             NODE_CARD_AVATAR_SIZE +
             NODE_CARD_ROW_GAP +
-            NODE_CARD_ROW2_MIN_HEIGHT,
+            NODE_CARD_ROW2_HEIGHT,
         )
-        expect(NODE_CARD_HEIGHT).toBe(115)
+        // 1.5×2 border + 9×2 padding + 44 tile + 4 gap + 19.2 status row.
+        expect(NODE_CARD_HEIGHT).toBe(88.2)
     })
 
     it('reserves the tile the whole headline row, so the two can be aligned', () => {
@@ -55,18 +63,24 @@ describe('node card constants', () => {
         expect(NODE_CARD_AVATAR_SIZE).toBe(44)
     })
 
-    it('leaves room for the tallest status pill the shared palette can produce', () => {
+    it('derives the status row from its two boxes instead of reserving a worst case', () => {
         /*
-         * `.tg-status-pill { max-width: 92px; white-space: normal }` wraps
-         * "awaiting final approval" onto three lines, measured at
-         * 45.563 px (3 × the 13.2 px line box + 6 px of block padding).
-         * The reserve has to clear that or the pill hangs 0.563 px below
-         * the card's bottom edge — a fixed box that its own contents
-         * overflow.
+         * The row is exactly as tall as the taller of the two boxes it
+         * holds. The pill is one line (`.tg-node-card-pill` sets
+         * `white-space: nowrap` + `text-overflow: ellipsis`), so its box
+         * is 11 px × 1.2 + 2 × 3 = 19.2 px; the badges are
+         * 10 px × 1.4 + 2 × 1 = 16 px. The pill wins, so the row is
+         * 19.2 px and the card is 88.2 px — not the 115 px it was when the
+         * row reserved the pill's three-line height.
          */
+        expect(NODE_CARD_PILL_HEIGHT).toBeCloseTo(19.2, 5)
+        expect(NODE_CARD_BADGE_HEIGHT).toBeCloseTo(16, 5)
+        expect(NODE_CARD_ROW2_HEIGHT).toBe(Math.max(NODE_CARD_PILL_HEIGHT, NODE_CARD_BADGE_HEIGHT))
+        // The old worst case (the pill on three lines) is 45.6 px; the row
+        // must NOT reserve it any more, or the 26.8 px hole comes back.
         const threeLinePill = 3 * 13.2 + 2 * 3
         expect(threeLinePill).toBeCloseTo(45.6, 1)
-        expect(NODE_CARD_ROW2_MIN_HEIGHT).toBeGreaterThanOrEqual(threeLinePill)
+        expect(NODE_CARD_ROW2_HEIGHT).toBeLessThan(threeLinePill)
     })
 
     it('leaves a positive margin around the rendered content', () => {
@@ -75,11 +89,93 @@ describe('node card constants', () => {
 })
 
 /**
+ * The status row fits every label `statusLabel()` can produce, on one
+ * line, with no card overflow — the property the 46 px worst-case reserve
+ * used to buy by brute force and that `.tg-node-card-pill`'s
+ * `text-overflow: ellipsis` now buys by construction.
+ *
+ * **What this can and cannot assert without a layout engine.** happy-dom
+ * has no cascade, no flexbox and no text metrics, so the *rendered* pill
+ * box is measured in a real browser (see `tests/fixtures/`) and reported in
+ * the change that introduced it. What is assertable here — and what would
+ * actually regress — is the contract the CSS and the constants encode:
+ *
+ *   1. The row is one line tall for *every* status, so no label can make
+ *      the row, and therefore the card, taller than `NODE_CARD_HEIGHT`.
+ *      The pill's reserved height is its single-line height by
+ *      construction (`NODE_CARD_PILL_HEIGHT`).
+ *   2. The card's declared height accommodates that row plus everything
+ *      above it (the height is the sum, asserted above), so a one-line row
+ *      cannot overflow the box.
+ *   3. The pill cannot grow horizontally past the row: `flex-shrink: 1`
+ *      plus `min-width: 0` lets it shrink to the row's own width, and
+ *      `overflow: hidden` + `text-overflow: ellipsis` clips whatever is
+ *      left rather than pushing the edge-count badges off the card.
+ *
+ * The 11 labels are asserted to be non-empty and to include the longest
+ * one, so a future `statusLabel()` that returns something longer is caught
+ * here rather than only on screen.
+ */
+describe('the status row fits every real status on one line', () => {
+    const ALL: WireStatus[] = [
+        'RUNNING',
+        'PENDING_APPROVAL',
+        'AWAITING_SUB_AGENTS',
+        'AWAITING_INPUT',
+        'AWAITING_FINAL_APPROVAL',
+        'APPROVED',
+        'FAILED',
+        'ABORTED',
+        'COMPLETED',
+        'CANCELLED',
+        'QUEUED',
+    ]
+    const css = readFileSync(resolve(process.cwd(), 'src/style.css'), 'utf8')
+        .replace(/\/\*[\s\S]*?\*\//g, ' ')
+        .replace(/\s+/g, ' ')
+
+    it('has 11 statuses, and the longest label is the three-word one', () => {
+        expect(ALL).toHaveLength(11)
+        const labels = ALL.map((s) => statusLabel(s))
+        expect(labels.every((l) => l.length > 0)).toBe(true)
+        expect(statusLabel('AWAITING_FINAL_APPROVAL')).toBe('awaiting final approval')
+        // The label that used to force the three-line reserve.
+        expect(labels).toContain('awaiting final approval')
+    })
+
+    it('renders the card pill on a single, ellipsised line so no status can overflow', () => {
+        // These three declarations are the whole mechanism, asserted as
+        // text because happy-dom cannot lay them out. `min-width: 0` is
+        // load-bearing (a flex item's automatic minimum size is its
+        // min-content width, so a `nowrap` pill without it refuses to
+        // shrink and pushes the badges off the card); `overflow: hidden` +
+        // `text-overflow: ellipsis` are what make the remainder a truncated
+        // label rather than a clipped one.
+        expect(css).toContain(
+            '.tg-node-card-pill { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }',
+        )
+    })
+
+    it('never lets the row exceed one line, whatever the label', () => {
+        // The card cannot overflow because its height is the sum of parts
+        // and the status row is one of those parts at a fixed, single-line
+        // size. The assertion is a pair of bounds: the row is *at least*
+        // the pill (so the pill is never clipped by its own row) and
+        // *strictly less* than the three-line worst case (so the reserve
+        // is gone and the hole cannot come back).
+        expect(NODE_CARD_ROW2_HEIGHT).toBeGreaterThanOrEqual(NODE_CARD_PILL_HEIGHT)
+        expect(NODE_CARD_ROW2_HEIGHT).toBeLessThan(3 * 13.2 + 2 * 3)
+        // And the whole card still has room for it.
+        expect(NODE_CARD_HEIGHT).toBeGreaterThanOrEqual(NODE_CARD_PILL_HEIGHT)
+    })
+})
+
+/**
  * The footprint is load-bearing in four places, and three of them read
  * these constants — so the fourth (the CSS that actually paints the box)
  * has to read them too, or the arrowheads detach from the cards again.
  * This is the guard on that seam: it fails the build if a
- * `width: 240px; height: 115px` pair ever reappears in the stylesheet
+ * `width: 240px; height: …` pair ever reappears in the stylesheet
  * next to the constants that define it.
  */
 describe('the stylesheet takes the card footprint from these constants', () => {
@@ -107,10 +203,10 @@ describe('the stylesheet takes the card footprint from these constants', () => {
     })
 
     it('reserves the status row the derived height is built from', () => {
-        // If this drifts from `NODE_CARD_ROW2_MIN_HEIGHT` the card either
+        // If this drifts from `NODE_CARD_ROW2_HEIGHT` the card either
         // grows a hole or clips its own pill — the derivation would still
         // be self-consistent and still wrong.
-        expect(css).toContain(`min-height: ${NODE_CARD_ROW2_MIN_HEIGHT}px;`)
+        expect(css).toContain(`min-height: ${NODE_CARD_ROW2_HEIGHT}px;`)
         expect(css).toContain(`margin-top: ${NODE_CARD_ROW_GAP}px;`)
         expect(css).toContain(`padding: ${NODE_CARD_PADDING_BLOCK}px 13px;`)
         expect(css).toContain(`border: ${NODE_CARD_BORDER}px solid #7c3aed;`)

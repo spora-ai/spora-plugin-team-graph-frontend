@@ -13,24 +13,40 @@
  *
  *   - avatar tile **left**, name **top-right**,
  *   - status pill **bottom-left**, edge-count badges **bottom-right**,
- *   - fixed **240 × 115 px** box, ellipsised name,
+ *   - fixed **240 px** box whose height is derived from its own parts
+ *     in `lib/nodeLayout.ts`, ellipsised name,
  *   - `↑ N` inbound green / `↓ N` outbound violet, and a distinct
  *     slate `.zero` style **per badge** when that badge's own count
  *     is 0 — a 0-inbound node is an entry-point agent, and that
  *     distinction is signal, not noise.
  *
  * **The tile is `size="md"` (44 px) and the headline sits on it.** The
- * 240 px width is the Variant M prototype's; the 115 px height is
- * *derived* from the box's own parts in `lib/nodeLayout.ts`
- * (`border + block padding + tile + row gap + status row`), so the
- * headline row can be exactly as tall as the tile and the name's line
- * box ends up centred on the tile's centre. That is the whole reason
- * the card grew: a 44 px tile cannot be centre-aligned with a 15.6 px
- * headline inside a box whose padding is uniform — aligning the two
- * centres needs the tile to overhang the top padding by half the
- * difference — so the alignment is bought with a taller first row
- * rather than with a negative margin. Measured in the browser, the
- * delta between the two centres is 0.000 px in both themes.
+ * 240 px width is the Variant M prototype's; the height is *derived*
+ * from the box's own parts in `lib/nodeLayout.ts` (`border + block
+ * padding + tile + row gap + status row`), so the headline row can be
+ * exactly as tall as the tile and the name's line box ends up centred
+ * on the tile's centre. That is the whole reason the card grew: a
+ * 44 px tile cannot be centre-aligned with a 15.6 px headline inside a
+ * box whose padding is uniform — aligning the two centres needs the
+ * tile to overhang the top padding by half the difference — so the
+ * alignment is bought with a taller first row rather than with a
+ * negative margin. Measured in the browser, the delta between the two
+ * centres is 0.000 px in both themes.
+ *
+ * **The status row is sized to its content, so the label does not
+ * wrap.** It used to reserve the pill's three-line height, which made
+ * every card 115 px tall and left 26.8 px of empty row under the pill
+ * on all of them — the "the paddings are off" report. The pill now
+ * takes its label on one line and ellipsises (`.tg-node-card-pill` in
+ * `style.css`), which puts the card at its natural 88.2 px for every
+ * status. The full label is not lost: it stays in the DOM as the
+ * pill's text, so a screen reader reads it whole; it is the pill's
+ * `title` on hover; and the detail panel shows it in full. The
+ * ellipsis is visible on the three longest labels — the `awaiting *`
+ * family, which share one colour slug — so the canvas text is
+ * genuinely less specific than it was. That is the trade this card
+ * makes for being a fixed box, and it is the same one
+ * `.tg-chat-row-status` already makes in the sidebar.
  *
  * **Everything visual lives in `style.css`** (`.tg-node-card` and
  * friends) so the card markup stays a pure structure and the CSS
@@ -99,7 +115,15 @@ const props = defineProps<{
 const emit = defineEmits<{ toggle: [id: number] }>()
 
 const avatar = computed(() => avatarSubject(props.node))
-const pillClass = computed(() => statusPillClass(props.node.status))
+/**
+ * The pill's whole class list in one binding: the shared `.tg-status-pill`
+ * the panel chip and the chat rows also use, the card's own
+ * `.tg-node-card-pill` (which is what makes the label one line), and the
+ * status slug. Merged rather than split across a static `class` and a
+ * `:class` so the element keeps two attributes — the same count it had
+ * before `title` joined it, and one attribute per line.
+ */
+const pillClass = computed(() => `tg-status-pill tg-node-card-pill ${statusPillClass(props.node.status)}`)
 const pillText = computed(() => statusLabel(props.node.status))
 
 /**
@@ -198,8 +222,8 @@ function onActivate(): void {
             </span>
             <span class="tg-node-card-row2">
                 <span
-                    class="tg-status-pill tg-node-card-pill"
                     :class="pillClass"
+                    :title="pillText"
                 >
                     <span class="dot" />
                     {{ pillText }}
