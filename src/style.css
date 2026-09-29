@@ -119,11 +119,25 @@
  * and friends — stays available. That matters: `useMermaidRender.ts`
  * paints its error fallback with `text-red-500`.
  *
- * Note what is *not* here: `--color-card` / `--color-card-foreground`.
- * v3's `theme.extend.colors` didn't define `card` either, so the
- * `bg-card text-card-foreground surface-card` classes in the SFCs were
- * already inert here and are styled by the host SPA. Adding the tokens
- * would be a design change, not a build-tooling one.
+ * **`--color-card` is the host's own mapping, copied verbatim.** There
+ * is no `--card` token: `spora-frontend/src/style.css` line 117 maps
+ * `--color-card: hsl(var(--background))`, i.e. in this design system a
+ * card *is* the page background, separated by `border-border` and a
+ * radius — which is why every card in the SPA (`AccountPage`,
+ * `ProfileSettingsPage`, `PluginAppPage`) is
+ * `rounded-xl border border-border bg-card` with no shadow and no fill
+ * of its own. Mirroring the host's line rather than inventing a card
+ * colour is what keeps the plugin on the same page as the rest of the
+ * app in both themes.
+ *
+ * `--color-card-foreground` is the one value with no host counterpart:
+ * the SPA never uses a `text-card-foreground` utility, so it never
+ * needed the token. The SFCs do use it (shadcn's card/foreground
+ * pairing), and leaving it undefined meant the class resolved to
+ * nothing at computed-value time — the same silent failure as a bare
+ * `var()`. `hsl(var(--foreground))` is the only value that invents
+ * nothing: it is the host's own foreground token, i.e. exactly what
+ * the panel's text already inherited before the class existed.
  */
 @theme {
     --font-sans: 'Barlow', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', 'Noto Sans', Arial, sans-serif;
@@ -144,6 +158,8 @@
     --color-muted-foreground: hsl(var(--muted-foreground));
     --color-accent: hsl(var(--accent));
     --color-accent-foreground: hsl(var(--accent-foreground));
+    --color-card: hsl(var(--background));
+    --color-card-foreground: hsl(var(--foreground));
 
     --radius-lg: var(--radius);
     --radius-md: calc(var(--radius) - 2px);
@@ -180,12 +196,15 @@
     font-size: 14px;
     line-height: 1.5;
     /*
-     * No `color` / `background` here, and that is the point: the
-     * detail panel is deliberately surface-less (`.surface-card` and
-     * `bg-card` are inert — see the `@theme` note above), so every
-     * colour it paints is a *token* read against whatever the host
-     * page renders behind it. Pinning `color: #1f2937` would have
-     * hard-coded a light-theme text colour onto that surface.
+     * No `color` / `background` here, and that is still the point:
+     * the plugin root spans the full page, so painting a fill on it
+     * would repaint the host's `body`. Every *card* inside it carries
+     * its own surface instead — `surface-card` below, which is the same
+     * `hsl(var(--background))` the host paints `body` with, so a card
+     * is the page plus a hairline `border-border` and a radius. That
+     * is the host's own card idiom (`PluginAppPage.vue:165`), and it
+     * is what makes the detail panel's text legible in both themes
+     * without this root pinning a light-theme colour of its own.
      */
 }
 
@@ -580,13 +599,31 @@
  * `spora-frontend/src/style.css` — not as colours, so a bare
  * `var(--border)` in a `border-color` is an invalid value and the
  * whole declaration is dropped at computed-value time, silently
- * falling back to `currentColor` / the initial value. Measured in a
- * headless browser with the host's real tokens loaded:
- * `border-top: 1px solid var(--border)` computes to `rgb(31, 41, 55)`
- * (inherited from the page) rather than the intended
- * `hsl(240 5.9% 90%)` = `rgb(229, 229, 231)`. The sidebar rules that
- * predate this change and used the bare form were fixed along with it;
- * see `.tg-edge-row:hover`.
+ * falling back to the initial value. The sidebar rules that predate
+ * this change and used the bare form were fixed along with it; see
+ * `.tg-edge-row:hover`.
+ *
+ * Re-measured for this pass, because the earlier note in this comment
+ * described the failure imprecisely enough to mislead a debugger. It
+ * read: "computes to `rgb(31, 41, 55)` (inherited from the page)".
+ * The colour is real, but the inference from it was not: `rgb(31, 41,
+ * 55)` is the *initial* `border-top-color` inside a
+ * `color: #1f2937` container (the plugin's own old `html, body, #app`
+ * rule, now gone), not a sign that the declaration degraded to a
+ * colour fallback. `border-top` is a **shorthand**, so
+ * `1px solid var(--border)` invalidates all of it at once. Measured
+ * with the host's real tokens loaded:
+ *
+ *     light, bare            →  0px none rgb(9, 9, 11)
+ *     light, hsl()           →  1px solid rgb(228, 228, 231)
+ *     light, bare, inside a
+ *             #1f2937 parent →  0px none rgb(31, 41, 55)
+ *     dark,  bare            →  0px none rgb(250, 250, 250)
+ *     dark,  hsl()           →  1px solid rgb(39, 39, 42)
+ *
+ * The `border-top-style: none` is the load-bearing part: the width is
+ * 0, so *no rule is drawn at all* — the same end state a colour
+ * fallback produces, arrived at for a completely different reason.
  */
 .tg-panel-section + .tg-panel-section {
     margin-top: -4px;
@@ -1013,11 +1050,10 @@
  * the sidebar pass's stated scope — but they had the same
  * `var(--token)`-without-`hsl()` bug as the sidebar rows, so a
  * pill's hover background and label colour were both silently
- * dropped. They are fixed here for consistency rather than left
- * visibly broken next to a sidebar that now works. The one block
- * that was left alone is `.tg-zoom-btn` at the bottom of this file:
- * that is canvas chrome, which this pass was explicitly told not to
- * touch, and it carries the same defect (see the report).
+ * dropped. They were fixed for consistency rather than left visibly
+ * broken next to a sidebar that now works; `.tg-zoom-btn` at the
+ * bottom of this file carried the identical defect and is now fixed
+ * too. `scripts/smoke.js` fails the build if either form comes back.
  */
 .tg-pill {
     display: inline-flex; align-items: center; gap: 6px;
@@ -1050,8 +1086,84 @@
     border: 1px solid hsl(var(--border));
 }
 
+/**
+ * Zoom-button stack — the last of the `var(--token)`-without-`hsl()`
+ * bug class, and the one that was easiest to miss because the rule
+ * block sits at the very bottom of the file with no comment above it.
+ *
+ * All four declarations were the bare form and all four were
+ * invalid at computed-value time, which is silent: no build error, no
+ * failing test, and a control that still *looks* like a control.
+ * Measured in a headless browser with the host's real tokens loaded
+ * (`--muted-foreground: 240 4% 38%`, `--muted: 240 4.8% 95.9%`,
+ * `--border: 240 5.9% 90%`), light theme, before → after:
+ *
+ *   icon `color`      rgb(9, 9, 11)     → rgb(93, 93, 101)
+ *   icon `stroke`     rgb(9, 9, 11)     → rgb(93, 93, 101)
+ *   `:hover` fill     rgba(0, 0, 0, 0)  → rgb(244, 244, 245)
+ *   divider `border`  0px none          → 1px solid rgb(228, 228, 231)
+ *
+ * Dark, same four readings: `rgb(9, 9, 11)` → `rgb(161, 161, 170)`
+ * (`--muted-foreground` is `240 5% 64.9%`), `rgba(0, 0, 0, 0)` →
+ * `rgb(39, 39, 42)` (`--muted` is `240 3.7% 15.9%`), and `0px none` →
+ * `1px solid rgb(39, 39, 42)` (`--border`). Nothing about either set
+ * looks like an error on its own, which is the whole problem: a colour
+ * that resolves is indistinguishable from a colour that fell back to
+ * `inherit`.
+ *
+ * The icon colour was the one that did not look broken: `color` fell
+ * back to the *inherited* value, so the button rendered in the page's
+ * text colour — a valid colour, just not the quiet muted one, so the
+ * three glyphs shouted at the same weight as the panel's headings.
+ * The hover fill went to `transparent`, i.e. there was no hover
+ * affordance at all. The divider is the interesting one: because
+ * `border-top: 1px solid var(--border)` is a *shorthand*, the whole
+ * declaration was dropped rather than just its colour, so the stack
+ * read as three floating buttons with no separation and the muted
+ * fill on hover bleeding straight through the seam.
+ *
+ * `hsl(var(--token))`, matching every other rule in this file — and
+ * enforced now: `scripts/smoke.js` walks the built stylesheet and
+ * fails on any bare `var(--<host token>)`, because nothing about
+ * this bug announces itself anywhere else.
+ */
 .tg-zoom-btn { width: 28px; height: 28px; display: flex; align-items: center; justify-content: center;
-               color: var(--muted-foreground); background: transparent; border: none; cursor: pointer;
+               color: hsl(var(--muted-foreground)); background: transparent; border: none; cursor: pointer;
                transition: background 120ms, color 120ms; }
-.tg-zoom-btn:hover { background: var(--muted); color: var(--foreground); }
-.tg-zoom-btn + .tg-zoom-btn { border-top: 1px solid var(--border); }
+.tg-zoom-btn:hover { background: hsl(var(--muted)); color: hsl(var(--foreground)); }
+.tg-zoom-btn + .tg-zoom-btn { border-top: 1px solid hsl(var(--border)); }
+
+/**
+ * The card surface — the plugin's marker for "this element is a
+ * surface", and the reason `surface-card` was on five elements in the
+ * SFCs while being defined nowhere.
+ *
+ * **Why a class and not just `@theme`.** The `@theme` block already
+ * carries `--color-card`, so the `bg-card` utility in the templates
+ * is live and does the job on four of the five elements. This rule
+ * exists for the fifth: the zoom stack in `TeamGraphCanvas.vue:306`
+ * is the one `surface-card` with no `bg-card` beside it, and with
+ * both classes inert it was a border and a `shadow-sm` around
+ * nothing — the three buttons sat directly on the canvas card. Rather
+ * than patch that one template and leave a class named
+ * `surface-card` undefined (i.e. permanently free to be inert again),
+ * the name is given the meaning it always implied.
+ *
+ * **`hsl(var(--background))`, not `var(--color-card)`.** Same colour,
+ * one fewer indirection — and the indirection is load-bearing risk,
+ * not DRY: Tailwind v4 tree-shakes `@theme` variables that no utility
+ * consumes, so `--color-card` is emitted only while some template
+ * still says `bg-card`. A hand-written rule leaning on it would go
+ * transparent the moment the last one did, which is the same silent
+ * failure one step further away. (Verified in the built sheet: of the
+ * 15 `--color-*` declarations in this `@theme`, only the 6 whose
+ * utilities appear in a template are emitted.) `smoke.js` separately
+ * asserts that `--color-card` *is* emitted, so the utility path is
+ * covered too.
+ *
+ * No shadow and no border here: every call site already carries
+ * `border border-border` plus a radius, which is the host's own card
+ * recipe (`PluginAppPage.vue:165`). Adding elevation would be a
+ * design change the host does not make.
+ */
+.surface-card { background-color: hsl(var(--background)); }

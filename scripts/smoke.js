@@ -15,7 +15,13 @@
  *  - the stylesheet still carries `@spora-ai/components`' rules
  *    unrenamed inside `@layer components` (the Tailwind v3
  *    `scopeVendorLayers` workaround must stay deleted),
- *  - the stylesheet still carries the plugin's own `.tg-*` rules.
+ *  - the stylesheet still carries the plugin's own `.tg-*` rules and
+ *    its `.surface-card` fill,
+ *  - no rule uses a bare `var(--<host token>)`: the host's tokens are
+ *    HSL channel triples, so the unwrapped form is an invalid value
+ *    that is dropped silently at computed-value time,
+ *  - `--color-card` / `--color-card-foreground` are still emitted, so
+ *    the detail panel keeps a real surface in both themes.
  */
 import { readFile } from 'node:fs/promises'
 import { resolve, dirname } from 'node:path'
@@ -108,12 +114,86 @@ if (!/@layer\s+components\s*\{/.test(css)) {
 // renders unstyled, which is invisible in a bundle-size diff.
 // The list tracks the *current* chrome: the Variant M node card
 // (`.tg-node-card`) replaced the Mermaid HTML label template
-// (`.tg-node-accent`) when node cards moved to a Vue overlay, and the
-// edge-degree badges (`.tg-edge-badge`) are new. Swapping a selector
-// out is fine; dropping a check is not.
-for (const sel of ['.tg-node-card', '.tg-status-running', '.tg-edge-badge']) {
+// (`.tg-node-accent`) when node cards moved to a Vue overlay, the
+// edge-degree badges (`.tg-edge-badge`) are new, and `.surface-card`
+// is the card surface the canvas and the detail panel paint.
+// Swapping a selector out is fine; dropping a check is not.
+for (const sel of ['.tg-node-card', '.tg-status-running', '.tg-edge-badge', '.surface-card']) {
     if (!css.includes(sel)) {
         failures.push(`stylesheet is missing the plugin's own ${sel} rule`)
+    }
+}
+
+/*
+ * The card surface must survive Tailwind's `@theme` tree-shaking.
+ *
+ * v4 emits a `--color-*` variable only while some template still uses
+ * the utility it backs — of the fifteen this plugin declares, only
+ * the handful whose utilities appear in an SFC reach the output. Drop
+ * the last `bg-card` from a template and `--color-card` disappears
+ * with it, at which point `background-color: var(--color-card)` is an
+ * invalid value again and the panel is transparent: the same silent
+ * failure this file's other guards exist for. `.surface-card` does not
+ * read the variable (see `src/style.css`), so the plugin keeps a
+ * working surface either way, but the utility path is worth asserting
+ * too because it is the one a refactor would remove.
+ */
+if (!/--color-card:hsl\(var\(--background\)\)/.test(css)) {
+    failures.push('stylesheet does not emit `--color-card: hsl(var(--background))` — the card surface is gone')
+}
+if (!/--color-card-foreground:hsl\(var\(--foreground\)\)/.test(css)) {
+    failures.push('stylesheet does not emit `--color-card-foreground: hsl(var(--foreground))`')
+}
+if (!/#spora-plugin-team-graph \.bg-card\{/.test(css)) {
+    failures.push('stylesheet has no `bg-card` utility under the plugin scope (Tailwind dropped the card colour)')
+}
+
+/*
+ * No bare `var(--<host token>)` — the failure mode with no signal.
+ *
+ * The host declares its design tokens as bare HSL *channel* triples
+ * (`--border: 240 5.9% 90%` in `spora-frontend/src/style.css`), not
+ * as colours. So `background: var(--muted)` is an **invalid value**,
+ * and an invalid value is dropped at computed-value time with no build
+ * error, no lint error and no failing test: the property falls back
+ * to its inherited or initial value and the declaration is simply
+ * gone. It shipped that way on `.tg-zoom-btn` for long enough that
+ * the three zoom buttons rendered with no hover fill, no divider
+ * between them and a full-strength icon, and nothing in the build
+ * said a word about it.
+ *
+ * The fix is `hsl(var(--token))` everywhere, which is what
+ * `src/style.css` does now and what `tests/style.spec.ts` asserts at
+ * source level. This is the backstop on the *built* asset, so it also
+ * covers rules contributed by `@spora-ai/components` and by anything
+ * imported later.
+ *
+ * A `var(--token)` is legal here only as a colour function's argument:
+ * `hsl(var(--muted))`, `hsl(var(--primary) / 0.45)`,
+ * `color-mix(in srgb, hsl(var(--muted)) 14%, white)`. The list below is
+ * the host's own token set — Tailwind's `--color-*` / `--tw-*`
+ * variables and the plugin's local `--panel-fg` / `--tg-status-color`
+ * are already full colours and are correctly absent from it.
+ */
+const HOST_HSL_TOKENS = [
+    'background', 'foreground',
+    'muted', 'muted-foreground',
+    'border', 'input', 'ring',
+    'primary', 'primary-foreground',
+    'secondary', 'secondary-foreground',
+    'destructive', 'destructive-foreground',
+    'accent', 'accent-foreground',
+]
+for (const token of HOST_HSL_TOKENS) {
+    // The captured window ends exactly where `var(` begins, so the test
+    // below can ask whether that `var(` is a function's argument.
+    const re = new RegExp(`(.{0,64})var\\(--${token}\\)`, 'g')
+    for (const [, lead = ''] of css.matchAll(re)) {
+        if (/[a-z-]+\(\s*$/i.test(lead)) continue
+        failures.push(
+            `stylesheet uses a bare \`var(--${token})\`, which is an invalid value against an HSL-triple ` +
+            `token and is dropped at computed-value time: \`…${lead}var(--${token})\``,
+        )
     }
 }
 

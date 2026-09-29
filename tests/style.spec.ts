@@ -38,6 +38,21 @@ function declarationsFor(selector: string): string {
         .join(' ')
 }
 
+/**
+ * The body of the `@theme` block — the file's stand-in for `:root`.
+ * Tailwind emits these declarations to `:root` in the built sheet, and
+ * only the ones some utility consumes (see the card-surface tests).
+ *
+ * Read with its own regex rather than through `rules()`: the generic
+ * parser splits a selector list on commas, and everything above
+ * `@theme` is a run of at-rule *statements* — including
+ * `@custom-variant dark (&:where(.dark, .dark *))`, whose argument has
+ * a comma in it. Only the `{ … }` pair identifies the block.
+ */
+function themeBlock(): string {
+    return /@theme\s*\{([^{}]*)\}/.exec(css)?.[1] ?? ''
+}
+
 describe('style.css — Mermaid node boxes stay invisible', () => {
     it('forces fill and stroke transparent on every node shape, for every state', () => {
         // Keyed on `g.node`, not on `g.node.selected` / `.dimmed` /
@@ -132,3 +147,106 @@ describe('style.css — the avatar tile shape', () => {
         expect(new Set(radii)).toEqual(new Set(['0.5rem']))
     })
 })
+
+/**
+ * The host's design tokens, verbatim from
+ * `spora-frontend/src/style.css` `:root` / `.dark`. They are **bare HSL
+ * channel triples**, not colours: `--muted` is `240 4.8% 95.9%`, so
+ * `var(--muted)` on its own is a syntactically valid `var()` whose
+ * *substituted value* is not a colour. CSS resolves that at
+ * computed-value time by discarding the whole declaration — no build
+ * error, no lint error, no failing test, and a property that quietly
+ * falls back to its inherited or initial value.
+ *
+ * That is the bug class this block exists for. `.tg-zoom-btn` shipped
+ * the bare form for its icon colour, its hover fill and its divider;
+ * the first silently rendered the button in the page's *text* colour
+ * (so the three glyphs read at heading weight), the second produced no
+ * hover affordance at all, and the third — being a `border-top`
+ * *shorthand* — was dropped whole, leaving three floating buttons with
+ * no seam between them.
+ *
+ * `scripts/smoke.js` runs the same sweep over the *built* stylesheet;
+ * these tests run it over the source, so a regression fails `npm test`
+ * and `npm run smoke` alike.
+ */
+const HOST_HSL_TOKENS = [
+    'background', 'foreground',
+    'muted', 'muted-foreground',
+    'border', 'input', 'ring',
+    'primary', 'primary-foreground',
+    'secondary', 'secondary-foreground',
+    'destructive', 'destructive-foreground',
+    'accent', 'accent-foreground',
+]
+
+describe('style.css — host tokens are always wrapped in a colour function', () => {
+    it('never uses a bare `var(--<host token>)`', () => {
+        // `css` is already comment-stripped, so a `var(--border)`
+        // quoted inside a doc comment cannot trip this.
+        for (const token of HOST_HSL_TOKENS) {
+            for (const [, lead = ''] of css.matchAll(new RegExp(`(.{0,64})var\\(--${token}\\)`, 'g'))) {
+                // Legal only as a colour function's argument:
+                // `hsl(var(--muted))`, `hsl(var(--primary) / 0.45)`,
+                // `color-mix(in srgb, hsl(var(--muted)) 14%, white)`.
+                const wrapped = /[a-z-]+\(\s*$/i.test(lead)
+                expect(
+                    wrapped,
+                    `bare \`var(--${token})\` in: …${lead}var(--${token})`,
+                ).toBe(true)
+            }
+        }
+    })
+
+    it('resolves the zoom button\'s colour, hover fill and divider', () => {
+        // The three declarations that were wrong, asserted directly so
+        // the failure names the control rather than a token.
+        expect(declarationsFor('.tg-zoom-btn')).toContain('color: hsl(var(--muted-foreground))')
+        expect(declarationsFor('.tg-zoom-btn:hover')).toContain('background: hsl(var(--muted))')
+        expect(declarationsFor('.tg-zoom-btn:hover')).toContain('color: hsl(var(--foreground))')
+        expect(declarationsFor('.tg-zoom-btn + .tg-zoom-btn')).toContain('border-top: 1px solid hsl(var(--border))')
+    })
+})
+
+describe('style.css — the cards have a real surface', () => {
+    it('maps the card colour to the host\'s own card mapping', () => {
+        // `spora-frontend/src/style.css:117` reads
+        // `--color-card: hsl(var(--background))`: in this design system a
+        // card *is* the page background, separated by `border-border` and
+        // a radius. Copied rather than invented, so the plugin can never
+        // drift from the app it is embedded in — and so light and dark
+        // both come for free from the host's own `.dark` toggle.
+        // Note there is no host `--card` token to read: shadcn's name
+        // is a *Tailwind* colour here, and the host has never declared
+        // it. `hsl(var(--card))` would be a fresh silent failure.
+        expect(themeBlock()).toContain('--color-card: hsl(var(--background))')
+        // The host has no `card-foreground` utility either, so this is
+        // the one value with no line to copy. `hsl(var(--foreground))`
+        // invents nothing: it is what the panel's text already
+        // inherited before the class resolved to anything.
+        expect(themeBlock()).toContain('--color-card-foreground: hsl(var(--foreground))')
+    })
+
+    it('defines `.surface-card` so the class on five elements is not inert', () => {
+        // `surface-card` appears in `AgentDetailPanel.vue`,
+        // `TeamGraphCanvas.vue` and `TeamGraphPage.vue` and used to be
+        // defined nowhere, so the panel rendered on whatever the host
+        // painted behind it. It carries the fill itself rather than
+        // reading `var(--color-card)`: Tailwind v4 tree-shakes `@theme`
+        // variables that no utility consumes, so a hand-written rule
+        // leaning on one would go transparent the moment the last
+        // `bg-card` left a template.
+        expect(declarationsFor('.surface-card')).toContain('background-color: hsl(var(--background))')
+    })
+
+    it('paints the surface with a host token, never a hard-coded colour', () => {
+        // The regression the file's own header warns about: pinning
+        // `color: #1f2937` on the panel would have hard-coded a
+        // light-theme text colour onto a surface that has to work in
+        // dark too.
+        const surface = declarationsFor('.surface-card')
+        expect(surface).not.toMatch(/#[0-9a-f]{3,8}\b/i)
+        expect(surface).not.toContain('rgba(')
+    })
+})
+
