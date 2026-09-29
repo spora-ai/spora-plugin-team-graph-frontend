@@ -94,6 +94,50 @@ async function mountHarness(svg: Box = SVG, viewport: Box = VIEWPORT): Promise<H
 }
 
 /**
+ * Capture the `ResizeObserver` callbacks the composable registers.
+ *
+ * happy-dom ships a `ResizeObserver`, but with no layout engine it never
+ * fires on its own, so the "the canvas grew and the diagram re-framed"
+ * path would be silently untested. This installs a recording stub
+ * *before* the composable runs, so the tests can resize the wrap and
+ * deliver the notification the browser would.
+ */
+interface ObserverStub {
+    callbacks: Array<() => void>
+    targets: Element[]
+    disconnected: number
+    restore: () => void
+}
+
+function installResizeObserverStub(): ObserverStub {
+    const stub: ObserverStub = { callbacks: [], targets: [], disconnected: 0, restore: () => {} }
+    const original = globalThis.ResizeObserver
+    class RecordingResizeObserver {
+        constructor(private readonly callback: () => void) {}
+        observe(target: Element): void {
+            stub.callbacks.push(this.callback)
+            stub.targets.push(target)
+        }
+        unobserve(): void {}
+        disconnect(): void {
+            stub.disconnected += 1
+        }
+    }
+    globalThis.ResizeObserver = RecordingResizeObserver as unknown as typeof ResizeObserver
+    stub.restore = () => {
+        globalThis.ResizeObserver = original
+    }
+    return stub
+}
+
+/** Read `k` out of the composable's `transform` string. */
+function scaleOf(h: Harness): number {
+    const m = /scale\((-?[\d.]+)\)/.exec(transformOf(h))
+    if (m === null) throw new Error(`no scale in "${transformOf(h)}"`)
+    return Number(m[1])
+}
+
+/**
  * A pointer/wheel event shaped like the real thing. happy-dom's
  * `PointerEvent` constructor does not populate every field the
  * composable reads, so the properties are assigned directly.
@@ -423,6 +467,79 @@ describe('usePanZoom — window resize', () => {
         expect(transformOf(h)).toBe(before)
     })
 
+    /*
+     * The regression this whole branch exists for. `TeamGraphPage` no
+     * longer caps the page at a fixed width, so the graph column (and
+     * with it the canvas) can grow from 766 px to ~1516 px on a wide
+     * monitor. The old handler only clamped x/y, so a view that was
+     * `fit()`'d for the narrow canvas kept the *old* scale and sat in
+     * the left half of the new, much wider one. `reflow()` re-fits
+     * instead — but only while nobody has taken the view over.
+     */
+    it('re-fits an untouched view so the diagram grows into a wider canvas', async () => {
+        const h = await mountHarness({ w: 666.75, h: 401 }, { w: 766, h: 620 })
+        h.fit()
+        // Width binds: k = min(750/666.75, 604/401, 1.5) = 1.125.
+        expect(scaleOf(h)).toBeCloseTo(1.125, 3)
+
+        // The canvas doubles in width (the real 1920-vs-1440 case).
+        stubLayout(h.wrapRef.value as HTMLElement, 1516, 620)
+        window.dispatchEvent(new Event('resize'))
+
+        // Now k = min(1500/666.75, 604/401, 1.5) = 1.5 — the
+        // FIT_MAX_SCALE cap, i.e. the enlargement limit, not the old
+        // scale. The diagram is visibly bigger, not stranded.
+        expect(scaleOf(h)).toBeCloseTo(1.5, 3)
+        // …and it is re-centred in the new box, not left at the old x.
+        const [, x] = /^translate\((-?[\d.]+)px,/.exec(transformOf(h)) as RegExpExecArray
+        expect(Number(x)).toBeCloseTo((1516 - 666.75 * 1.5) / 2, 1)
+    })
+
+    it('preserves a scale the operator chose by zooming, across a resize', async () => {
+        const h = await mountHarness({ w: 666.75, h: 401 }, { w: 766, h: 620 })
+        h.fit()
+        h.zoomIn() // k = 1.125 * 1.25
+        const chosen = scaleOf(h)
+
+        stubLayout(h.wrapRef.value as HTMLElement, 1516, 620)
+        window.dispatchEvent(new Event('resize'))
+
+        // The operator asked for this scale; a resize must not overrule it.
+        expect(scaleOf(h)).toBeCloseTo(chosen, 6)
+    })
+
+    it('preserves a pan the operator made, across a resize', async () => {
+        const h = await mountHarness({ w: 666.75, h: 401 }, { w: 1516, h: 620 })
+        h.fit()
+        const wrap = h.wrapRef.value as HTMLElement
+        wrap.dispatchEvent(down(wrap, 100, 100, 31))
+        wrap.dispatchEvent(move(wrap, 160, 100, 31))
+        wrap.dispatchEvent(up(wrap))
+        const chosen = scaleOf(h)
+        expect(chosen).toBeCloseTo(1.5, 3)
+
+        window.dispatchEvent(new Event('resize'))
+
+        expect(scaleOf(h)).toBeCloseTo(chosen, 6)
+    })
+
+    it('hands the framing back to the automatic behaviour after an explicit fit()', async () => {
+        // fit() is the "reset the view" button and the principal-switch
+        // path, so it must clear the manual-override flag — otherwise a
+        // stale zoom would suppress re-framing forever.
+        const h = await mountHarness({ w: 666.75, h: 401 }, { w: 766, h: 620 })
+        h.fit()
+        h.zoomOut()
+        const manual = scaleOf(h)
+        expect(manual).toBeCloseTo(0.9, 3)
+
+        stubLayout(h.wrapRef.value as HTMLElement, 1516, 620)
+        h.fit()
+        window.dispatchEvent(new Event('resize'))
+
+        expect(scaleOf(h)).toBeCloseTo(1.5, 3)
+    })
+
     it('is a no-op when the wrap is not mounted or the SVG is not rendered yet', () => {
         const api = usePanZoom({ wrapRef: ref(null), contentRef: ref(null), hostRef: ref(null) })
         expect(() => window.dispatchEvent(new Event('resize'))).not.toThrow()
@@ -460,5 +577,125 @@ describe('usePanZoom — window resize', () => {
         const frozen = content.style.transform
         wrap.dispatchEvent(move(wrap, 900, 900, 21))
         expect(content.style.transform).toBe(frozen)
+    })
+})
+
+/**
+ * The canvas can change size without any `resize` event — the host SPA
+ * collapsing its own sidebar, a browser zoom, a root font-size change
+ * all resize `.tg-canvas-wrap` alone. That is why the wrap is observed
+ * directly instead of only listening to the window, and it is the case
+ * that actually matters now the graph column is no longer width-capped.
+ */
+describe('usePanZoom — ResizeObserver on the wrap', () => {
+    let stub: ObserverStub
+
+    beforeEach(() => {
+        stub = installResizeObserverStub()
+    })
+
+    afterEach(() => {
+        stub.restore()
+    })
+
+    it('observes the wrap as soon as it mounts', async () => {
+        const h = await mountHarness()
+        expect(stub.targets).toContain(h.wrapRef.value)
+    })
+
+    it('re-fits the diagram when the observed wrap grows, with no window resize', async () => {
+        /*
+         * The exact regression the uncapped layout introduces. No
+         * `resize` event is dispatched here — the only signal is the
+         * observer — so the pre-fix code (which only listened to
+         * `window`) leaves the diagram at the old scale in a canvas
+         * twice as wide.
+         */
+        const h = await mountHarness({ w: 666.75, h: 401 }, { w: 766, h: 620 })
+        h.fit()
+        expect(scaleOf(h)).toBeCloseTo(1.125, 3)
+
+        stubLayout(h.wrapRef.value as HTMLElement, 1516, 620)
+        for (const cb of stub.callbacks) cb()
+
+        expect(scaleOf(h)).toBeCloseTo(1.5, 3)
+        const [, x, y] = /^translate\((-?[\d.]+)px, (-?[\d.]+)px\)/.exec(transformOf(h)) as RegExpExecArray
+        expect(Number(x)).toBeCloseTo((1516 - 666.75 * 1.5) / 2, 1)
+        expect(Number(y)).toBeCloseTo((620 - 401 * 1.5) / 2, 1)
+    })
+
+    it('keeps a manually-chosen scale across an observed resize', async () => {
+        const h = await mountHarness({ w: 666.75, h: 401 }, { w: 766, h: 620 })
+        h.fit()
+        h.zoomIn()
+        const chosen = scaleOf(h)
+
+        stubLayout(h.wrapRef.value as HTMLElement, 1516, 620)
+        for (const cb of stub.callbacks) cb()
+
+        expect(scaleOf(h)).toBeCloseTo(chosen, 6)
+    })
+
+    it('re-binds when the wrap is replaced, dropping the old observation', async () => {
+        /*
+         * `TeamGraphCanvas` keeps the same wrap element for its lifetime,
+         * so this is belt-and-braces — but a stale observer on a
+         * detached wrap would keep re-framing a canvas nobody is looking
+         * at, and a *second* observer would double the work.
+         */
+        const h = await mountHarness()
+        expect(stub.targets).toHaveLength(1)
+        const first = h.wrapRef.value
+
+        h.wrapRef.value = null
+        await nextTick()
+        expect(stub.disconnected).toBe(1)
+
+        h.wrapRef.value = first
+        await nextTick()
+        expect(stub.targets).toHaveLength(2)
+        // The replacement is observed exactly once — no double-binding.
+        expect(stub.targets[1]).toBe(first)
+    })
+
+    it('disconnects the observer on unmount', async () => {
+        const wrapper = mount(
+            {
+                template: '<div ref="wrapRef" data-testid="wrap"><div ref="contentRef" data-testid="content"><div ref="hostRef" data-testid="host"><svg width="400" height="200" /></div></div></div>',
+                setup() {
+                    const wrapRef = ref<HTMLElement | null>(null)
+                    const contentRef = ref<HTMLElement | null>(null)
+                    const hostRef = ref<HTMLElement | null>(null)
+                    const api = usePanZoom({ wrapRef, contentRef, hostRef })
+                    return { wrapRef, contentRef, hostRef, api }
+                },
+            },
+            { attachTo: document.body },
+        )
+        await nextTick()
+        expect(stub.targets).toHaveLength(1)
+        wrapper.unmount()
+        // A leaked observer keeps re-framing a torn-down canvas.
+        expect(stub.disconnected).toBe(1)
+    })
+
+    it('survives an environment with no ResizeObserver at all', async () => {
+        // Older/embedded webviews and non-DOM test environments may not
+        // expose it; the window `resize` listener is the fallback and
+        // the composable must not throw on the way there.
+        const original = globalThis.ResizeObserver
+        // @ts-expect-error — deliberately removing a global to simulate the absence.
+        delete globalThis.ResizeObserver
+        try {
+            const h = await mountHarness({ w: 666.75, h: 401 }, { w: 766, h: 620 })
+            h.fit()
+            expect(scaleOf(h)).toBeCloseTo(1.125, 3)
+            stubLayout(h.wrapRef.value as HTMLElement, 1516, 620)
+            expect(() => window.dispatchEvent(new Event('resize'))).not.toThrow()
+            // The window listener alone still re-frames the diagram.
+            expect(scaleOf(h)).toBeCloseTo(1.5, 3)
+        } finally {
+            globalThis.ResizeObserver = original
+        }
     })
 })

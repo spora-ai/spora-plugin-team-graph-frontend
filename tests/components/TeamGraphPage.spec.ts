@@ -316,6 +316,91 @@ describe('TeamGraphPage.vue (single-sidebar layout)', () => {
     })
 })
 
+/**
+ * The full-width change.
+ *
+ * `max-w-7xl mx-auto` used to sit on the page, which capped the *whole*
+ * layout — graph canvas included — at 80rem and centred it, so a wide
+ * monitor wasted both sides. The cap now sits on the `header` only,
+ * which is the one region whose content is short, left-aligned and
+ * would otherwise stretch; the graph column below it takes every pixel
+ * the host slot offers.
+ *
+ * These assert the class contract rather than a computed width:
+ * happy-dom has no layout engine, so `getBoundingClientRect()` is 0 for
+ * everything and a width assertion here would be vacuous. The real
+ * widths were measured in a headless browser against the dev server
+ * (1920 px viewport: tg-page 1162 px → 1920 px, canvas 766 px →
+ * 1516 px, fitted scale 1.12 → 1.5, `scrollWidth` == `clientWidth`).
+ */
+/**
+ * The `grid … lg:grid-cols-[minmax(0,1fr)_340px]` element: the only
+ * child of the page that carries the `grid` class, reached through the
+ * DOM rather than a `> div.grid` selector (which happy-dom's parser
+ * rejects).
+ */
+function pageGrid(wrapper: ReturnType<typeof mount>): HTMLElement {
+    const page = wrapper.find('[data-testid="tg-page"]').element as HTMLElement
+    const grid = [...page.children].find((el) => el.classList.contains('grid'))
+    if (grid === undefined) throw new Error('no grid element on the page')
+    return grid as HTMLElement
+}
+
+describe('TeamGraphPage.vue — full-width graph area', () => {
+    it('drops the max-width cap from the page container', async () => {
+        const wrapper = mount(TeamGraphPage, { props: { hostContext } })
+        await flushPromises()
+        const classes = wrapper.find('[data-testid="tg-page"]').classes()
+        expect(classes).toContain('w-full')
+        expect(classes).not.toContain('max-w-7xl')
+        expect(classes).not.toContain('mx-auto')
+        // `box-border` keeps `w-full` honest: there is no Tailwind
+        // preflight here, so the default box model is `content-box` and
+        // `width: 100%` + `p-6` would push the page 42 px past the
+        // viewport (measured: `scrollWidth` 1962 vs `clientWidth` 1920
+        // at 1920 px, 928 vs 900 at 900 px). The old `max-w-7xl` was
+        // capping the *content* box and hiding it.
+        expect(classes).toContain('box-border')
+        wrapper.unmount()
+    })
+
+    it('keeps the cap on the toolbar, where the short text lives', async () => {
+        const wrapper = mount(TeamGraphPage, { props: { hostContext } })
+        await flushPromises()
+        const page = wrapper.find('[data-testid="tg-page"]').element as HTMLElement
+        const header = [...page.children].find((el) => el.tagName === 'HEADER')
+        expect(header).toBeDefined()
+        // The title / summary / legend / pill row keep their measure.
+        expect(header!.classList).toContain('max-w-7xl')
+        wrapper.unmount()
+    })
+
+    it('leaves the 1fr / 340px grid and the stacked-below-lg layout intact', async () => {
+        const wrapper = mount(TeamGraphPage, { props: { hostContext } })
+        await flushPromises()
+        const grid = pageGrid(wrapper)
+        const classes = grid.classList
+        // Stacked by default, side-by-side from `lg`.
+        expect(classes).toContain('grid-cols-1')
+        expect(classes).toContain('lg:grid-cols-[minmax(0,1fr)_340px]')
+        // `items-start` keeps the sticky detail panel from stretching.
+        expect(classes).toContain('items-start')
+        wrapper.unmount()
+    })
+
+    it('still stacks the graph above the detail panel below lg', async () => {
+        const wrapper = mount(TeamGraphPage, { props: { hostContext } })
+        await flushPromises()
+        // Document order is the whole contract for a single column: the
+        // canvas comes first, the detail panel second.
+        const cols = [...pageGrid(wrapper).children]
+        expect(cols).toHaveLength(2)
+        expect(cols[0]!.querySelector('[data-testid="tg-canvas-wrap"]')).not.toBeNull()
+        expect(cols[1]!.tagName).toBe('ASIDE')
+        wrapper.unmount()
+    })
+})
+
 describe('principalLabel', () => {
     it('returns "My Agents" for the user-owned user-principal', () => {
         expect(principalLabel(PRINCIPALS[0]!)).toBe('My Agents')

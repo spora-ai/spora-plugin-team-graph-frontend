@@ -24,6 +24,16 @@
  * control point* by the same delta: the curve keeps its shape and stays
  * smooth, and only its reach changes.
  *
+ * **The border is not where the arrow is.** Landing the *path end* on
+ * the card border looks right in the geometry and is still wrong on
+ * screen: Mermaid's `pointEnd` marker is drawn with the path's end
+ * vertex at the marker's `refX`, so the visible tip is
+ * `ARROWHEAD_OVERSHOOT` user units further along the path — i.e.
+ * *inside* the opaque `button.tg-node-card`, which then clips the tip
+ * and reads as a cut-off arrowhead. The endpoint is therefore stopped
+ * short by exactly that overshoot, along the direction the marker is
+ * actually drawn, so the **tip** lands on the border.
+ *
  * Everything here is a pure function over the path's `d` string, so it
  * is unit-testable without a layout engine and cannot half-apply: a
  * path we cannot parse is reported as `null` and the caller leaves the
@@ -34,6 +44,51 @@ export interface Point {
     x: number
     y: number
 }
+
+/**
+ * How far Mermaid's end-of-line arrowhead paints **past** the path's
+ * end point, in SVG user units — the default value of
+ * `reanchorEdgePath`'s `endOvershoot`.
+ *
+ * This number is the whole reason a path that ends *exactly* on the
+ * card border still looks cut off, so it is derived rather than
+ * guessed. Read off the rendered `<marker>` in the plugin's own SVG
+ * (and byte-identical in `mermaid/dist/edges-*.js → insertMarkers`):
+ *
+ *     <marker id="m-1_flowchart-pointEnd" viewBox="0 0 10 10"
+ *             refX="6" refY="5" markerUnits="userSpaceOnUse"
+ *             markerWidth="12" markerHeight="12" orient="auto">
+ *       <path d="M 0 0 L 10 5 L 0 10 z"/>
+ *     </marker>
+ *
+ *   - `markerUnits="userSpaceOnUse"` *together with* a `viewBox`
+ *     means the marker's own 10-unit coordinate box is scaled into SVG
+ *     user units by `markerWidth / viewBox.width` = 12 / 10 = **1.2**.
+ *   - `refX="6"` is the marker-local point pinned to the path's end
+ *     vertex; the tip is the marker path's rightmost point, local
+ *     `x = 10`, so 4 local units sit beyond the vertex.
+ *   - 4 × 1.2 = **4.8 user units**.
+ *
+ * Measured on the 4-node dev fixture with the previous, un-inset code:
+ * every edge's path end sat 0.000 user units from the card border
+ * while its arrow **tip** sat 4.800 inside the card (1.613 for the two
+ * diagonal edges, whose tip approaches at an angle) — hidden under the
+ * card's own background. With the endpoint stopped 4.8 short, the tip
+ * lands on the border to within 0.000.
+ *
+ * `orient="auto"` rotates the marker to the path's own direction of
+ * travel, so the overshoot is the same 4.8 on every edge — but it is
+ * applied *along that direction* (`endTangent`), not along the ray
+ * from the node's centre, so a diagonal edge is compensated along the
+ * direction the marker is actually drawn.
+ *
+ * **Nothing is compensated at the start.** `lib/mermaidSource.ts` emits
+ * `n<a> --> n<b>` for every edge, so Mermaid only ever writes
+ * `marker-end`; the `pointStart` marker it also defines in `<defs>`
+ * (`refX=4.5`, i.e. a 5.4-unit *backward* reach) is never referenced,
+ * and the start point therefore stays exactly on the source border.
+ */
+export const ARROWHEAD_OVERSHOOT = 4.8
 
 /**
  * A parsed path point plus whether it lies *on* the curve.
@@ -253,8 +308,52 @@ function clampHandle(
 }
 
 /**
+ * The path's direction of travel where it *ends*, as a unit vector —
+ * i.e. the direction an `orient="auto"` end marker is rotated to.
+ *
+ * For a final cubic this is the vector to the nearest *control* point
+ * (the curve's end tangent); for a final `L` it is the vector to the
+ * previous on-curve point. A two-point path therefore measures the
+ * line between its two endpoints, and a path whose last two points
+ * coincide (or that has fewer than two points) has no direction at
+ * all: `(0, 0)` is returned, which turns any overshoot into a no-op
+ * rather than a guess.
+ */
+function endTangent(points: PathPoint[]): Point {
+    const last = points[points.length - 1]
+    const prev = points[points.length - 2]
+    if (last === undefined || prev === undefined) return { x: 0, y: 0 }
+    const length = Math.hypot(last.x - prev.x, last.y - prev.y)
+    if (length === 0) return { x: 0, y: 0 }
+    return { x: (last.x - prev.x) / length, y: (last.y - prev.y) / length }
+}
+
+/**
+ * `border` walked back along the marker's own direction by
+ * `overshoot` — the point the path has to *stop* at for its arrow
+ * **tip** to land on `border`.
+ *
+ * The inset is along the path's travel direction rather than the ray
+ * from the node's centre, because that is the line the marker is drawn
+ * on: subtracting the overshoot from the wrong direction would leave
+ * the tip off the border by up to `overshoot` for a diagonal edge.
+ */
+function shortOfBorder(border: Point, unit: Point, overshoot: number): Point {
+    if (overshoot === 0) return border
+    return { x: border.x - unit.x * overshoot, y: border.y - unit.y * overshoot }
+}
+
+/**
  * Re-anchor one edge path so it starts on `source`'s card border and
- * ends on `target`'s card border.
+ * its arrow **tip** lands on `target`'s card border.
+ *
+ * `endOvershoot` is how far past the path's end the end marker's tip
+ * is drawn (see `ARROWHEAD_OVERSHOOT`, which is the default because
+ * every edge `mermaidSource.ts` emits is a `-->` arrow). The endpoint
+ * is stopped short by exactly that much along the path's own end
+ * direction, so the *tip* — not the path end — meets the border. Pass
+ * `0` for a path with no end marker; the start point is never
+ * compensated, because Mermaid emits no `marker-start` for it.
  *
  * Returns `null` when the path cannot be parsed or carries no points,
  * which is the caller's signal to leave the attribute alone. A node
@@ -267,6 +366,7 @@ export function reanchorEdgePath(
     target: Point,
     halfWidth: number,
     halfHeight: number,
+    endOvershoot: number = ARROWHEAD_OVERSHOOT,
 ): string | null {
     const segments = parsePath(d)
     if (segments === null) return null
@@ -278,7 +378,11 @@ export function reanchorEdgePath(
         anchorEnds(
             segments,
             cardBorderPoint(source, first, halfWidth, halfHeight),
-            cardBorderPoint(target, last, halfWidth, halfHeight),
+            shortOfBorder(
+                cardBorderPoint(target, last, halfWidth, halfHeight),
+                endTangent(points),
+                endOvershoot,
+            ),
         ),
     )
 }

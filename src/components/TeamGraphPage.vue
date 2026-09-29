@@ -3,12 +3,53 @@
  * TeamGraphPage — single-sidebar layout (graph + right-side detail).
  *
  *   ┌──────────────────────────────────────────────────────────────┐
- *   │ Toolbar                                                      │
+ *   │ Toolbar (capped at max-w-7xl)                               │
  *   │   title · principal pill row · refresh                       │
  *   ├───────────────────────────────────┬──────────────────────────┤
  *   │ Centre graph canvas               │ Right detail sidebar     │
- *   │ (flex — gets whatever's left)     │ (340px when populated)    │
+ *   │ (full width — gets whatever's    │ (340px when populated)    │
+ *   │  left after the sidebar)          │                          │
  *   └───────────────────────────────────┴──────────────────────────┘
+ *
+ * **Where the width cap lives, and why it moved.** The page used to
+ * carry `max-w-7xl mx-auto`, which capped *everything* — the graph
+ * canvas included — at 80 rem and centred it, so a 1920 px monitor
+ * wasted both sides of the diagram. The cap now sits on the `header`
+ * only, which is the one region that genuinely wants one:
+ *
+ *   - the toolbar's own text is short and left-aligned (an `h1`, a
+ *     one-line summary, a wrapping row of principal pills, a wrapping
+ *     legend of status chips), so without a cap `justify-between`
+ *     would fling the Refresh button 900 px away from the title it
+ *     belongs with;
+ *   - the legend and pill rows are `flex-wrap` chip rows that gain
+ *     nothing from extra width;
+ *   - the only prose on the page is the agent description, and it lives
+ *     in the detail panel — a *fixed* 340 px column, which is why it
+ *     was never affected by the page cap and still isn't.
+ *
+ * Below the header, the `1fr` column takes every pixel the host slot
+ * offers, so the graph gets the width back. Measured in a headless
+ * browser at a 1920 px viewport: page 1162 px → 1920 px, canvas
+ * 766 px → 1516 px, and the diagram's fitted scale 1.12 → 1.5 (the
+ * `FIT_MAX_SCALE` cap) — see `composables/usePanZoom.ts → reflow()`,
+ * which re-fits when the canvas box changes.
+ *
+ * **`box-border` is load-bearing, not decoration.** This plugin
+ * imports Tailwind without `preflight` (see `style.css` note 1 — the
+ * host owns the reset), so nothing in the subtree sets
+ * `box-sizing: border-box` and the default is `content-box`. `w-full`
+ * is then `width: 100%` of the parent *plus* the horizontal padding,
+ * which is 42 px at `lg:p-6` (1.5 rem × the 14 px root this
+ * stylesheet sets). The `max-w-7xl` that used to sit alongside it
+ * capped the *content* box, so the padding fitted inside the cap and
+ * nothing overflowed; with the cap gone the page grew 42 px wider
+ * than the viewport and produced a horizontal scrollbar at every
+ * width. Measured: `documentElement.scrollWidth` 1962 vs
+ * `clientWidth` 1920 at a 1920 px viewport, 928 vs 900 at 900 px (the
+ * latter pre-existing — it was only the wide widths the cap had been
+ * hiding). `box-border` folds the padding inside the 100 % and both
+ * are 0 now.
  *
  * One graph per principal. The principal pill row in the toolbar
  * lists the user's own user-principal (always rendered as "My
@@ -142,8 +183,8 @@ function onTapEmptyCanvas(): void {
 </script>
 
 <template>
-    <div class="p-4 lg:p-6 max-w-7xl mx-auto w-full" data-testid="tg-page">
-        <header class="mb-4 space-y-3">
+    <div class="p-4 lg:p-6 box-border w-full" data-testid="tg-page">
+        <header class="mb-4 space-y-3 max-w-7xl">
             <div class="flex flex-wrap items-end justify-between gap-3">
                 <div class="min-w-0">
                     <h1 class="text-2xl font-semibold tracking-tight">Team Graph</h1>

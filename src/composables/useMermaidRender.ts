@@ -27,7 +27,9 @@
  *      routed the edges against the (much smaller) label boxes it
  *      measured, so growing the rects in step 2 leaves the arrows
  *      floating short of the cards. Each endpoint is walked out along
- *      the same ray to the new border; see `lib/edgeGeometry.ts`.
+ *      the same ray to the new border — and then stopped short again
+ *      by `ARROWHEAD_OVERSHOOT`, so the arrow *tip* rather than the
+ *      path end meets the card. See `lib/edgeGeometry.ts`.
  *   4. `viewBox` is reset to that `getBBox()` + `SVG_PADDING`
  *      padding, and `width`/`height` are pinned to the same numbers
  *      so one SVG user unit equals one content-layer pixel.
@@ -46,7 +48,7 @@
 import mermaid from 'mermaid'
 import { onBeforeUnmount, ref, watch, type Ref } from 'vue'
 import { buildMermaidSource } from '../lib/mermaidSource'
-import { reanchorEdgePath } from '../lib/edgeGeometry'
+import { ARROWHEAD_OVERSHOOT, reanchorEdgePath } from '../lib/edgeGeometry'
 import {
     SVG_PADDING,
     edgeEndsFromMermaidId,
@@ -194,11 +196,18 @@ export function useMermaidRender({ hostRef, graph, onRender }: UseMermaidRenderO
          * the same delta so the curve stays smooth. See
          * `lib/edgeGeometry.ts` for the measurement that motivates it.
          *
+         * The overshoot is passed explicitly because it is not a guess:
+         * every edge `lib/mermaidSource.ts` emits is a `-->`, so every
+         * rendered path carries Mermaid's `pointEnd` marker, and
+         * `ARROWHEAD_OVERSHOOT` is how far that marker's tip paints past
+         * the path end. Without the inset the tip lands *inside* the
+         * opaque card and the arrowhead reads as cut off.
+         *
          * Runs before the `getBBox()` below on purpose: a re-anchored
-         * endpoint lands exactly on a node rect, which is already the
-         * widest geometry in the diagram, so the bounding box cannot
-         * grow — but taking it afterwards keeps that true by
-         * construction rather than by argument.
+         * endpoint lands on — or just short of — a node rect, which is
+         * already within the widest geometry in the diagram, so the
+         * bounding box cannot grow; but taking it afterwards keeps that
+         * true by construction rather than by argument.
          */
         svgEl.querySelectorAll('path.flowchart-link').forEach((edgeEl) => {
             const ends = edgeEndsFromMermaidId(edgeEl.id)
@@ -209,7 +218,14 @@ export function useMermaidRender({ hostRef, graph, onRender }: UseMermaidRenderO
             if (source === undefined || target === undefined) return
             const d = edgeEl.getAttribute('d')
             if (d === null) return
-            const next = reanchorEdgePath(d, source, target, NODE_CARD_WIDTH / 2, NODE_CARD_HEIGHT / 2)
+            const next = reanchorEdgePath(
+                d,
+                source,
+                target,
+                NODE_CARD_WIDTH / 2,
+                NODE_CARD_HEIGHT / 2,
+                ARROWHEAD_OVERSHOOT,
+            )
             if (next !== null) edgeEl.setAttribute('d', next)
         })
     }

@@ -8,7 +8,7 @@ import {
     SVG_PADDING,
     nodeIdFromMermaidId,
 } from '../../src/lib/nodeLayout'
-import { parsePathPoints } from '../../src/lib/edgeGeometry'
+import { ARROWHEAD_OVERSHOOT, parsePathPoints } from '../../src/lib/edgeGeometry'
 import { useSelectionStore } from '../../src/stores/selection'
 import type { GraphPayload } from '../../src/types'
 
@@ -357,7 +357,18 @@ describe('useMermaidRender — post-processing', () => {
 })
 
 describe('useMermaidRender — edge re-anchoring', () => {
-    it('moves every edge endpoint onto the card borders', async () => {
+    /*
+     * The invariant, stated once: the path's **start** lands exactly on
+     * the source card's border, and the path's **end** stops
+     * `ARROWHEAD_OVERSHOOT` short of the target border along the
+     * path's own end tangent — so the arrowhead *tip*, which Mermaid
+     * paints that far past the path end, is what meets the card.
+     *
+     * Asserting "the end is on the border" (as this did before) is
+     * precisely the bug: it produced arrowheads buried 4.8 user units
+     * inside the opaque card.
+     */
+    it('starts on the source border and stops short of the target by the marker overshoot', async () => {
         renderFn.mockResolvedValue({ svg: makeSvgFixture() })
         const el = host()
         useMermaidRender({ hostRef: ref<HTMLElement | null>(el), graph: ref<GraphPayload | null>(tinyStartup) })
@@ -369,6 +380,7 @@ describe('useMermaidRender — edge re-anchoring', () => {
             ) as RegExpExecArray
             return { x: Number(t[1]), y: Number(t[2]) }
         }
+        let checked = 0
         for (const path of [...svg.querySelectorAll('path.flowchart-link')]) {
             const id = path.id
             const m = /^L-n(\d+)-n(\d+)/.exec(id)
@@ -383,14 +395,34 @@ describe('useMermaidRender — edge re-anchoring', () => {
             const points = segments.flatMap((seg) => seg.points)
             const first = points[0] as { x: number; y: number }
             const last = points[points.length - 1] as { x: number; y: number }
-            // Exactly on the source card's border: |dx| = 120 or |dy| = 38.
+            const prev = points[points.length - 2] as { x: number; y: number }
+            checked += 1
+            // Start: exactly on the source card's border,
+            // |dx| = 120 or |dy| = 38. No marker there to compensate.
             const onSource = Math.abs(Math.abs(first.x - centre(src).x) - NODE_CARD_WIDTH / 2) < 0.01 ||
                 Math.abs(Math.abs(first.y - centre(src).y) - NODE_CARD_HEIGHT / 2) < 0.01
-            const onTarget = Math.abs(Math.abs(last.x - centre(tgt).x) - NODE_CARD_WIDTH / 2) < 0.01 ||
-                Math.abs(Math.abs(last.y - centre(tgt).y) - NODE_CARD_HEIGHT / 2) < 0.01
             expect(onSource, `start of ${id}`).toBe(true)
-            expect(onTarget, `end of ${id}`).toBe(true)
+
+            // End: walk the overshoot back off the tip and the tip must
+            // then be exactly on the target card's border. The tangent
+            // is read off the *rewritten* path, so this checks the
+            // shipped geometry rather than the input.
+            const len = Math.hypot(last.x - prev.x, last.y - prev.y)
+            expect(len, `end tangent of ${id} is non-degenerate`).toBeGreaterThan(0)
+            const tip = {
+                x: last.x + (ARROWHEAD_OVERSHOOT * (last.x - prev.x)) / len,
+                y: last.y + (ARROWHEAD_OVERSHOOT * (last.y - prev.y)) / len,
+            }
+            const onTarget = Math.abs(Math.abs(tip.x - centre(tgt).x) - NODE_CARD_WIDTH / 2) < 0.01 ||
+                Math.abs(Math.abs(tip.y - centre(tgt).y) - NODE_CARD_HEIGHT / 2) < 0.01
+            expect(onTarget, `arrow tip of ${id} lands on the target border`).toBe(true)
+            // …and the path end itself is *not* on the border any more.
+            const endOnTarget = Math.abs(Math.abs(last.x - centre(tgt).x) - NODE_CARD_WIDTH / 2) < 0.01 ||
+                Math.abs(Math.abs(last.y - centre(tgt).y) - NODE_CARD_HEIGHT / 2) < 0.01
+            expect(endOnTarget, `path end of ${id} is held back, not on the border`).toBe(false)
         }
+        // Guard against the loop vacuously passing over zero edges.
+        expect(checked).toBeGreaterThan(0)
     })
 
     it('leaves a path it cannot parse exactly as Mermaid wrote it', async () => {

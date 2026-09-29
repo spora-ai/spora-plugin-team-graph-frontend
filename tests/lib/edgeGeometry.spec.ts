@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
+    ARROWHEAD_OVERSHOOT,
     cardBorderPoint,
     parsePathPoints,
     reanchorEdgePath,
@@ -128,23 +129,97 @@ describe('reanchorEdgePath', () => {
         return { first: points[0]!, last: points[points.length - 1]! }
     }
 
-    it('puts both endpoints exactly on the card borders', () => {
+    it('puts the start endpoint exactly on the card border', () => {
         const out = reanchorEdgePath(MERMAID_D, source, target, halfW, halfH)
         expect(out).not.toBeNull()
         const { first, last } = endpoint(out!)
         // Start: on the source card's bottom border (y = cy + halfH).
         expect(first.y).toBeCloseTo(source.y + halfH, 3)
-        // End: on the target card's top border (y = cy - halfH).
-        expect(last.y).toBeCloseTo(target.y - halfH, 3)
         // Both are vertical rays, so x follows the centre.
         expect(first.x).toBeLessThan(source.x)
         expect(last.x).toBeCloseTo(target.x, 3)
     })
 
+    /**
+     * The end endpoint is *not* on the border — that is the whole point
+     * of the overshoot. These are the numbers measured on the rendered
+     * dev fixture, where the un-inset path ended on the border and its
+     * arrowhead tip landed 4.8 units inside the target card.
+     */
+    it('stops the end endpoint short by the arrowhead overshoot', () => {
+        const out = reanchorEdgePath(MERMAID_D, source, target, halfW, halfH)!
+        const { last } = endpoint(out)
+        // The ray here is vertical, so the end tangent is (0, 1) and the
+        // tip is `overshoot` further down. The border is at
+        // `target.y - halfH`; the endpoint must be that far above it.
+        expect(last.y).toBeCloseTo(target.y - halfH - ARROWHEAD_OVERSHOOT, 3)
+    })
+
+    it('insets along the end tangent, not along a fixed axis (diagonal edge)', () => {
+        /*
+         * A 45° edge. The marker is `orient="auto"`, so it is rotated
+         * onto the path's own direction; the overshoot has to be
+         * subtracted along *that* vector. Subtracting it vertically (or
+         * horizontally) would leave the tip off the card by up to
+         * `overshoot * sin(45°) = 3.39` units.
+         */
+        const d = 'M600,100C500,100 200,100 100,200'
+        const tgt = { x: 0, y: 300 }
+        const out = reanchorEdgePath(d, { x: 700, y: 100 }, tgt, halfW, halfH)!
+        const { last } = endpoint(out)
+        // The end tangent is (0,1) - (0,100) normalised = (0,1)...
+        // actually (-100,100) normalised = (-0.7071, 0.7071).
+        const border = cardBorderPoint(tgt, last, halfW, halfH)
+        // Walking back along the tangent by the overshoot must put the
+        // tip exactly on the border, in the *tangent* direction.
+        const tip = {
+            x: last.x + ARROWHEAD_OVERSHOOT * -Math.SQRT1_2,
+            y: last.y + ARROWHEAD_OVERSHOOT * Math.SQRT1_2,
+        }
+        expect(Math.hypot(tip.x - border.x, tip.y - border.y)).toBeLessThan(0.01)
+        // And the endpoint is genuinely *short* of the border.
+        expect(Math.hypot(last.x - border.x, last.y - border.y)).toBeCloseTo(ARROWHEAD_OVERSHOOT, 3)
+    })
+
+    it('applies no inset at all when endOvershoot is 0 (no end marker)', () => {
+        // An edge with no arrowhead — `mermaidSource.ts` only ever emits
+        // `-->`, but the geometry must degrade to "path end on the
+        // border" rather than silently short by 4.8.
+        const out = reanchorEdgePath(MERMAID_D, source, target, halfW, halfH, 0)!
+        const { last } = endpoint(out)
+        expect(last.y).toBeCloseTo(target.y - halfH, 3)
+    })
+
+    it('leaves a two-point path with no measurable tangent un-inset', () => {
+        // `endTangent` returns (0,0) for fewer than two points and for
+        // coincident last two points; the inset is then a no-op rather
+        // than a NaN or a random direction.
+        const single = 'M100,50'
+        const a = reanchorEdgePath(single, { x: 100, y: 50 }, { x: 500, y: 50 }, halfW, halfH)
+        const b = reanchorEdgePath(single, { x: 100, y: 50 }, { x: 500, y: 50 }, halfW, halfH, 0)
+        expect(a).toBe(b)
+        expect(endpoint(a!)).toEqual(endpoint(b!))
+
+        // Same guard, reached through a path whose last two points
+        // coincide: the tangent length is 0, so there is no direction to
+        // inset along and the endpoint stays on the border.
+        const degenerate = 'M100,50L200,100L200,100'
+        const c = reanchorEdgePath(degenerate, { x: 100, y: 50 }, { x: 400, y: 100 }, halfW, halfH)!
+        const d = reanchorEdgePath(degenerate, { x: 100, y: 50 }, { x: 400, y: 100 }, halfW, halfH, 0)!
+        expect(endpoint(c)).toEqual(endpoint(d))
+    })
+
     it('is idempotent — re-anchoring an anchored path moves nothing', () => {
         const once = reanchorEdgePath(MERMAID_D, source, target, halfW, halfH)!
         const twice = reanchorEdgePath(once, source, target, halfW, halfH)!
-        expect(endpoint(twice)).toEqual(endpoint(once))
+        // The overshoot is a property of the marker, not of the current
+        // path, so re-anchoring must not stack a second 4.8 on top: the
+        // ray from the target centre through the already-shortened end
+        // still crosses the same border, and the same inset is applied.
+        const one = endpoint(once)
+        const two = endpoint(twice)
+        expect(two.last.x).toBeCloseTo(one.last.x, 3)
+        expect(two.last.y).toBeCloseTo(one.last.y, 3)
     })
 
     it('preserves the start and end tangents (the curve stays smooth)', () => {
