@@ -276,53 +276,63 @@ function devGraph(principalId: number): GraphPayload {
 }
 
 /**
+ * Resolve one dev-harness `GET` to its stub payload.
+ *
+ * Separate from `devApi.get` so this stays a plain synchronous function:
+ * the real client is `Promise`-returning, and an `async` wrapper over a
+ * body that never awaits would be `await`ing nothing while implying the
+ * resolution is deferred. `get` wraps the result once, below.
+ */
+function devApiGet<T>(path: string): T {
+    if (path.startsWith('/principals/me')) {
+        return { principals: DEV_PRINCIPALS } as T
+    }
+    if (path.startsWith('/plugins/team-graph/graph')) {
+        const match = /principal_id=(\d+)/.exec(path)
+        const id = match !== null ? Number(match[1]) : 1
+        return devGraph(id) as T
+    }
+    if (path.startsWith('/tasks')) {
+        // `status=` narrows to the in-flight statuses the panel
+        // asks for; everything else (COMPLETED) is the recent list.
+        const status = /status=([A-Z_]+)/.exec(path)?.[1] ?? 'COMPLETED'
+        const inFlight = ['RUNNING', 'AWAITING_SUB_AGENTS', 'PENDING_APPROVAL'].includes(status)
+        return {
+            tasks: DEV_TASKS.filter((t) => (inFlight ? t.status === status : t.status === 'COMPLETED')),
+        } as T
+    }
+    if (/^\/agents\/\d+$/.test(path)) {
+        return {
+            agent: {
+                id: Number(path.split('/').pop()),
+                name: 'Spora Core Agent',
+                description:
+                    'Coordinates the team: breaks goals into delegated tasks, merges the results, and escalates anything that needs a human decision.',
+                llm_driver_config_id: 1,
+                max_steps: 25,
+                is_active: true,
+                is_pinned: false,
+                principal_id: 1,
+                tools: [],
+                created_at: '2026-09-01T00:00:00Z',
+            },
+        } as T
+    }
+    return {} as T
+}
+
+/**
  * Generically typed to match `PluginHostContext['api']`: the stub is
  * installed through `setApi()`, which takes the real client type, so a
  * `Promise<unknown>`-returning stub would not be assignable (and would
  * also hide the payload types from every `fetch*()` call site).
  */
 const devApi = {
-    get: async <T>(path: string): Promise<T> => {
-        if (path.startsWith('/principals/me')) {
-            return { principals: DEV_PRINCIPALS } as T
-        }
-        if (path.startsWith('/plugins/team-graph/graph')) {
-            const match = /principal_id=(\d+)/.exec(path)
-            const id = match !== null ? Number(match[1]) : 1
-            return devGraph(id) as T
-        }
-        if (path.startsWith('/tasks')) {
-            // `status=` narrows to the in-flight statuses the panel
-            // asks for; everything else (COMPLETED) is the recent list.
-            const status = /status=([A-Z_]+)/.exec(path)?.[1] ?? 'COMPLETED'
-            const inFlight = ['RUNNING', 'AWAITING_SUB_AGENTS', 'PENDING_APPROVAL'].includes(status)
-            return {
-                tasks: DEV_TASKS.filter((t) => (inFlight ? t.status === status : t.status === 'COMPLETED')),
-            } as T
-        }
-        if (/^\/agents\/\d+$/.test(path)) {
-            return {
-                agent: {
-                    id: Number(path.split('/').pop()),
-                    name: 'Spora Core Agent',
-                    description:
-                        'Coordinates the team: breaks goals into delegated tasks, merges the results, and escalates anything that needs a human decision.',
-                    llm_driver_config_id: 1,
-                    max_steps: 25,
-                    is_active: true,
-                    is_pinned: false,
-                    principal_id: 1,
-                    tools: [],
-                    created_at: '2026-09-01T00:00:00Z',
-                },
-            } as T
-        }
-        return {} as T
-    },
-    post: async <T>(): Promise<T> => ({} as T),
-    put: async <T>(): Promise<T> => ({} as T),
-    patch: async <T>(): Promise<T> => ({} as T),
-    delete: async <T>(): Promise<T> => undefined as T,
+    get: <T>(path: string): Promise<T> => Promise.resolve(devApiGet<T>(path)),
+    post: <T>(): Promise<T> => Promise.resolve({} as T),
+    put: <T>(): Promise<T> => Promise.resolve({} as T),
+    patch: <T>(): Promise<T> => Promise.resolve({} as T),
+    delete: <T>(): Promise<T> => Promise.resolve(undefined as T),
 }
 
 /**

@@ -262,6 +262,76 @@ interface Group {
 }
 
 /**
+ * A single command letter, and an SVG path number, each matched **where the
+ * scanner stands** rather than at the next match anywhere in the string.
+ *
+ * Sticky (`y`) matching is what makes that possible: it anchors a match at
+ * `lastIndex` and reports failure rather than searching on. `nextToken`
+ * offers both at the same index and takes the first that fits. They are
+ * disjoint — a command letter is never `-`, a digit or a `.` — so this
+ * picks the same tokens, in the same order, as a single alternation would.
+ * That is also the cheaper form: nesting the number pattern inside a
+ * top-level alternation pushes every quantifier in it one level deeper,
+ * which is what put the combined pattern over the complexity budget.
+ *
+ * The number accepts what the SVG grammar allows and `Number()` reads: an
+ * optional sign, a mantissa of digits with at most one dot (which may lead
+ * or trail), and an optional exponent. It can never match empty, so the
+ * scanner always advances.
+ */
+const LETTER = /[A-Za-z]/y
+const NUMBER = /-?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?/y
+
+/**
+ * Turn one command's accumulated coordinates into a `Segment`.
+ *
+ * Three-valued, because "carries nothing" and "cannot be read" are
+ * different answers:
+ *
+ *   - a `Segment` — read it, and keep it;
+ *   - `undefined` — a command letter immediately followed by another one
+ *     carries no coordinates and contributes no segment. Not an error;
+ *   - `null` — the path cannot be read with certainty, and declining is
+ *     always the right answer rather than a guess: a mis-split moves half
+ *     the path. `Z` is the one command that legitimately has no
+ *     coordinates, and it still has to survive so the rewritten `d`
+ *     keeps it.
+ */
+function readSegment(command: string, numbers: number[]): Segment | null | undefined {
+    const shape = SHAPE[command]
+    if (shape === undefined) return null
+    if (numbers.length === 0) {
+        return shape.points === 0 ? { command, points: [] } : undefined
+    }
+    if (shape.points === 0) return null
+    if (numbers.length % 2 !== 0) return null
+    if (numbers.length / 2 % shape.points !== 0) return null
+    const points: PathPoint[] = []
+    for (let i = 0; i < numbers.length; i += 2) {
+        const x = numbers[i]
+        const y = numbers[i + 1]
+        if (x === undefined || y === undefined) return null
+        points.push({ x, y, onCurve: (i / 2) % shape.points === shape.vertex })
+    }
+    return { command, points }
+}
+
+/** The next command letter or number at or after `from`, or `null` at the end. */
+function nextToken(d: string, from: number): { text: string; letter: boolean; end: number } | null {
+    for (let at = from; at < d.length; at += 1) {
+        NUMBER.lastIndex = at
+        const number = NUMBER.exec(d)
+        if (number !== null) {
+            return { text: number[0], letter: false, end: at + number[0].length }
+        }
+        LETTER.lastIndex = at
+        const letter = LETTER.exec(d)
+        if (letter !== null) return { text: letter[0], letter: true, end: at + 1 }
+    }
+    return null
+}
+
+/**
  * Tokenise an SVG path into command → points, marking on-curve points.
  *
  * Returns `null` for anything it cannot read with certainty:
@@ -272,67 +342,75 @@ interface Group {
  *   - a coordinate count that is not a whole number of repetitions of
  *     that command's arity (a malformed path, or a guess).
  */
+/**
+ * The scan's mutable state: the command being read, the coordinates
+ * collected for it so far, and whether the path is still readable.
+ */
+interface Scan {
+    /** The command the pending numbers belong to, or `null` before the first one. */
+    command: string | null
+    numbers: number[]
+    /** The segments read so far. */
+    segments: Segment[]
+    /** `false` once the path has been found unreadable. */
+    ok: boolean
+}
+
+/** Close off the command being read, so the next token starts a new one. */
+function flushScan(scan: Scan): void {
+    if (scan.command === null) return
+    const segment = readSegment(scan.command, scan.numbers)
+    scan.numbers = []
+    // `undefined` is a command with no coordinates, which contributes
+    // nothing and is not an error; only a `null` makes the path unreadable.
+    if (segment === null) {
+        scan.ok = false
+        return
+    }
+    if (segment !== undefined) scan.segments.push(segment)
+}
+
+/** Consume one command letter. A lowercase one is a *relative* command, which is declined. */
+function readLetter(scan: Scan, letter: string): void {
+    flushScan(scan)
+    if (!scan.ok || letter !== letter.toUpperCase()) {
+        scan.ok = false
+        return
+    }
+    scan.command = letter.toUpperCase()
+}
+
+/** Consume one coordinate. */
+function readNumber(scan: Scan, text: string): void {
+    if (scan.command === null) {
+        scan.ok = false
+        return
+    }
+    scan.numbers.push(Number(text))
+    /*
+     * Per SVG, coordinate pairs after an `M` are implicit `L`s.
+     * dagre never emits that, but honouring it keeps the group
+     * arithmetic below correct if a future Mermaid does.
+     */
+    if (scan.command === 'M' && scan.numbers.length === 2) {
+        flushScan(scan)
+        scan.command = 'L'
+    }
+}
+
 function parsePath(d: string): Segment[] | null {
-    const segments: Segment[] = []
-    let current: string | null = null
-    let numbers: number[] = []
-
-    const flush = (): boolean => {
-        if (current === null) return true
-        const shape = SHAPE[current]
-        if (shape === undefined) return false
-        /*
-         * No coordinates for this command. `Z` is the one command that
-         * legitimately carries none, and it still has to survive into the
-         * segment list so the rewritten `d` keeps it; anything else with
-         * no numbers is a letter followed immediately by another one, and
-         * contributes nothing.
-         */
-        if (numbers.length === 0) {
-            if (shape.points === 0) segments.push({ command: current, points: [] })
-            return true
-        }
-        if (shape.points === 0) return false
-        if (numbers.length % 2 !== 0) return false
-        if (numbers.length / 2 % shape.points !== 0) return false
-        const points: PathPoint[] = []
-        for (let i = 0; i < numbers.length; i += 2) {
-            const x = numbers[i]
-            const y = numbers[i + 1]
-            if (x === undefined || y === undefined) return false
-            points.push({ x, y, onCurve: (i / 2) % shape.points === shape.vertex })
-        }
-        segments.push({ command: current, points })
-        numbers = []
-        return true
+    const scan: Scan = { command: null, numbers: [], segments: [], ok: true }
+    for (let at = 0; at < d.length && scan.ok; ) {
+        const token = nextToken(d, at)
+        if (token === null) break
+        at = token.end
+        if (token.letter) readLetter(scan, token.text)
+        else readNumber(scan, token.text)
     }
-
-    // A single alternation of a command letter and a number matches
-    // both "M10 20" and "M10,20" and "C1 2 3 4 5 6".
-    const token = /([A-Za-z])|(-?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?)/g
-    let match: RegExpExecArray | null
-    while ((match = token.exec(d)) !== null) {
-        const [, letter, value] = match
-        if (letter !== undefined) {
-            if (!flush()) return null
-            if (letter !== letter.toUpperCase()) return null
-            current = letter.toUpperCase()
-        } else {
-            if (current === null) return null
-            numbers.push(Number(value))
-            /*
-             * Per SVG, coordinate pairs after an `M` are implicit `L`s.
-             * dagre never emits that, but honouring it keeps the group
-             * arithmetic below correct if a future Mermaid does.
-             */
-            if (current === 'M' && numbers.length === 2) {
-                if (!flush()) return null
-                current = 'L'
-            }
-        }
-    }
-    if (!flush()) return null
-    return segments.length > 0 ? segments : null
+    if (!scan.ok) return null
+    flushScan(scan)
+    if (!scan.ok) return null
+    return scan.segments.length > 0 ? scan.segments : null
 }
 
 /**
@@ -419,10 +497,14 @@ function round(value: number): number {
     return Math.round(value * 1e6) / 1e6
 }
 
+/** One segment back to its `d` text, e.g. `C 1,2 3,4 5,6`. */
+function serialiseSegment(segment: Segment): string {
+    const coordinates = segment.points.map((p) => `${round(p.x)},${round(p.y)}`).join(' ')
+    return `${segment.command} ${coordinates}`
+}
+
 function serialise(segments: Segment[]): string {
-    return segments
-        .map((segment) => `${segment.command} ${segment.points.map((p) => `${round(p.x)},${round(p.y)}`).join(' ')}`)
-        .join(' ')
+    return segments.map(serialiseSegment).join(' ')
 }
 
 function unit(x: number, y: number): Point {
@@ -488,7 +570,7 @@ const BUNDLE_BASIS_TOLERANCE = 0.01
 function isBundleBasis(groups: Group[], points: Point[]): boolean {
     if (groups.length < 5) return false
     if (groups[0]?.command !== 'M' || groups[1]?.command !== 'L') return false
-    if (groups[groups.length - 1]?.command !== 'L') return false
+    if (groups.at(-1)?.command !== 'L') return false
     for (const group of groups.slice(2, -1)) {
         if (group.command !== 'C') return false
     }
@@ -547,7 +629,7 @@ function decodeBundleBasis(points: Point[]): Point[] | null {
             continue
         }
         if (i === n - 1) {
-            q.push(points[points.length - 1] as Point)
+            q.push(points.at(-1) as Point)
             continue
         }
         // The two ends are read verbatim above; every interior point is
@@ -602,12 +684,14 @@ function emitBundleBasis(q: Point[]): Point[] {
             blend(q[k - 1] as Point, q[k] as Point, q[k + 1] as Point, 1, 4, 1),
         )
     }
+    // The closing cubic `lineEnd` emits after the last point is consumed,
+    // and the trailing `L` that closes the path is its on-curve endpoint.
     out.push(
         along(q[n - 2] as Point, q[n - 1] as Point, 1 / 3),
         along(q[n - 2] as Point, q[n - 1] as Point, 2 / 3),
         blend(q[n - 2] as Point, q[n - 1] as Point, q[n - 1] as Point, 1, 5, 0),
+        q[n - 1] as Point,
     )
-    out.push(q[n - 1] as Point)
     return out
 }
 
@@ -663,95 +747,87 @@ function emitBundleBasis(q: Point[]): Point[] {
  * **Why the runs are accumulated before they are applied.** A lone
  * `S`/`Q` repetition has one control point governing both of its ends,
  * and if both runs reach it, it has to receive both deltas.
+ *
+ * The four steps below are named so each can be read — and measured — on its
+ * own: measure the runs, apply them, rescale the handles a run left at the
+ * wrong length, then clamp what is left.
  */
-function anchorEnds(
-    segments: Segment[],
-    newStart: Point,
-    newEnd: Point,
-    departure: Point,
-    arrival: Point,
-): Segment[] {
-    const { points, groups } = flatten(segments)
-    const lastIndex = points.length - 1
-    if (lastIndex < 0) return segments
 
-    const first = points[0] as PathPoint
-    const last = points[lastIndex] as PathPoint
-    const deltas: Point[] = points.map(() => ({ x: 0, y: 0 }))
-    const addTo = (from: number, to: number, delta: Point): void => {
-        for (let i = from; i <= to; i++) {
-            const current = deltas[i] as Point
-            deltas[i] = { x: current.x + delta.x, y: current.y + delta.y }
-        }
+/**
+ * How far the run at the **head** of the path reaches.
+ *
+ * Measured **positionally** along the path's own direction of travel: the
+ * run extends as far as the points that lie at or before the endpoint's new
+ * position, and no further. Reaching past a point the endpoint never passed
+ * would drag that point *backwards*, which is the fold this prevents.
+ *
+ * Where the path has no direction to measure against — a single point, or a
+ * zero-length first leg, which d3 emits for a `curveBumpX` edge leaving
+ * straight up — the tangent-carrying handle stands in, which is the nearest
+ * thing to an answer the path offers.
+ */
+function headReach(points: PathPoint[], lastIndex: number, movedTo: Point, direction: Point, curve: Group | undefined): number {
+    if (direction.x === 0 && direction.y === 0) return curve === undefined ? 0 : curve.start
+    const along = (point: Point): number => point.x * direction.x + point.y * direction.y
+    const reachable = along(movedTo)
+    let end = 0
+    while (end + 1 <= lastIndex && along(points[end + 1] as PathPoint) <= reachable) {
+        end += 1
     }
+    return end
+}
 
-    // The run at each end of the path.
-    const curves = groups.filter((group) => group.handles > 0)
-    const firstCurve = curves[0]
-    const lastCurve = curves[curves.length - 1]
-    const hasDeparture = departure.x !== 0 || departure.y !== 0
-    const hasArrival = arrival.x !== 0 || arrival.y !== 0
-
-    /*
-     * How far the endpoint has actually travelled along the path's own
-     * direction of travel, rather than how far the cards moved it. A run
-     * that reached past a point the endpoint never passed would drag that
-     * point *backwards*, which is the fold this exists to prevent.
-     *
-     * Where the path has no direction at all to measure against — a
-     * single point, or a first leg of zero length, which d3 emits for a
-     * `curveBumpX` edge leaving straight up — the tangent-carrying handle
-     * stands in instead, which is the nearest thing to an answer the path
-     * offers.
-     */
-    const along = (point: Point, direction: Point): number => point.x * direction.x + point.y * direction.y
-    let headEnd = 0
-    if (hasDeparture) {
-        while (headEnd + 1 <= lastIndex && along(points[headEnd + 1] as PathPoint, departure) <= along(newStart, departure)) {
-            headEnd += 1
-        }
-    } else if (firstCurve !== undefined) {
-        headEnd = firstCurve.start
+/**
+ * How far the run at the **tail** of the path reaches, walking backwards.
+ * The mirror of `headReach`, with the comparison reversed: the run covers
+ * the points at or beyond the endpoint's new position.
+ */
+function tailReach(points: PathPoint[], lastIndex: number, movedTo: Point, direction: Point, curve: Group | undefined): number {
+    if (direction.x === 0 && direction.y === 0) {
+        return curve === undefined ? lastIndex : Math.min(lastIndex, curve.start + curve.handles - 1)
     }
-    let tailStart = lastIndex
-    if (hasArrival) {
-        while (tailStart - 1 >= 0 && along(points[tailStart - 1] as PathPoint, arrival) >= along(newEnd, arrival)) {
-            tailStart -= 1
-        }
-    } else if (lastCurve !== undefined) {
-        tailStart = Math.min(tailStart, lastCurve.start + lastCurve.handles - 1)
+    const along = (point: Point): number => point.x * direction.x + point.y * direction.y
+    const reachable = along(movedTo)
+    let start = lastIndex
+    while (start - 1 >= 0 && along(points[start - 1] as PathPoint) >= reachable) {
+        start -= 1
     }
+    return start
+}
 
-    addTo(0, headEnd, { x: newStart.x - first.x, y: newStart.y - first.y })
-    addTo(tailStart, lastIndex, { x: newEnd.x - last.x, y: newEnd.y - last.y })
+/** Accumulate one run's translation, so a point in two runs receives both. */
+function addDelta(deltas: Point[], from: number, to: number, delta: Point): void {
+    for (let i = from; i <= to; i++) {
+        const current = deltas[i] as Point
+        deltas[i] = { x: current.x + delta.x, y: current.y + delta.y }
+    }
+}
 
-    const moved: PathPoint[] = points.map((point, index) => {
-        const delta = deltas[index] as Point
-        return { x: point.x + delta.x, y: point.y + delta.y, onCurve: point.onCurve }
-    })
-
-    /*
-     * Rescale the handle on the far side of any repetition whose span
-     * changed.
-     *
-     * A run carries one end of a repetition and never the other, so the
-     * repetition's span grows or shrinks while the handle at the *moved*
-     * end keeps its length (it slid with its own point) and the handle
-     * at the *unmoved* end is left at the length that fitted the old
-     * span. Left alone, that handle reaches past its own vertex and the
-     * segment hooks: on the captured corpus the last cubic of a
-     * diagonal `curveBasis` edge comes out with its head control still
-     * 4.9 units *below* the vertex it is supposed to lead into, and
-     * Chrome's own path geometry shows a 75.81° turn over a 12-unit
-     * window where Mermaid drew 18.61°.
-     *
-     * Scaling it by the span ratio is the standard way to shorten a
-     * bézier without moving either tangent: the handle keeps its
-     * direction, so every join angle is untouched, and its length stays
-     * in proportion to the segment it shapes. When both ends of a
-     * repetition moved — a lone `S`/`Q` segment, whose single control
-     * point is in both runs — the ratio is 1 and nothing happens.
-     */
+/**
+ * Rescale the handle on the far side of any repetition whose span changed.
+ *
+ * A run carries one end of a repetition and never the other, so the
+ * repetition's span grows or shrinks while the handle at the *moved* end
+ * keeps its length (it slid with its own point) and the handle at the
+ * *unmoved* end is left at the length that fitted the old span. Left alone,
+ * that handle reaches past its own vertex and the segment hooks: on the
+ * captured corpus the last cubic of a diagonal `curveBasis` edge comes out
+ * with its head control still 4.9 units *below* the vertex it is supposed
+ * to lead into, and Chrome's own path geometry shows a 75.81° turn over a
+ * 12-unit window where Mermaid drew 18.61°.
+ *
+ * Scaling it by the span ratio is the standard way to shorten a bézier
+ * without moving either tangent: the handle keeps its direction, so every
+ * join angle is untouched, and its length stays in proportion to the segment
+ * it shapes. When both ends of a repetition moved — a lone `S`/`Q` segment,
+ * whose single control point is in both runs — the ratio is 1 and nothing
+ * happens.
+ */
+function rescaleFarHandles(points: PathPoint[], moved: PathPoint[], deltas: Point[], curves: Group[]): void {
+    const movedIt = (index: number): boolean => {
+        const delta = deltas[index]
+        return delta !== undefined && (delta.x !== 0 || delta.y !== 0)
+    }
     for (const group of curves) {
         if (group.anchor < 0) continue
         const span = Math.hypot(
@@ -765,10 +841,6 @@ function anchorEnds(
         if (span === 0 || movedSpan === 0) continue
         const ratio = movedSpan / span
         if (ratio === 1) continue
-        const movedIt = (index: number): boolean => {
-            const delta = deltas[index]
-            return delta !== undefined && (delta.x !== 0 || delta.y !== 0)
-        }
         const scaleAbout = (index: number, baseIndex: number): void => {
             const base = moved[baseIndex] as PathPoint
             const current = moved[index] as PathPoint
@@ -789,27 +861,85 @@ function anchorEnds(
             scaleAbout(group.start + group.handles - 1, group.vertex)
         }
     }
+}
 
+/**
+ * The three points one handle is measured against: the point it hangs off,
+ * the same point before the move, and the far end of its repetition.
+ *
+ * A head handle (`head`) hangs off the repetition's *anchor*, a tail handle
+ * off its *vertex*. Measuring the clamp from the wrong one rotates the
+ * handle onto the original direction and puts a visible kink at the far
+ * join — measured at 113° on the captured `curveBasis` corpus when the tail
+ * was measured from the anchor instead of the vertex.
+ */
+function handleBounds(
+    points: PathPoint[],
+    moved: PathPoint[],
+    group: Group,
+    head: boolean,
+): { base: PathPoint; originalBase: PathPoint; far: PathPoint } {
+    const near = head ? group.anchor : group.vertex
+    const far = head ? group.vertex : group.anchor
+    return { base: moved[near] as PathPoint, originalBase: points[near] as PathPoint, far: moved[far] as PathPoint }
+}
+
+/** Hold every handle a run dragged to two bounds, so a run can never fold the path back on itself. */
+function clampMovedHandles(points: PathPoint[], moved: PathPoint[], deltas: Point[], groups: Group[]): void {
     for (const group of groups) {
         if (group.anchor < 0) continue
         for (let k = 0; k < group.handles; k++) {
             const index = group.start + k
             const delta = deltas[index] as Point
             if (delta.x === 0 && delta.y === 0) continue
-            /*
-             * A head handle hangs off the repetition's *anchor*, a tail
-             * handle off its *vertex*. Measuring the clamp from the wrong
-             * one rotates the handle onto the original direction and puts
-             * a visible kink at the far join — measured at 113° on the
-             * captured `curveBasis` corpus when the tail was measured
-             * from the anchor instead of the vertex.
-             */
-            const base = k === 0 ? (moved[group.anchor] as PathPoint) : (moved[group.vertex] as PathPoint)
-            const originalBase = k === 0 ? (points[group.anchor] as PathPoint) : (points[group.vertex] as PathPoint)
-            const far = k === 0 ? (moved[group.vertex] as PathPoint) : (moved[group.anchor] as PathPoint)
-            moved[index] = clampHandle(moved[index] as PathPoint, points[index] as PathPoint, base, originalBase, far)
+            const bounds = handleBounds(points, moved, group, k === 0)
+            moved[index] = clampHandle(moved[index] as PathPoint, points[index] as PathPoint, bounds.base, bounds.originalBase, bounds.far)
         }
     }
+}
+
+function anchorEnds(
+    segments: Segment[],
+    newStart: Point,
+    newEnd: Point,
+    departure: Point,
+    arrival: Point,
+): Segment[] {
+    const { points, groups } = flatten(segments)
+    const lastIndex = points.length - 1
+    if (lastIndex < 0) return segments
+
+    const deltas: Point[] = points.map(() => ({ x: 0, y: 0 }))
+    const first = points[0] as PathPoint
+    const last = points[lastIndex] as PathPoint
+    // The run at each end of the path.
+    const curves = groups.filter((group) => group.handles > 0)
+
+    /*
+     * How far the endpoint has actually travelled along the path's own
+     * direction of travel, rather than how far the cards moved it. A run
+     * that reached past a point the endpoint never passed would drag that
+     * point *backwards*, which is the fold this exists to prevent.
+     *
+     * Where the path has no direction at all to measure against — a
+     * single point, or a first leg of zero length, which d3 emits for a
+     * `curveBumpX` edge leaving straight up — the tangent-carrying handle
+     * stands in instead, which is the nearest thing to an answer the path
+     * offers.
+     */
+    const reach = headReach(points, lastIndex, newStart, departure, curves[0])
+    const back = tailReach(points, lastIndex, newEnd, arrival, curves.at(-1))
+
+    addDelta(deltas, 0, reach, { x: newStart.x - first.x, y: newStart.y - first.y })
+    addDelta(deltas, back, lastIndex, { x: newEnd.x - last.x, y: newEnd.y - last.y })
+
+    const moved: PathPoint[] = points.map((point, index) => {
+        const delta = deltas[index] as Point
+        return { x: point.x + delta.x, y: point.y + delta.y, onCurve: point.onCurve }
+    })
+
+    rescaleFarHandles(points, moved, deltas, curves)
+    clampMovedHandles(points, moved, deltas, groups)
 
     let seen = 0
     return segments.map((segment) => ({
@@ -818,24 +948,6 @@ function anchorEnds(
     }))
 }
 
-/**
- * A translated handle, held to two bounds so a run can never fold the
- * path back on itself:
- *
- *   - it keeps the **direction** it had relative to the point it hangs
- *     off — a repetition's anchor for a head handle, its vertex for a
- *     tail handle. It may be shortened, never turned around.
- *   - it is never **longer than the room** from that point to the far
- *     end of the repetition, which is what would turn the segment into
- *     a loop.
- *
- * The reference direction is read off the **original** handle and the
- * **original** point it hung off, while the length and the room are read
- * off the **moved** ones. Mixing the two — measuring a handle's
- * original reach from where its anchor ended up — silently rotates the
- * handle onto a different ray, which is what put a 113° kink at the far
- * join of every `curveBasis` edge before this was split in two.
- */
 function clampHandle(
     handle: PathPoint,
     original: PathPoint,
@@ -878,7 +990,7 @@ function clampHandle(
  * Mermaid's own marker on such a path has no orientation to honour.
  */
 function endTangent(groups: Group[], points: PathPoint[]): Point {
-    const lastGroup = groups[groups.length - 1]
+    const lastGroup = groups.at(-1)
     if (lastGroup === undefined) return { x: 0, y: 0 }
     const end = points[lastGroup.vertex]
     if (end === undefined) return { x: 0, y: 0 }
@@ -907,49 +1019,61 @@ function endTangent(groups: Group[], points: PathPoint[]): Point {
  * degenerate handles (`curveBumpX` puts the first control point on the
  * start vertex, `curveStep` repeats the last point), and a handle that
  * sits on the point it measures from has no direction to give.
- */function endDirections(groups: Group[], points: PathPoint[]): { departure: Point; arrival: Point } {
+ */
+function endDirections(groups: Group[], points: PathPoint[]): { departure: Point; arrival: Point } {
     const firstGroup = groups[0]
-    const lastGroup = groups[groups.length - 1]
+    const lastGroup = groups.at(-1)
     if (firstGroup === undefined || lastGroup === undefined) {
         return { departure: { x: 0, y: 0 }, arrival: { x: 0, y: 0 } }
     }
     const vertices = groups
         .map((group) => points[group.vertex])
         .filter((point): point is PathPoint => point !== undefined)
-    const first = points[0] as PathPoint | undefined
-    const last = points[points.length - 1] as PathPoint | undefined
+    return {
+        departure: endDirection(vertices, points[0] as PathPoint | undefined, headHandle(points, firstGroup), true),
+        arrival: endDirection(vertices, points.at(-1), tailHandle(points, lastGroup), false),
+    }
+}
 
-    let departure = { x: 0, y: 0 }
-    if (firstGroup.handles > 0) {
-        const head = points[firstGroup.start]
-        if (first !== undefined && head !== undefined) departure = unit(head.x - first.x, head.y - first.y)
+/** The handle nearest the start, or `undefined` when that repetition carries none. */
+function headHandle(points: PathPoint[], group: Group): PathPoint | undefined {
+    return group.handles > 0 ? points[group.start] : undefined
+}
+
+/** The handle nearest the end, or `undefined` when that repetition carries none. */
+function tailHandle(points: PathPoint[], group: Group): PathPoint | undefined {
+    return group.handles > 0 ? points[group.start + group.handles - 1] : undefined
+}
+
+/**
+ * The travel direction at one end: off that end's own handle where it has
+ * one, and off the nearest pair of distinct on-curve points otherwise.
+ *
+ * A handle that sits on the point it measures from — d3 emits several
+ * (`curveBumpX` puts its first control point on the start vertex,
+ * `curveStep` repeats the last point) — has no direction to give, so the
+ * chord scan takes over. It walks *inward* from the end, which is the way
+ * the run there is made: forwards from the start, backwards from the end,
+ * and skipping the end's own vertex.
+ */
+function endDirection(vertices: PathPoint[], end: PathPoint | undefined, handle: PathPoint | undefined, forward: boolean): Point {
+    const zero = { x: 0, y: 0 }
+    if (end === undefined) return zero
+    if (handle !== undefined) {
+        const chord = forward ? unit(handle.x - end.x, handle.y - end.y) : unit(end.x - handle.x, end.y - handle.y)
+        if (chord.x !== 0 || chord.y !== 0) return chord
     }
-    let arrival = { x: 0, y: 0 }
-    if (lastGroup.handles > 0) {
-        const tail = points[lastGroup.start + lastGroup.handles - 1]
-        if (last !== undefined && tail !== undefined) arrival = unit(last.x - tail.x, last.y - tail.y)
+    for (const vertex of inward(vertices, forward)) {
+        const chord = forward ? unit(vertex.x - end.x, vertex.y - end.y) : unit(end.x - vertex.x, end.y - vertex.y)
+        if (chord.x !== 0 || chord.y !== 0) return chord
     }
-    // Fall back to the chord to the next on-curve point the head run and
-    // the tail run are both made of.
-    if (departure.x === 0 && departure.y === 0 && first !== undefined) {
-        for (const vertex of vertices) {
-            const chord = unit(vertex.x - first.x, vertex.y - first.y)
-            if (chord.x !== 0 || chord.y !== 0) {
-                departure = chord
-                break
-            }
-        }
-    }
-    if (arrival.x === 0 && arrival.y === 0 && last !== undefined) {
-        for (let i = vertices.length - 2; i >= 0; i--) {
-            const chord = unit(last.x - (vertices[i] as PathPoint).x, last.y - (vertices[i] as PathPoint).y)
-            if (chord.x !== 0 || chord.y !== 0) {
-                arrival = chord
-                break
-            }
-        }
-    }
-    return { departure, arrival }
+    return zero
+}
+
+/** The on-curve vertices to try, in the order they are tried. */
+function inward(vertices: PathPoint[], forward: boolean): PathPoint[] {
+    if (forward) return vertices
+    return vertices.slice(0, -1).reverse()
 }
 
 /**
@@ -1098,7 +1222,7 @@ export function reanchorEdgePath(
     if (segments[0]?.command !== 'M') return null
     const { points, groups } = flatten(segments)
     const first = points[0]
-    const last = points[points.length - 1]
+    const last = points.at(-1)
     if (first === undefined || last === undefined) return null
     if (isBundleBasis(groups, points)) {
         const q = decodeBundleBasis(points)

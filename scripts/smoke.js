@@ -26,6 +26,7 @@
 import { readFile } from 'node:fs/promises'
 import { resolve, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { IS_FUNCTION_ARGUMENT, firstHostDocLeak } from './cssGuards.js'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const bundlePath = resolve(here, '..', 'frontend', 'main.js')
@@ -47,7 +48,10 @@ try {
 
 const globalName = 'SporaAppTeamGraph'
 
-const bindingRe = new RegExp(String.raw`(?:^|;|\n)\s*(?:var\s+${globalName}\s*=|window\.${globalName}\s*=)`, 'm')
+// No `String.raw` here: there is no backslash to protect, only the `\n` and
+// `\s` the regex engine reads, so a plain template is the same string with
+// one less thing to keep straight.
+const bindingRe = new RegExp(`(?:^|;|\\n)\\s*(?:var\\s+${globalName}\\s*=|window\\.${globalName}\\s*=)`, 'm')
 if (!bindingRe.test(txt)) {
     failures.push(`bundle does not declare ${globalName} via \`var ${globalName}=\` or \`window.${globalName}=\``)
 }
@@ -187,9 +191,9 @@ const HOST_HSL_TOKENS = [
 for (const token of HOST_HSL_TOKENS) {
     // The captured window ends exactly where `var(` begins, so the test
     // below can ask whether that `var(` is a function's argument.
-    const re = new RegExp(`(.{0,64})var\\(--${token}\\)`, 'g')
+    const re = new RegExp(String.raw`(.{0,64})var\(--${token}\)`, 'g')
     for (const [, lead = ''] of css.matchAll(re)) {
-        if (/[a-z-]+\(\s*$/i.test(lead)) continue
+        if (IS_FUNCTION_ARGUMENT.test(lead)) continue
         failures.push(
             `stylesheet uses a bare \`var(--${token})\`, which is an invalid value against an HSL-triple ` +
             `token and is dropped at computed-value time: \`…${lead}var(--${token})\``,
@@ -218,15 +222,9 @@ for (const token of HOST_HSL_TOKENS) {
  * bug. The value-level check is what actually catches the regression
  * if the rule is reintroduced with different colours.
  */
-const hostDocLeaks = [
-    { re: /(^|[};])\s*html\s*,\s*body\s*,\s*#app\s*\{/m, what: 'an unscoped `html, body, #app` rule' },
-    { re: /(^|[};])\s*body\s*\{[^}]*\b(background|color)\s*:\s*#[0-9a-f]{3,8}\b/i, what: 'an unscoped `body` rule with a hard-coded colour' },
-    { re: /(^|[};])\s*:root\s*\{[^}]*\bcolor-scheme\b/i, what: 'a `:root` rule setting `color-scheme` (belongs on the plugin root)' },
-]
-for (const { re, what } of hostDocLeaks) {
-    if (re.test(css)) {
-        failures.push(`stylesheet leaks into the host document: ${what}`)
-    }
+const leak = firstHostDocLeak(css)
+if (leak !== null) {
+    failures.push(`stylesheet leaks into the host document: ${leak}`)
 }
 if (css.includes('#f9fafb') || css.includes('#1f2937')) {
     failures.push('stylesheet contains the hard-coded dev-harness colours #f9fafb / #1f2937 (host tokens must be used)')
