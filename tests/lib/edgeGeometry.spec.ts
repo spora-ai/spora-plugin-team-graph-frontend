@@ -607,10 +607,19 @@ describe('reanchorEdgePath', () => {
     it('clamps a start handle that would overshoot its own vertex', () => {
         /*
          * A path whose label box is far smaller than the card, so the
-         * start endpoint travels 52.5 units and drags the first cubic's
-         * head control point with it. The handle was 30 units long; the
-         * room left between its (moved) anchor and the segment's own
-         * vertex is 7.5, so the clamp has to bite or the segment loops.
+         * start endpoint travels 26.5 units (31.5 of half-height less the
+         * 5 it started at) and drags the first cubic's whole head run
+         * with it. The head handle was 10 units long; the room left
+         * between its (moved) anchor and the segment's own vertex is
+         * 5.5, so the clamp has to bite or the segment loops.
+         *
+         * **The numbers are relative to the card, and the card is
+         * shorter than it was.** At the 88.2 px card this fixture's lead-in
+         * and cubic were far enough apart that the run landed *past* the
+         * vertex; at 63 px the endpoint has 12.6 units less to travel, so
+         * the fixture was re-shaped to keep the same situation rather
+         * than the assertion being relaxed — the clamp is still
+         * exercised, and still has to be.
          *
          * The handle is found through the command table — index 2 is the
          * first `C`'s *head control point*, not "the point after the
@@ -619,9 +628,9 @@ describe('reanchorEdgePath', () => {
          * tangent the card is met at is still the tangent dagre drew.
          *
          * `tests/lib/edgeGeometryCorpus.spec.ts` proves the same clamp on
-         * ten real Mermaid paths, from the `short-names` graph.
+         * real Mermaid paths.
          */
-        const narrowLabelBox = 'M0,5L0,10C0,40 0,55 0,70L0,600'
+        const narrowLabelBox = 'M0,5L0,10C0,20 0,30 0,42L0,600'
         const out = reanchorEdgePath(narrowLabelBox, { x: 0, y: 0 }, { x: 0, y: 700 }, halfW, halfH)
         expect(out).not.toBeNull()
         const points = parsePathPoints(out!)!.flatMap((s) => s.points)
@@ -632,8 +641,10 @@ describe('reanchorEdgePath', () => {
         const handleLen = Math.hypot(handle.x - anchor.x, handle.y - anchor.y)
         const room = Math.hypot(vertex.x - anchor.x, vertex.y - anchor.y)
         expect(handleLen).toBeCloseTo(room, 3)
-        // …where it was 30 units long to begin with.
-        expect(handleLen).toBeLessThan(30)
+        // …where it was 10 units long to begin with, and the room was
+        // 5.5 of it.
+        expect(handleLen).toBeCloseTo(5.5, 3)
+        expect(handleLen).toBeLessThan(10)
         // The tangent is still the original one, just shorter: the handle
         // still points from the lead-in vertex straight down.
         expect(handle.x - anchor.x).toBeCloseTo(0, 3)

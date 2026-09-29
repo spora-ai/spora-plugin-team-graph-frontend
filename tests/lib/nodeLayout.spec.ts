@@ -4,7 +4,12 @@ import { resolve } from 'node:path'
 import {
     NODE_CARD_AVATAR_SIZE,
     NODE_CARD_BADGE_HEIGHT,
+    NODE_CARD_BODY_HEIGHT,
     NODE_CARD_BORDER,
+    NODE_CARD_CONTENT_HEIGHT,
+    NODE_CARD_HEADLINE_FONT_SIZE,
+    NODE_CARD_HEADLINE_HEIGHT,
+    NODE_CARD_HEADLINE_LINE_HEIGHT,
     NODE_CARD_HEIGHT,
     NODE_CARD_PADDING_BLOCK,
     NODE_CARD_PILL_HEIGHT,
@@ -41,26 +46,96 @@ describe('node card constants', () => {
         // (`nodeLayout`, `edgeGeometry`, `useMermaidRender`) and this
         // arithmetic follows.
         expect(NODE_CARD_WIDTH).toBe(240)
-        expect(NODE_CARD_HEIGHT).toBe(
-            NODE_CARD_BORDER * 2 +
-            NODE_CARD_PADDING_BLOCK * 2 +
-            NODE_CARD_AVATAR_SIZE +
-            NODE_CARD_ROW_GAP +
-            NODE_CARD_ROW2_HEIGHT,
+        expect(NODE_CARD_CONTENT_HEIGHT).toBe(
+            Math.max(NODE_CARD_AVATAR_SIZE, NODE_CARD_HEADLINE_HEIGHT + NODE_CARD_ROW_GAP + NODE_CARD_ROW2_HEIGHT),
         )
-        // 1.5×2 border + 9×2 padding + 44 tile + 4 gap + 19.2 status row.
-        expect(NODE_CARD_HEIGHT).toBe(88.2)
+        expect(NODE_CARD_HEIGHT).toBe(NODE_CARD_BORDER * 2 + NODE_CARD_PADDING_BLOCK * 2 + NODE_CARD_CONTENT_HEIGHT)
+        // 1.5×2 border + 8×2 padding + 44 tile = 63.
+        expect(NODE_CARD_HEIGHT).toBe(63)
     })
 
-    it('reserves the tile the whole headline row, so the two can be aligned', () => {
+    it('derives every term of the height, so the sum is a measurement and not a copy', () => {
         /*
-         * The tile is the package's `size="md"` (2.75rem → 44 px) and the
-         * headline row is the tile's own edge, which is what lets
-         * `.tg-node-card-row1 { block-size: var(--tg-avatar-size) }` put
-         * the name's line box on the tile's centre line. Measured in the
-         * browser: 0.000 px between the two centres, both themes.
+         * **Why the height has to be a sum and not a number.** The box is
+         * load-bearing in four places (the painted card, the overlay's
+         * `translate3d`, the grown `g.node` rect, and the border walk
+         * `edgeGeometry` does to every arrow tip). Three of them read
+         * these constants, and a fourth hard-coded `63` would be a fifth
+         * copy that could disagree with the padding, the tile and the row
+         * the stylesheet actually paints. Each term is therefore derived
+         * from the same font-size / line-height / padding numbers the CSS
+         * declares, and this test is what holds those two together.
          */
+        expect(NODE_CARD_HEADLINE_HEIGHT).toBe(NODE_CARD_HEADLINE_FONT_SIZE * NODE_CARD_HEADLINE_LINE_HEIGHT)
+        expect(NODE_CARD_HEADLINE_HEIGHT).toBeCloseTo(15.6, 5)
+        expect(NODE_CARD_BODY_HEIGHT).toBe(NODE_CARD_HEADLINE_HEIGHT + NODE_CARD_ROW_GAP + NODE_CARD_ROW2_HEIGHT)
+        expect(NODE_CARD_BODY_HEIGHT).toBeCloseTo(37.8, 5)
+        expect(NODE_CARD_CONTENT_HEIGHT).toBe(NODE_CARD_AVATAR_SIZE)
+        // 3 + 16 + 44.
+        expect(NODE_CARD_HEIGHT).toBe(NODE_CARD_BORDER * 2 + 16 + 44)
+    })
+
+    it('keeps the body column shorter than the tile, so the tile is the height floor', () => {
+        /*
+         * **The invariant the 63 px card rests on.** The content box is
+         * `max(tile, body)`; the body is 37.8 px and the tile 44, so the
+         * tile sets it and the card is exactly as short as a 44 px tile
+         * allows. If a future font-size or pill-padding change pushed the
+         * body past 44 the `max` would silently start growing the card
+         * again — the same quiet regression the 46 px status-row reserve
+         * used to be, arrived at from the other direction. So the
+         * inequality is asserted directly, with the margin that would be
+         * available before it bites.
+         */
+        expect(NODE_CARD_BODY_HEIGHT).toBeLessThan(NODE_CARD_AVATAR_SIZE)
+        expect(NODE_CARD_CONTENT_HEIGHT).toBe(NODE_CARD_AVATAR_SIZE)
+        // 44 − 37.8 = 6.2 px of the body column's band left over beneath
+        // it, and that is the whole of the card's remaining slack.
+        expect(NODE_CARD_AVATAR_SIZE - NODE_CARD_BODY_HEIGHT).toBeCloseTo(6.2, 5)
+        // The same statement from the other side: nothing may grow the
+        // content box while the tile is the taller of the two.
+        expect(NODE_CARD_HEIGHT).toBe(NODE_CARD_BORDER * 2 + NODE_CARD_PADDING_BLOCK * 2 + NODE_CARD_AVATAR_SIZE)
+    })
+
+    it('cannot go below the tile: every other lever is spent', () => {
+        /*
+         * **Why there is no smaller card to find.** The content box
+         * cannot be shorter than the 44 px tile standing in it, so the
+         * card is `2·1.5 + 2·padding + 44` and the *only* term left is
+         * the padding. The arithmetic is spelled out here so the next
+         * person who is asked for a shorter card reads the ladder instead
+         * of shrinking the tile and calling it a layout fix: 63 at 8 px
+         * of padding, 59 at 6, 55 at 4, 47 at none. The operator asked
+         * for the 44 px tile and has not rescinded it.
+         */
+        const at = (padding: number): number => NODE_CARD_BORDER * 2 + padding * 2 + NODE_CARD_AVATAR_SIZE
+        expect(at(NODE_CARD_PADDING_BLOCK)).toBe(NODE_CARD_HEIGHT)
+        expect(at(6)).toBe(59)
+        expect(at(4)).toBe(55)
+        expect(at(0)).toBe(47)
+        // And the tile is not a term anyone has quietly moved.
         expect(NODE_CARD_AVATAR_SIZE).toBe(44)
+    })
+
+    it('leaves the headline one line box tall, top-aligned rather than centred on the tile', () => {
+        /*
+         * **The deliberate reversal.** Row 1 used to be forced to
+         * `var(--tg-avatar-size)` with the name centred in it, so the two
+         * centres coincided at Δ = 0.000 px — and the headline read as
+         * sitting low, because a 15.6 px line box centred in a 44 px band
+         * hangs 14.2 px below the tile's top edge. Row 1 is now the
+         * headline's natural height and the card's own
+         * `align-items: flex-start` puts the name's top edge on the tile's
+         * top edge, so the measured centre delta is −(44 − 15.6) / 2 =
+         * −14.2 px. This test cannot measure a browser, so it asserts the
+         * two things it can: the headline is one line box tall, and the
+         * stylesheet no longer forces row 1 to the tile's edge.
+         */
+        expect(NODE_CARD_HEADLINE_FONT_SIZE).toBe(13)
+        expect(NODE_CARD_HEADLINE_LINE_HEIGHT).toBe(1.2)
+        // Half the difference between the tile and the line box, which is
+        // how far the name's centre now sits above the tile's.
+        expect((NODE_CARD_AVATAR_SIZE - NODE_CARD_HEADLINE_HEIGHT) / 2).toBeCloseTo(14.2, 5)
     })
 
     it('derives the status row from its two boxes instead of reserving a worst case', () => {
@@ -70,8 +145,8 @@ describe('node card constants', () => {
          * `white-space: nowrap` + `text-overflow: ellipsis`), so its box
          * is 11 px × 1.2 + 2 × 3 = 19.2 px; the badges are
          * 10 px × 1.4 + 2 × 1 = 16 px. The pill wins, so the row is
-         * 19.2 px and the card is 88.2 px — not the 115 px it was when the
-         * row reserved the pill's three-line height.
+         * 19.2 px — untouched by the resize, which took its height out of
+         * row 1 and the block padding rather than out of the pill.
          */
         expect(NODE_CARD_PILL_HEIGHT).toBeCloseTo(19.2, 5)
         expect(NODE_CARD_BADGE_HEIGHT).toBeCloseTo(16, 5)
@@ -168,6 +243,32 @@ describe('the status row fits every real status on one line', () => {
         // And the whole card still has room for it.
         expect(NODE_CARD_HEIGHT).toBeGreaterThanOrEqual(NODE_CARD_PILL_HEIGHT)
     })
+
+    it('still fits every label in the row it is given, at the new card height', () => {
+        /*
+         * The resize took the height out of row 1 and the block padding,
+         * not out of the row the pill is in — so the pill is still 19.2 px
+         * and the row is still one line tall. The *width* the label is
+         * measured against is unchanged too (the inline padding stayed at
+         * 13 px), which is the other half of why all eleven still fit.
+         * These are the same numbers the stylesheet comment quotes, and
+         * they are asserted from the constants rather than copied, so a
+         * future width change cannot quietly invalidate the browser
+         * measurement quoted there.
+         *
+         * The border is the *rendered* 1 px, not the declared 1.5: that
+         * is the rounding every inset on this card already carries, and
+         * it is why the measured row is 158 px and not 157.
+         */
+        const RENDERED_BORDER = 1
+        const rowWidth = NODE_CARD_WIDTH - RENDERED_BORDER * 2 - 2 * 13 - NODE_CARD_AVATAR_SIZE - 10
+        expect(rowWidth).toBe(158)
+        expect(NODE_CARD_ROW2_HEIGHT).toBeCloseTo(19.2, 5)
+        // The pill is 19.2 px in a content box that is the 44 px tile, so
+        // it has 24.8 px of vertical room to be wrong in before the card
+        // clips it.
+        expect(NODE_CARD_CONTENT_HEIGHT - NODE_CARD_ROW2_HEIGHT).toBeCloseTo(24.8, 5)
+    })
 })
 
 /**
@@ -189,16 +290,36 @@ describe('the stylesheet takes the card footprint from these constants', () => {
         expect(body).not.toMatch(/(?:^|[;\s])height\s*:/)
     })
 
-    it('takes the tile edge and the headline row from the same custom property', () => {
+    it('takes the tile edge from the same custom property the height is derived from', () => {
         // The package sizes its tile in `rem`, which tracks the *root*
         // font size, while the card is a fixed px box. Both consumers
-        // therefore read `--tg-avatar-size`, which
-        // `AgentNodeCard.vue` sets from `NODE_CARD_AVATAR_SIZE`.
+        // therefore read `--tg-avatar-size`, which `AgentNodeCard.vue`
+        // sets from `NODE_CARD_AVATAR_SIZE` — the tile itself, and (since
+        // `NODE_CARD_CONTENT_HEIGHT` is the `max` that includes it) the
+        // term the card's height is floored on.
         expect(css).toContain(
             '.tg-node-card-avatar { inline-size: var(--tg-avatar-size); block-size: var(--tg-avatar-size);',
         )
+    })
+
+    it('no longer forces the headline row to the tile\'s edge', () => {
+        /*
+         * **The reversal, asserted where it happened.** Row 1 used to
+         * carry `block-size: var(--tg-avatar-size)`, which is what put
+         * the name's centre on the tile's centre — and what the operator
+         * asked to give up. The row is now the headline's own line box,
+         * top-aligned, and the card's height is derived from that instead
+         * of from the tile. The font-size / line-height below are the same
+         * two numbers `NODE_CARD_HEADLINE_HEIGHT` multiplies, so a change
+         * to one that is not a change to the other fails here.
+         */
+        expect(css).toContain('.tg-node-card-row1 { display: flex; align-items: flex-start; gap: 6px; }')
+        expect(/\.tg-node-card-row1\s*\{[^}]*block-size/.test(css)).toBe(false)
         expect(css).toContain(
-            '.tg-node-card-row1 { display: flex; align-items: center; gap: 6px; block-size: var(--tg-avatar-size); }',
+            `.tg-node-card-name { font-size: ${NODE_CARD_HEADLINE_FONT_SIZE}px;`,
+        )
+        expect(/\.tg-node-card-name\s*\{[^}]*line-height:\s*([\d.]+)/.exec(css)?.[1]).toBe(
+            String(NODE_CARD_HEADLINE_LINE_HEIGHT),
         )
     })
 

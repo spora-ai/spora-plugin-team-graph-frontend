@@ -333,6 +333,11 @@
  * gone: the shared `AgentAvatar` tile is the agent's identity, and
  * it reads `profile_picture` straight off the wire payload.
  *
+ * The height is 63 px and is derived from the parts below rather than
+ * authored here: 1.5 × 2 border + 8 × 2 block padding + a 44 px
+ * content box, which is the 44 px tile. See `NODE_CARD_HEIGHT` in
+ * `lib/nodeLayout.ts`.
+ *
  * **No `width` / `height` here, on purpose.** The card's box is
  * load-bearing in four places — the painted card, the overlay's
  * `translate3d`, the `g.node` rect `useMermaidRender` grows, and the
@@ -345,13 +350,16 @@
  * no longer existed. `tests/style.spec.ts` fails the build if a literal
  * creeps back in.
  *
- * **`align-items: flex-start`, not `center`.** The tile and the
- * headline row are the same height (`--tg-avatar-size`), so with
- * `center` the tile would be centred on the *body* — which is taller,
- * because it also holds the status row — and would sit a third of the
- * card down, next to the pill instead of the name. Pinning both to the
- * top padding edge is what puts the name's line box on the tile's
- * centre line.
+ * **`align-items: flex-start`, not `center`.** The card is a 44 px tile
+ * beside a 37.8 px body column, and the body is the *shorter* of the
+ * two — so they are not interchangeable and the tile has nothing to be
+ * centred against. Pinning both to the top padding edge is what puts the
+ * name's line box on the tile's top edge, which is where the operator
+ * asked for it: row 1 used to be forced to the tile's whole 44 px with
+ * the name centred inside it, and a 15.6 px line box centred in a 44 px
+ * band sits 14.2 px lower than it does now. The centre-alignment is
+ * deliberately gone — see `NODE_CARD_HEADLINE_HEIGHT` in
+ * `lib/nodeLayout.ts` for the reversal, in full.
  *
  * The card element is a real `<button type="button">` (see
  * `AgentNodeCard.vue`), so this rule also has to undo what the UA
@@ -366,16 +374,23 @@
  * from the measured node centre; `position: absolute` keeps every
  * card out of flow.
  *
- * **`padding: 9px 13px` is the prototype's and is unchanged**, even
- * though the tile is 44 px where the prototype's is 32: the padding
- * was never what was wrong. The card read as badly padded because the
- * status row reserved 46 px for a label that needs 19.2, leaving a
- * hole in front of the bottom padding — see `.tg-node-card-row2` and
- * `.tg-node-card-pill` below. With the reserve gone the four insets
- * render at the prototype's own values again (measured 10 / 11 / 14 /
- * 14 px, top / bottom / left / right, in both themes — the extra pixel
- * at the bottom is the 1.5 px border rounded to a whole one, and it was
- * there before this change too).
+ * **`padding: 8px 13px` is the prototype's inline padding and one
+ * pixel less than its block padding, and the reason is the tile.** The
+ * prototype sized `9px 13px` for a **32 px** tile; this card carries the
+ * 44 px one the operator asked for, and at 9 px of block padding the
+ * card still measured 65 px — 23.2 px of the old height gone, but 2 px
+ * of it still padding nobody asked for. The inline padding is untouched
+ * at 13 px: the status row's arithmetic is measured against it (the row
+ * is 158 px wide and the two badges take 67.5 of it), and that did not
+ * change. Measured in a headless browser in both themes, the four insets
+ * render at 9 / 10 / 14 / 14 px, top / bottom / left / right — the extra
+ * pixel at the bottom is the 1.5 px border rounded to a whole one, and
+ * it was there before this change too. Those are the *tile's* insets,
+ * which is the one thing whose meaning moved: the tile used to float in
+ * the top 44 px of a 67.2 px content column and now fills the whole of
+ * a 44 px one, so the body column's own bottom inset reads 16.2 px.
+ * That asymmetry is what top-aligning the headline costs, and it is the
+ * only one this change introduces.
  */
 .tg-node-card {
     position: absolute;
@@ -386,7 +401,7 @@
     align-items: flex-start;
     gap: 10px;
     margin: 0;
-    padding: 9px 13px;
+    padding: 8px 13px;
     appearance: none;
     -webkit-appearance: none;
     background: #fff;
@@ -440,10 +455,15 @@
  * in `2.75rem` — and `rem` resolves against the **root** font size, not
  * against the plugin. A host that set `html { font-size: 18px }` would
  * paint a 49.5 px tile inside a box computed from 44 px, and the tile
- * would spill out of the row it is supposed to sit on. So the card
+ * would spill out of the content box it is supposed to fill. So the card
  * names the edge itself (`--tg-avatar-size`, set inline from
- * `NODE_CARD_AVATAR_SIZE`) and this rule states it in px. The
- * remaining `flex-shrink` and the shadow are the prototype's own.
+ * `NODE_CARD_AVATAR_SIZE`) and this rule states it in px. The remaining
+ * `flex-shrink` and the shadow are the prototype's own.
+ *
+ * It used to be read by `.tg-node-card-row1` as well, which is how the
+ * headline was centred on it. It is now read only here, because the
+ * headline is top-aligned against the tile rather than centred on it —
+ * the same reversal `NODE_CARD_HEADLINE_HEIGHT` documents.
  */
 .tg-node-card-avatar {
     inline-size: var(--tg-avatar-size);
@@ -485,34 +505,53 @@
  * split the rows across lines instead of stacking them. */
 .tg-node-card-body { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; }
 /**
- * Row 1 is exactly the tile's edge, and the name is centred inside it.
+ * Row 1 is the headline, at the headline's own height, top-aligned.
  *
- * This single line is the "avatar aligned with the headline". The tile
- * sits at the top padding edge (`.tg-node-card { align-items: flex-start }`)
- * and so does row 1; giving row 1 the tile's own height and centring
- * the name within it puts the two centres on the same line by
- * construction, at any headline font size, rather than by a magic
- * offset. Measured in the browser: the delta between the name's line-box
- * centre and the tile's centre is 0.000 px, in both themes.
+ * **The `block-size` this rule used to carry is the change.** Row 1 was
+ * forced to `var(--tg-avatar-size)` with the name centred inside it, so
+ * the name's line-box centre and the tile's centre coincided at
+ * Δ = 0.000 px. That is a real alignment, and it is what the operator
+ * asked to give up: a 15.6 px line box centred in a 44 px band hangs
+ * 14.2 px below the tile's top edge, and the report was "the headline
+ * sits low". With the `block-size` gone the row is 13 px × 1.2 = 15.6 px
+ * — the same number as `NODE_CARD_HEADLINE_HEIGHT` in
+ * `lib/nodeLayout.ts`, which is what keeps the height equation honest
+ * — and `align-items: flex-start` (matching the card) puts the name's
+ * top edge on the tile's top edge. Measured after the change, in a
+ * headless browser in both themes: the name's line-box centre is
+ * 14.203 px *above* the tile's centre, which is exactly half of
+ * (44 − 15.6).
+ *
+ * Nothing else depended on the old alignment: the row gap below is the
+ * only thing that moved with it, and the card is shorter by 25.2 px.
  */
-.tg-node-card-row1 { display: flex; align-items: center; gap: 6px; block-size: var(--tg-avatar-size); }
+.tg-node-card-row1 { display: flex; align-items: flex-start; gap: 6px; }
 /**
  * Row 2 is the pill and the edge-count badges, and its `min-height` is
  * the status row's *content* height, not a reserve for a label that
  * might wrap: `NODE_CARD_ROW2_HEIGHT` in `lib/nodeLayout.ts` derives it
  * as the taller of the pill's own box (11 px × 1.2 + 2 × 3 = 19.2 px)
- * and the badges' (10 px × 1.4 + 2 × 1 = 16 px), and `NODE_CARD_HEIGHT`
- * adds it in. The two numbers have to move together or the card either
- * grows a hole or clips its own pill — asserted in
+ * and the badges' (10 px × 1.4 + 2 × 1 = 16 px), and
+ * `NODE_CARD_BODY_HEIGHT` adds it in. The numbers have to move together
+ * or the card either grows a hole or clips its own pill — asserted in
  * `tests/lib/nodeLayout.spec.ts`. See `.tg-node-card-pill` below for why
  * the label no longer wraps.
+ *
+ * `margin-top: 3px` is `NODE_CARD_ROW_GAP`, down from the prototype's
+ * 4 px. It is the headline↔badges gap the operator asked to be smaller,
+ * and it is now *the* gap: measured, the name's line-box bottom sits
+ * 3.0 px above the pill's top edge, where it used to sit 18.2 px above
+ * it. Reducing it does **not** make the card shorter — the 44 px tile is
+ * the height floor, not the body column — so the height came from the
+ * `block-size` on row 1 and from the block padding, and the gap is a
+ * pure spacing change.
  */
 .tg-node-card-row2 {
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 6px;
-    margin-top: 4px;
+    margin-top: 3px;
     min-height: 19.2px;
 }
 .tg-node-card-name {

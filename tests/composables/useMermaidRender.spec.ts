@@ -52,8 +52,15 @@ function makeSvgFixture(centres: Array<[number, [number, number]]> = [[1, [200, 
     return `<svg viewBox="0 0 200 100" style="max-width: 200px" width="200" height="100">${nodes}` +
         `<path class="flowchart-link LS-n1 LE-n2" id="L-n1-n2-0" d="M200 52 L200 148" />` +
         // The path Mermaid 10 really emits for a `curveBasis` edge:
-        // `M <start> L <control> C … C … L <end>`.
-        `<path class="flowchart-link LS-n1 LE-n2" id="L-n1-n2-9" d="M185,58L170,64C150,70,120,80,105,90C90,100,90,110,90,115L90,120" />` +
+        // `M <q₀> L <blend> C … C … L <qₙ>`. These are d3's `Basis`
+        // emission of Mermaid's `curveBundle(0.85)` through the routed
+        // spline points (200,52) → (240,100) → (200,148), serialised at
+        // Mermaid's own 3 decimals — so `edgeGeometry` recognises it as
+        // the one shape the shipped `flowchart.curve` produces and takes
+        // its own `reanchorBundleBasis` path, not the polyline fallback.
+        // It used to be a hand-written `M L C C L` that only *looked*
+        // like one, which the bundle-basis decoder rightly declined.
+        `<path class="flowchart-link LS-n1 LE-n2" id="L-n1-n2-9" d="M200,52L205.667,60C211.333,68,222.667,84,222.667,100C222.667,116,211.333,132,205.667,140L200,148" />` +
         `<path class="flowchart-link" id="L-unparseable" d="M0,0H10" />` +
         `<path class="flowchart-link" id="L-n1-n99-0" d="M200 52 L200 148" />` +
         `</svg>`
@@ -440,14 +447,14 @@ describe('useMermaidRender — edge re-anchoring', () => {
             ).toBeCloseTo(0, 3)
             // …and the path end is never more than one arrowhead past it.
             //
-            // For every edge Mermaid's router produces the end tangent
-            // points *into* the target, so the end sits exactly
-            // `ARROWHEAD_OVERSHOOT` short. The bound is stated as "within
-            // one arrowhead" rather than "exactly one" because the
-            // fixture's `L-n1-n2-9` ends with a vertical `L` that runs
-            // *along* the left border its ray crossed — a shape the real
-            // router does not emit. `tests/lib/edgeGeometry.spec.ts`
-            // pins the exact 4.8 for the four shapes it does.
+            // For a vertical edge (`L-n1-n2-0`) the end tangent is exactly
+            // the border's normal, so the end sits `ARROWHEAD_OVERSHOOT`
+            // short. For the diagonal `L-n1-n2-9` the same 4.8 is walked
+            // along the *tangent* rather than along the normal, so it
+            // lands nearer the border than one arrowhead (3.083 px at the
+            // 63 px card) — which is the point of measuring the tip
+            // rather than the end. The bound is stated as "within one
+            // arrowhead" for exactly that reason.
             expect(
                 distanceToBorder(last, centre(tgt)),
                 `path end of ${id} is held back by at most the overshoot`,

@@ -93,7 +93,7 @@ describe('style.css — the card always paints an opaque prototype-M surface', (
         expect(rule).toContain('background: #fff')
         expect(rule).toContain('border: 1.5px solid #7c3aed')
         expect(rule).toContain('border-radius: 10px')
-        expect(rule).toContain('padding: 9px 13px')
+        expect(rule).toContain('padding: 8px 13px')
         expect(rule).toContain('box-shadow: 0 2px 6px -2px rgba(15, 23, 41, 0.08)')
     })
 

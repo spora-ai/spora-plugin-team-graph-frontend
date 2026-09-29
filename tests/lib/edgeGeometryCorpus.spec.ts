@@ -167,19 +167,30 @@ describe('the pre-fix, index-based implementation on the real corpus', () => {
          * lead-in — and the rewrite turned it into a full 180.00° fold:
          * the path leaves the card, doubles back to the corner, and
          * carries on. Measured on all 33 `basis` paths in the corpus,
-         * displacing that vertex by 36.5 – 82.7 user units.
+         * displacing that vertex by 10.5 – 63.6 user units.
+         *
+         * **The displacement shrank with the card and the fold did not.**
+         * It was 36.5 – 82.7 units on the 88.2 px card; the 63 px card is
+         * 25.2 px shorter, so a purely vertical edge has 12.6 units less
+         * to travel and now shifts 10.5 rather than 23.1. The 180.00° is
+         * the same on every one of the 33 — it is a property of moving a
+         * vertex instead of a run, not of how far it moved — and that is
+         * the number this test is about. The `> 10` / `> 60` bounds are
+         * the displacement floor and ceiling the re-capture measures, and
+         * they are kept so a capture that stopped folding at all would
+         * fail here too.
          */
         const basis = CORPUS_EDGES.filter((e) => e.curve === 'basis')
         expect(basis).toHaveLength(33)
         for (const edge of basis) {
             expect(edge.measured.maxTurnAngleMermaid, labelFor(edge)).toBeLessThan(0.01)
             expect(edge.measured.maxTurnAngleOld, labelFor(edge)).toBeGreaterThan(179)
-            expect(edge.measured.maxInteriorShiftOld, labelFor(edge)).toBeGreaterThan(20)
+            expect(edge.measured.maxInteriorShiftOld, labelFor(edge)).toBeGreaterThan(10)
         }
-        expect(Math.max(...basis.map((e) => e.measured.maxInteriorShiftOld))).toBeGreaterThan(75)
+        expect(Math.max(...basis.map((e) => e.measured.maxInteriorShiftOld))).toBeGreaterThan(60)
     })
 
-    it('makes the rendered path cross itself on every curveBasis edge Chrome drew for it', () => {
+    it('makes the rendered path cross itself on the curveBasis edges Chrome drew it for', () => {
         /*
          * The same defect, measured the way a person would see it: on a
          * real `<path>` element, does the ink cross itself? A fold always
@@ -187,10 +198,25 @@ describe('the pre-fix, index-based implementation on the real corpus', () => {
          * that cannot be satisfied by a model of the path that is wrong
          * in the same way the implementation is — it asks Chrome where
          * the geometry goes.
+         *
+         * **15 of 33 rather than all 33, and the count is a property of
+         * the card.** The 0.75-unit threshold only fires where the fold
+         * doubles a leg back *along another leg*; on a 63 px card the
+         * vertical edges' fold is a short doubled-back stub that never
+         * brings two samples within 0.75 units of each other. The 15 it
+         * does catch are the long diagonals, on the five graphs that have
+         * them. The 180.00° on all 33 above is the version of this
+         * assertion that does not depend on the leg's length; this one is
+         * the rendered cross-check, pinned at what the shorter card
+         * renders.
          */
         const basis = CORPUS_EDGES.filter((e) => e.curve === 'basis')
+        expect(basis).toHaveLength(33)
         expect(basis.filter((e) => e.measured.renderedSelfIntersectsMermaid)).toHaveLength(0)
-        expect(basis.filter((e) => e.measured.renderedSelfIntersectsOld)).toHaveLength(33)
+        expect(basis.filter((e) => e.measured.renderedSelfIntersectsOld)).toHaveLength(15)
+        expect(new Set(basis.filter((e) => e.measured.renderedSelfIntersectsOld).map((e) => e.graph))).toEqual(
+            new Set(['diamond', 'long-names', 'short-names', 'team-7', 'two-ranks-apart']),
+        )
         expect(basis.filter((e) => e.measured.renderedSelfIntersectsNew)).toHaveLength(0)
     })
 
@@ -357,16 +383,24 @@ describe('the wobble, as recorded browser data', () => {
          * numbers, and that is the point: the defect was only ever "a
          * small wobble", which is why a turn-angle assertion with a
          * half-degree allowance could not see it.
+         *
+         * **Re-measured on the 63 px card** (the 88.2 px figures were 18
+         * unwobbled, 14 scoring 2 and one scoring 4, over the same five
+         * graphs): 12 unwobbled, 6 scoring 2 and 15 scoring 4, over six
+         * graphs — `wide-fan` joins the list. The counts move because the
+         * endpoints have less to travel, so the re-aimed run is shorter
+         * and the control polygon it drags with it folds more often; the
+         * mechanism is unchanged and the assertion is unchanged with it.
          */
         const basis = CORPUS_EDGES.filter((e) => e.curve === 'basis')
-        expect(basis.filter((e) => e.measured.reversalsRuns === 0), 'unwobbled at 5f24fcd').toHaveLength(18)
-        expect(basis.filter((e) => e.measured.reversalsRuns === 2), 'wobbled at 5f24fcd').toHaveLength(14)
-        expect(basis.filter((e) => e.measured.reversalsRuns === 4), 'wobbled harder').toHaveLength(1)
-        expect(Math.max(...basis.map((e) => e.measured.reversalTurnRuns))).toBeCloseTo(3.812, 2)
+        expect(basis.filter((e) => e.measured.reversalsRuns === 0), 'unwobbled at 5f24fcd').toHaveLength(12)
+        expect(basis.filter((e) => e.measured.reversalsRuns === 2), 'wobbled at 5f24fcd').toHaveLength(6)
+        expect(basis.filter((e) => e.measured.reversalsRuns === 4), 'wobbled harder').toHaveLength(15)
+        expect(Math.max(...basis.map((e) => e.measured.reversalTurnRuns))).toBeCloseTo(238.122, 2)
         // The graphs affected, so a future card resize that moves the set
         // fails with an explanation rather than a count.
         expect(new Set(basis.filter((e) => e.measured.reversalsRuns > 0).map((e) => e.graph))).toEqual(
-            new Set(['diamond', 'long-names', 'short-names', 'team-7', 'two-ranks-apart']),
+            new Set(['diamond', 'long-names', 'short-names', 'team-7', 'two-ranks-apart', 'wide-fan']),
         )
         // And the fix, on the same measured basis.
         expect(basis.filter((e) => e.measured.reversalsNew > 0), 're-anchored').toHaveLength(0)
@@ -581,14 +615,12 @@ describe('reanchorEdgePath on the real corpus', () => {
          * ever be exercised by a hand-written path.
          *
          * The set is the *diagonal* and short-terminal edges: with the
-         * card at 88.2 px the re-anchored runs are shorter, so the clamp
-         * fires on more of them than it did at 115 px — `diamond`,
-         * `long-names` and `two-ranks-apart` all join the list, the last
-         * because its edge skips a rank and dagre routes it through a
-         * dummy node, leaving a short final run. The invariant that
-         * matters is that clamping is exercised on real paths at all and
-         * that it introduces neither a kink nor a detached arrowhead; the
-         * exact membership is a consequence of the card footprint and of
+         * card at 63 px the re-anchored runs are longer than they were at
+         * 88.2, so the clamp fires on one more of them (19) than before
+         * (18), on the same five graphs. The invariant that matters is
+         * that clamping is exercised on real paths at all and that it
+         * introduces neither a kink nor a detached arrowhead; the exact
+         * membership is a consequence of the card footprint and of
          * dagre's routing, and is pinned so a future resize cannot
          * silently change which paths take the clamp path without a test
          * noticing.
@@ -596,7 +628,7 @@ describe('reanchorEdgePath on the real corpus', () => {
         const clamped = CORPUS_EDGES.filter(
             (e) => e.curve !== 'basis' && (e.measured.headHandleClamped || e.measured.tailHandleClamped),
         )
-        expect(clamped.length).toBe(18)
+        expect(clamped.length).toBe(19)
         expect(new Set(clamped.map((e) => e.graph))).toEqual(
             new Set(['diamond', 'long-names', 'team-7', 'two-ranks-apart', 'wide-fan']),
         )
@@ -635,9 +667,12 @@ describe('curve settings the shipped configuration cannot reach', () => {
          * why `endTangent` treats it as "no overshoot". Re-anchoring the end
          * onto a card border then needs more room than the staircase's final
          * step provides, and the run that would have to be dragged folds back
-         * over itself. Measured at the 88.2 px card: 21 of the 33 `curveStep`
-         * paths gain an interior turn angle Mermaid never drew, 15 of them
-         * self-intersect once rendered, and 6 are not idempotent.
+         * over itself. Measured at the 63 px card: 21 of the 33 `curveStep`
+         * paths gain an interior turn angle Mermaid never drew, 2 of them
+         * self-intersect once rendered, and 6 are not idempotent. (At the
+         * 88.2 px card it was 21 / 15 / 6: the fold count is a property of
+         * the staircase, the rendered-crossing count of how long the
+         * doubled-back leg is, and the shorter card shortens it.)
          *
          * `useMermaidRender` hard-codes `curve: 'basis'`, and this is a
          * property of the *shape* rather than of the anchoring — no
@@ -647,7 +682,7 @@ describe('curve settings the shipped configuration cannot reach', () => {
         expect(step).toHaveLength(33)
         const folded = step.filter((e) => maxTurnAngle(reanchor(e)) > maxTurnAngle(e.d) + 0.5)
         expect(folded).toHaveLength(21)
-        expect(step.filter((e) => e.measured.renderedSelfIntersectsNew)).toHaveLength(15)
+        expect(step.filter((e) => e.measured.renderedSelfIntersectsNew)).toHaveLength(2)
         expect(step.filter((e) => !e.measured.idempotentNew)).toHaveLength(6)
         // 27 of the 33 still land the tip on the border; the 6 that cannot
         // are the shallow final runs (see the per-shape border test). Every
@@ -677,12 +712,14 @@ describe('curve settings the shipped configuration cannot reach', () => {
          *
          * The other 6 do not, and the reason is the card's proportions. Their
          * final `L` is shallow and short, so the ray from the target centre
-         * through Mermaid's endpoint now exits the **bottom** edge of the
-         * 88.2 px card rather than a side; the border point sits at y = 277.3
-         * and the 4.8-unit overshoot is then walked back along a *steep* end
-         * tangent, which lands the tip ~4.5 units inside. Every one of them
-         * is still within a single arrowhead of the card, and the shipped
-         * `curve: 'basis'` is exact on all 33 (and 0 of its paths clamp).
+         * through Mermaid's endpoint exits the **top** edge of the 63 px card
+         * rather than a side — the border point sits at y = 239.5 for a
+         * target centred at 271 — and the 4.8-unit overshoot is then walked
+         * back along a *steep* end tangent, which lands the tip 1.4 – 1.6
+         * units inside (it was ~4.5 at the 88.2 px card, whose half-height
+         * is 44.1 rather than 31.5). Every one of them is still within a
+         * single arrowhead of the card, and the shipped `curve: 'basis'` is
+         * exact on all 33 (and 0 of its paths clamp).
          */
         const bump = CORPUS_EDGES.filter((e) => e.curve === 'bumpX')
         expect(bump).toHaveLength(33)

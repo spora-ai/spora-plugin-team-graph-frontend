@@ -20,25 +20,31 @@
  *     is 0 — a 0-inbound node is an entry-point agent, and that
  *     distinction is signal, not noise.
  *
- * **The tile is `size="md"` (44 px) and the headline sits on it.** The
- * 240 px width is the Variant M prototype's; the height is *derived*
- * from the box's own parts in `lib/nodeLayout.ts` (`border + block
- * padding + tile + row gap + status row`), so the headline row can be
- * exactly as tall as the tile and the name's line box ends up centred
- * on the tile's centre. That is the whole reason the card grew: a
- * 44 px tile cannot be centre-aligned with a 15.6 px headline inside a
- * box whose padding is uniform — aligning the two centres needs the
- * tile to overhang the top padding by half the difference — so the
- * alignment is bought with a taller first row rather than with a
- * negative margin. Measured in the browser, the delta between the two
- * centres is 0.000 px in both themes.
+ * **The tile is `size="md"` (44 px) and the headline is top-aligned
+ * against it.** The 240 px width is the Variant M prototype's; the
+ * height is *derived* from the box's own parts in `lib/nodeLayout.ts`
+ * (`border + block padding + max(tile, body column)`), so the tile is
+ * the content box and the card is exactly as short as a 44 px tile can
+ * be — 63 px.
+ *
+ * The headline used to be **centred** on the tile: row 1 was forced to
+ * the tile's whole 44 px, which put the name's line-box centre and the
+ * tile's centre on the same line at Δ = 0.000 px. That alignment is
+ * deliberately reversed here. A 15.6 px line box centred in a 44 px
+ * band hangs 14.2 px below the tile's top edge, and that is what the
+ * operator read as "the headline sits low". Row 1 is now the headline's
+ * natural height (13 px × 1.2 = 15.6 px) and the card's own
+ * `align-items: flex-start` puts the name's top edge on the tile's top
+ * edge. The measured delta between the two centres is −14.203 px — the
+ * name now sits *above* the tile's centre rather than on it, which is
+ * the point. See `NODE_CARD_HEADLINE_HEIGHT` in `lib/nodeLayout.ts`.
  *
  * **The status row is sized to its content, so the label does not
  * wrap.** It used to reserve the pill's three-line height, which made
  * every card 115 px tall and left 26.8 px of empty row under the pill
  * on all of them — the "the paddings are off" report. The pill now
  * takes its label on one line and ellipsises (`.tg-node-card-pill` in
- * `style.css`), which puts the card at its natural 88.2 px for every
+ * `style.css`), which puts the card at its natural height for every
  * status. The full label is not lost: it stays in the DOM as the
  * pill's text, so a screen reader reads it whole; it is the pill's
  * `title` on hover; and the detail panel shows it in full. The
@@ -156,8 +162,7 @@ const cardClass = computed(() => ({
  * `--tg-avatar-size` is the same move one level down: the package sizes
  * its tile in `rem` (which tracks the *root* font size) while the card
  * is a fixed px box, so the tile's edge is stated in px here and
- * `style.css` uses the same variable for the tile *and* for the
- * headline row it is centred in.
+ * `style.css` uses the same variable for the tile itself.
  *
  * The two `--spora-avatar-*` custom properties are the package's own
  * theming hook for the initials tile, so an agent with no archetype

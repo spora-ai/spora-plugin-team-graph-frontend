@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { mount } from '@vue/test-utils'
 import AgentNodeCard from '../../src/components/AgentNodeCard.vue'
-import { NODE_CARD_AVATAR_SIZE, NODE_CARD_HEIGHT, NODE_CARD_WIDTH } from '../../src/lib/nodeLayout'
+import { NODE_CARD_AVATAR_SIZE, NODE_CARD_BODY_HEIGHT, NODE_CARD_CONTENT_HEIGHT, NODE_CARD_HEIGHT, NODE_CARD_WIDTH } from '../../src/lib/nodeLayout'
 import type { GraphNode } from '../../src/types'
 
 /**
@@ -93,11 +93,40 @@ describe('AgentNodeCard — structure', () => {
         expect(style).toContain(`height: ${NODE_CARD_HEIGHT}px`)
     })
 
-    it('publishes the tile edge so the tile and the headline row cannot drift', () => {
-        // `--tg-avatar-size` is read by both `.tg-node-card-avatar`
-        // (the tile's own edge, in px) and `.tg-node-card-row1` (the row
-        // the name is centred in). One number for both is what makes the
-        // headline land on the tile's centre line at any font size.
+    it('paints the tightened box: 240 × 63, floored by the 44 px tile', () => {
+        /*
+         * The card the operator asked for: headline higher, less room
+         * between the headline and the badges, less card. 88.2 → 63 px, and
+         * the number is pinned here as well as in `nodeLayout.spec.ts`
+         * because this is the element the box is actually painted on — a
+         * constant that changed without reaching the card would still pass
+         * every other test in the suite.
+         *
+         * The floor is the tile: 1.5 × 2 border + 8 × 2 block padding +
+         * max(44 tile, 37.8 body) = 63. Nothing below 63 is reachable
+         * without shrinking the tile, which the operator has not asked
+         * for.
+         */
+        const card = mountCard().find('.tg-node-card')
+        const style = card.attributes('style') ?? ''
+        expect(NODE_CARD_WIDTH).toBe(240)
+        expect(NODE_CARD_HEIGHT).toBe(63)
+        expect(style).toContain('width: 240px')
+        expect(style).toContain('height: 63px')
+        expect(NODE_CARD_CONTENT_HEIGHT).toBe(NODE_CARD_AVATAR_SIZE)
+        expect(NODE_CARD_BODY_HEIGHT).toBeLessThan(NODE_CARD_AVATAR_SIZE)
+    })
+
+    it('publishes the tile edge so the tile and the card height cannot drift', () => {
+        /*
+         * `--tg-avatar-size` is read by `.tg-node-card-avatar` for the
+         * tile's own edge, in px, and `NODE_CARD_AVATAR_SIZE` is the term
+         * `NODE_CARD_CONTENT_HEIGHT` floors the card's height on — so the
+         * painted tile and the box that has to contain it are one number.
+         * It used to be read by `.tg-node-card-row1` too, which is how
+         * the headline was centred on the tile; that alignment is
+         * deliberately gone, so this is now the only consumer.
+         */
         const style = mountCard().find('.tg-node-card').attributes('style') ?? ''
         expect(style).toContain(`--tg-avatar-size: ${NODE_CARD_AVATAR_SIZE}px`)
     })

@@ -86,7 +86,7 @@ const FIT_MARGIN = 16
  * `fit()` has no upper cap of its own any more: a graph whose natural
  * size is smaller than the viewport used to be pinned at `scale(1)`,
  * which left a small diagram marooned in the middle of a large empty
- * canvas (measured on the 4-node dev fixture: a 666 × 401 diagram in
+ * canvas (measured on the 4-node dev fixture: a 666 × 362 diagram in
  * a 764 × 620 viewport stayed at 100 % and wasted 219 px of height).
  * Letting `fit()` scale up fills the space, but a two-node graph is
  * only 280 × 116 px and would balloon to ~2.7×, so the enlargement is
@@ -140,7 +140,7 @@ export function usePanZoom({ wrapRef, contentRef, hostRef }: UsePanZoomOptions):
      * empty, read the "zoom out" icon (no `width` attribute, so it fell
      * through to `clientWidth` = 12) and computed a transform for a
      * 12 × 12 "diagram" — `translate(376px, 304px) scale(1)` at the
-     * time, throwing the real 667 × 401 graph off the bottom-right of
+     * time, throwing the real 667 × 362 graph off the bottom-right of
      * the canvas. Which of the two `<svg>`s wins is a race against
      * Mermaid's async render, so the mis-measurement is intermittent
      * rather than constant — but it is reachable, and requiring the host

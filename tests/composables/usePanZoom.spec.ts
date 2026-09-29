@@ -188,18 +188,18 @@ describe('usePanZoom — fit()', () => {
     })
 
     it('fills the tighter axis and centres the slack on the other one', async () => {
-        // A 4-node graph is wider than it is tall (667 × 401 in a
+        // A 4-node graph is wider than it is tall (667 × 362 in a
         // 722 × 618 canvas): the width binds, and the leftover height
         // is split above and below the diagram.
-        const h = await mountHarness({ w: 666.75, h: 401 }, { w: 722, h: 618 })
+        const h = await mountHarness({ w: 666.75, h: 362 }, { w: 722, h: 618 })
         expect(h.fit()).toBe(true)
         const [, x, y, k] = /^translate\((-?[\d.]+)px, (-?[\d.]+)px\) scale\(([\d.]+)\)$/.exec(
             transformOf(h),
         ) as RegExpExecArray
-        // k = min(706/666.75, 602/401, 1.5) = 1.0588…
+        // k = min(706/666.75, 602/362, 1.5) = 1.0588…
         expect(Number(k)).toBeCloseTo(1.0588, 3)
         expect(Number(x)).toBeCloseTo(8, 1)
-        expect(Number(y)).toBeCloseTo((618 - 401 * Number(k)) / 2, 1)
+        expect(Number(y)).toBeCloseTo((618 - 362 * Number(k)) / 2, 1)
     })
 
     it("ignores the zoom toolbar's icon SVGs and measures the diagram", async () => {
@@ -477,16 +477,16 @@ describe('usePanZoom — window resize', () => {
      * instead — but only while nobody has taken the view over.
      */
     it('re-fits an untouched view so the diagram grows into a wider canvas', async () => {
-        const h = await mountHarness({ w: 666.75, h: 401 }, { w: 766, h: 620 })
+        const h = await mountHarness({ w: 666.75, h: 362 }, { w: 766, h: 620 })
         h.fit()
-        // Width binds: k = min(750/666.75, 604/401, 1.5) = 1.125.
+        // Width binds: k = min(750/666.75, 604/362, 1.5) = 1.125.
         expect(scaleOf(h)).toBeCloseTo(1.125, 3)
 
         // The canvas doubles in width (the real 1920-vs-1440 case).
         stubLayout(h.wrapRef.value as HTMLElement, 1516, 620)
         window.dispatchEvent(new Event('resize'))
 
-        // Now k = min(1500/666.75, 604/401, 1.5) = 1.5 — the
+        // Now k = min(1500/666.75, 604/362, 1.5) = 1.5 — the
         // FIT_MAX_SCALE cap, i.e. the enlargement limit, not the old
         // scale. The diagram is visibly bigger, not stranded.
         expect(scaleOf(h)).toBeCloseTo(1.5, 3)
@@ -496,7 +496,7 @@ describe('usePanZoom — window resize', () => {
     })
 
     it('preserves a scale the operator chose by zooming, across a resize', async () => {
-        const h = await mountHarness({ w: 666.75, h: 401 }, { w: 766, h: 620 })
+        const h = await mountHarness({ w: 666.75, h: 362 }, { w: 766, h: 620 })
         h.fit()
         h.zoomIn() // k = 1.125 * 1.25
         const chosen = scaleOf(h)
@@ -509,7 +509,7 @@ describe('usePanZoom — window resize', () => {
     })
 
     it('preserves a pan the operator made, across a resize', async () => {
-        const h = await mountHarness({ w: 666.75, h: 401 }, { w: 1516, h: 620 })
+        const h = await mountHarness({ w: 666.75, h: 362 }, { w: 1516, h: 620 })
         h.fit()
         const wrap = h.wrapRef.value as HTMLElement
         wrap.dispatchEvent(down(wrap, 100, 100, 31))
@@ -527,7 +527,7 @@ describe('usePanZoom — window resize', () => {
         // fit() is the "reset the view" button and the principal-switch
         // path, so it must clear the manual-override flag — otherwise a
         // stale zoom would suppress re-framing forever.
-        const h = await mountHarness({ w: 666.75, h: 401 }, { w: 766, h: 620 })
+        const h = await mountHarness({ w: 666.75, h: 362 }, { w: 766, h: 620 })
         h.fit()
         h.zoomOut()
         const manual = scaleOf(h)
@@ -611,7 +611,7 @@ describe('usePanZoom — ResizeObserver on the wrap', () => {
          * `window`) leaves the diagram at the old scale in a canvas
          * twice as wide.
          */
-        const h = await mountHarness({ w: 666.75, h: 401 }, { w: 766, h: 620 })
+        const h = await mountHarness({ w: 666.75, h: 362 }, { w: 766, h: 620 })
         h.fit()
         expect(scaleOf(h)).toBeCloseTo(1.125, 3)
 
@@ -621,11 +621,11 @@ describe('usePanZoom — ResizeObserver on the wrap', () => {
         expect(scaleOf(h)).toBeCloseTo(1.5, 3)
         const [, x, y] = /^translate\((-?[\d.]+)px, (-?[\d.]+)px\)/.exec(transformOf(h)) as RegExpExecArray
         expect(Number(x)).toBeCloseTo((1516 - 666.75 * 1.5) / 2, 1)
-        expect(Number(y)).toBeCloseTo((620 - 401 * 1.5) / 2, 1)
+        expect(Number(y)).toBeCloseTo((620 - 362 * 1.5) / 2, 1)
     })
 
     it('keeps a manually-chosen scale across an observed resize', async () => {
-        const h = await mountHarness({ w: 666.75, h: 401 }, { w: 766, h: 620 })
+        const h = await mountHarness({ w: 666.75, h: 362 }, { w: 766, h: 620 })
         h.fit()
         h.zoomIn()
         const chosen = scaleOf(h)
@@ -687,7 +687,7 @@ describe('usePanZoom — ResizeObserver on the wrap', () => {
         // @ts-expect-error — deliberately removing a global to simulate the absence.
         delete globalThis.ResizeObserver
         try {
-            const h = await mountHarness({ w: 666.75, h: 401 }, { w: 766, h: 620 })
+            const h = await mountHarness({ w: 666.75, h: 362 }, { w: 766, h: 620 })
             h.fit()
             expect(scaleOf(h)).toBeCloseTo(1.125, 3)
             stubLayout(h.wrapRef.value as HTMLElement, 1516, 620)
