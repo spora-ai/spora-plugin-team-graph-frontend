@@ -85,13 +85,23 @@ function makeGraph(target: GraphNode): GraphPayload {
     }
 }
 
-/** Mount the panel with node 1 selected and the first tile returned. */
+/**
+ * Mount the panel with node 1 selected and the first tile returned.
+ *
+ * `router` is a required prop but these tests never click a chat row,
+ * so it is passed as an inert stub rather than `null` — that keeps the
+ * rows in their *enabled* state, which is the state the edge-row
+ * assertions below are written against. `null` (the disabled
+ * fallback) is covered on its own in `AgentDetailPanelChats.spec.ts`.
+ */
+const inertRouter = { push: () => Promise.resolve(undefined) }
+
 async function mountFirstTile(target: GraphNode) {
     const pinia = createPinia()
     setActivePinia(pinia)
     useSelectionStore().setSelected(1)
     const wrapper = mount(AgentDetailPanel, {
-        props: { graph: makeGraph(target) },
+        props: { graph: makeGraph(target), router: inertRouter },
         global: { plugins: [pinia] },
     })
     // The panel fires three fetches for the selected agent on mount;
@@ -179,7 +189,7 @@ describe('AgentDetailPanel avatar tiles', () => {
         // Point the edge at an agent that is not in the payload.
         graph.edges[0]!.target = 999
         const wrapper = mount(AgentDetailPanel, {
-            props: { graph },
+            props: { graph, router: inertRouter },
             global: { plugins: [pinia] },
         })
         await flushPromises()
@@ -189,7 +199,10 @@ describe('AgentDetailPanel avatar tiles', () => {
         // `useInitials('')` returns '?' — same as the old
         // `initialsFor()` fallback.
         expect(tile.find('[data-testid="avatar-initials"]').text()).toBe('?')
-        expect(wrapper.find('[data-testid="tg-outbound-section"] .truncate').text()).toBe('Unknown')
+        // `.tg-row-title` is the row's name line; it carries the
+        // ellipsis/truncation styling that used to be a bare
+        // `truncate` utility class on the `<p>`.
+        expect(wrapper.find('[data-testid="tg-outbound-section"] .tg-row-title').text()).toBe('Unknown')
         wrapper.unmount()
     })
 
@@ -232,7 +245,7 @@ describe('AgentDetailPanel avatar tiles', () => {
         })
         graph.nodes.push(withArchetype({ id: 3, name: 'Frankie' }))
         const wrapper = mount(AgentDetailPanel, {
-            props: { graph },
+            props: { graph, router: inertRouter },
             global: { plugins: [pinia] },
         })
         await flushPromises()

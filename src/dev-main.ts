@@ -22,6 +22,17 @@ import type { GraphNode, GraphPayload, GraphEdge } from './types'
  * dev-proxy (`SPORA_PLUGIN_DEV_PORTS=team-graph:5180 npm run dev` in
  * `spora-frontend`) and visit `/apps/team-graph`.
  *
+ * **The dev page has no host CSS variables.** The plugin resolves
+ * every colour through the host's tokens (`--foreground`,
+ * `--muted`, `--border`, …), and nothing in this repo declares them
+ * — the host does, in `spora-frontend/src/style.css`. So a bare
+ * `npm run dev` renders with every `hsl(var(--token))` falling back
+ * to inherited black-on-white, and the panel's dark theme cannot be
+ * inspected at all. Paste the host's `@layer base :root` / `.dark`
+ * blocks into the devtools (or load the host SPA through the
+ * dev-proxy, which is the better option) before judging any colour
+ * here.
+ *
  * **Two things the stub has to get right, because the whole point of
  * `npm run dev` is to be representative.**
  *
@@ -140,6 +151,93 @@ const DEV_PRINCIPALS = [
     { id: 3, type: 'group', name: 'Engineering', is_current_user_owned: false },
 ]
 
+/**
+ * `/tasks` rows for the selected agent, in the raw wire shape
+ * `taskToChatSummary()` maps from.
+ *
+ * **Why the stub bothers.** The panel's chat sections are the part
+ * of the sidebar with the most new surface in this change (the
+ * navigable rows, the status pill, the overflow note), and an empty
+ * `/tasks` response renders them as a single "No recent chats." line —
+ * so a dev server with an empty stub cannot show whether any of it
+ * works. Six completed rows against a cap of four also exercises the
+ * overflow note, and one running row exercises the in-flight section,
+ * so both chat sections and the "+N more" line are visible at once.
+ *
+ * Statuses are spread across the wire enum on purpose: two of them
+ * (`COMPLETED`, `CANCELLED`) collapse onto the *same* status slug, so
+ * only their labels tell them apart in the rendered pill.
+ *
+ * Five completed rows against a cap of four, so the overflow note is
+ * on screen in every dev session rather than only in a test.
+ */
+const DEV_TASKS: Array<Record<string, unknown>> = [
+    {
+        id: 501,
+        agent_id: 11,
+        status: 'RUNNING',
+        user_prompt: 'Draft the Q3 investor update from the analytics export',
+        final_response: null,
+        created_at: '2026-09-28T11:52:00Z',
+    },
+    {
+        id: 502,
+        agent_id: 11,
+        status: 'AWAITING_SUB_AGENTS',
+        user_prompt: 'Compare the three competitor pricing pages and summarise the differences',
+        final_response: null,
+        created_at: '2026-09-28T11:10:00Z',
+    },
+    {
+        id: 503,
+        agent_id: 11,
+        status: 'COMPLETED',
+        user_prompt: 'Summarise the Q3 report',
+        final_response: 'Three regions, two risks, one recommendation to hold pricing until November.',
+        created_at: '2026-09-28T10:00:00Z',
+    },
+    {
+        id: 504,
+        agent_id: 11,
+        status: 'COMPLETED',
+        user_prompt: 'Rewrite the onboarding email to be shorter and warmer',
+        final_response: 'Here is a 90-word version that keeps the same three-step structure…',
+        created_at: '2026-09-27T16:40:00Z',
+    },
+    {
+        id: 505,
+        agent_id: 11,
+        status: 'CANCELLED',
+        user_prompt: 'Pull every metric for the churned cohort since January',
+        final_response: null,
+        created_at: '2026-09-27T09:05:00Z',
+    },
+    {
+        id: 506,
+        agent_id: 11,
+        status: 'COMPLETED',
+        user_prompt: 'Explain the difference between the two rate-limit implementations we shipped last quarter, and which one the edge fleet is actually running now given the April migration',
+        final_response: 'The fleet is on the token-bucket implementation as of the April migration…',
+        created_at: '2026-09-26T13:22:00Z',
+    },
+    {
+        id: 507,
+        agent_id: 11,
+        status: 'COMPLETED',
+        user_prompt: 'Find every place the old pricing tier names still appear',
+        final_response: 'Nine: four in the marketing site, three in the API docs, two in emails.',
+        created_at: '2026-09-25T15:11:00Z',
+    },
+    {
+        id: 508,
+        agent_id: 11,
+        status: 'COMPLETED',
+        user_prompt: 'Draft the weekly ops digest',
+        final_response: 'Section headings drafted; the incident paragraph still needs a number.',
+        created_at: '2026-09-25T08:02:00Z',
+    },
+]
+
 function devGraph(principalId: number): GraphPayload {
     const names: Record<number, string> = {
         1: 'local-dev@spora.local',
@@ -176,7 +274,30 @@ const devApi = {
             return devGraph(id) as T
         }
         if (path.startsWith('/tasks')) {
-            return { tasks: [] } as T
+            // `status=` narrows to the in-flight statuses the panel
+            // asks for; everything else (COMPLETED) is the recent list.
+            const status = /status=([A-Z_]+)/.exec(path)?.[1] ?? 'COMPLETED'
+            const inFlight = ['RUNNING', 'AWAITING_SUB_AGENTS', 'PENDING_APPROVAL'].includes(status)
+            return {
+                tasks: DEV_TASKS.filter((t) => (inFlight ? t.status === status : t.status === 'COMPLETED')),
+            } as T
+        }
+        if (/^\/agents\/\d+$/.test(path)) {
+            return {
+                agent: {
+                    id: Number(path.split('/').pop()),
+                    name: 'Spora Core Agent',
+                    description:
+                        'Coordinates the team: breaks goals into delegated tasks, merges the results, and escalates anything that needs a human decision.',
+                    llm_driver_config_id: 1,
+                    max_steps: 25,
+                    is_active: true,
+                    is_pinned: false,
+                    principal_id: 1,
+                    tools: [],
+                    created_at: '2026-09-01T00:00:00Z',
+                },
+            } as T
         }
         return {} as T
     },
@@ -186,16 +307,68 @@ const devApi = {
     delete: async <T>(): Promise<T> => undefined as T,
 }
 
+/**
+ * A stand-in for the host's router.
+ *
+ * The real host passes its `vue-router` instance (see
+ * `spora-frontend/src/apps/registry.ts → buildHostContext`), and the
+ * panel's chat rows call `router.push('/tasks/{id}')` on it. Under
+ * `npm run dev` there is no host SPA, so this records each push on
+ * `window.__tgRouterPushes` and paints the destination into a fixed
+ * toast — which is what makes the deep-link *verifiable* in a browser
+ * rather than only in a unit test.
+ *
+ * `?router=off` on the dev URL hands over `null` instead, so the
+ * panel's disabled-row fallback can be inspected in the same session
+ * without editing this file.
+ */
+const devRouterPushes: string[] = []
+declare global {
+    interface Window {
+        __tgRouterPushes?: string[]
+    }
+}
+window.__tgRouterPushes = devRouterPushes
+
+const devRouter = {
+    push: (to: string): Promise<unknown> => {
+        devRouterPushes.push(to)
+        const toast = document.createElement('div')
+        toast.id = 'tg-dev-router-toast'
+        toast.textContent = `router.push(${to})`
+        toast.setAttribute(
+            'style',
+            'position:fixed;z-index:99999;left:12px;bottom:12px;padding:8px 12px;border-radius:8px;' +
+                'background:#0f172a;color:#f8fafc;font:600 13px ui-monospace,monospace;',
+        )
+        document.body.appendChild(toast)
+        return Promise.resolve(undefined)
+    },
+    currentRoute: { value: { path: '/apps/team-graph', params: {}, query: {} } },
+}
+
+const routerDisabled = new URLSearchParams(window.location.search).get('router') === 'off'
+
 const hostContext = {
     api: devApi,
     pinia: null,
     theme: 'light' as const,
     route: null,
-    router: null,
+    router: routerDisabled ? null : devRouter,
 }
 
 setApi(hostContext.api)
 
 const app = createApp(App, { hostContext })
 app.use(createPinia())
-app.mount('#app')
+/*
+ * Mount into the plugin's own scope id rather than a generic `#app`.
+ * `App.vue` renders `<div id="spora-plugin-team-graph">` as its root
+ * and every stylesheet rule — the generated Tailwind utilities via
+ * `tailwind.config.ts → important:`, and the hand-written `.tg-*`
+ * chrome — is scoped to that id. Mounting into a differently-named
+ * element gave `npm run dev` a different CSS scope from the hosted
+ * page, so dev could render correctly while production did not (or
+ * the reverse). `index.html` carries the same id.
+ */
+app.mount('#spora-plugin-team-graph')

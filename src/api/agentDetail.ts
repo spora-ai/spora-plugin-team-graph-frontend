@@ -2,10 +2,10 @@
  * Per-agent detail fetchers.
  *
  * Active / recent chats come from the live `/tasks` endpoint.
- * The full agent record (`/agents/{id}`) supplies everything the
- * detail panel wants beyond the graph payload: description, tools
- * (with server-resolved icons), the owning principal, the LLM
- * driver FK, etc. The agent resource shape is locked in
+ * The full agent record (`/agents/{id}`) supplies the one thing the
+ * detail panel wants beyond the graph payload: the description (and
+ * the tools / LLM FK the type still mirrors). The agent resource
+ * shape is locked in
  * `Spora\Services\AgentResource::toArray()`; we mirror only the
  * fields the plugin's right sidebar actually consumes.
  *
@@ -120,23 +120,19 @@ export interface AgentToolEntry {
 }
 
 /**
- * Owning principal as exposed by `AgentResource::toArray()`. The
- * team-graph payload's `principal` block only describes the
- * principal whose graph we're rendering; this block describes
- * the agent's OWN owner (one-to-one: every agent has exactly one
- * owning principal since migration 0067).
- */
-export interface AgentPrincipalBlock {
-    id: number
-    type: 'user' | 'group'
-    name: string
-}
-
-/**
  * AgentResource-shaped payload. We carry the full set of fields
  * the host serializes so the panel can read description / tools /
  * principal_id / llm FK without a second round-trip; we just
  * accept `null` on optional fields for fixtures and migrations.
+ *
+ * **No `principal` block.** The panel's Owner section was removed
+ * — the owning principal is already picked by the principal pill
+ * row at the top of the page, so the row was a duplicate of a
+ * control one screen above it. The interface member and the
+ * `AgentPrincipalBlock` shape it referenced went with it; the
+ * host still serializes `principal` on the wire and we still
+ * accept (and ignore) it, which is the whole point of a
+ * response-shaped interface.
  */
 export interface AgentMeta {
     id: number
@@ -147,16 +143,15 @@ export interface AgentMeta {
     is_active: boolean
     is_pinned: boolean
     principal_id: number
-    principal: AgentPrincipalBlock | null
     tools: AgentToolEntry[]
     created_at: string | null
 }
 
 /**
  * `GET /api/v1/agents/{id}` — full agent record. Used by the right
- * sidebar to render description / tools / owning principal, none
- * of which live on the team's `GraphPayload` (which only carries
- * the bare-minimum fields the Mermaid node template needs).
+ * sidebar to render the agent's description, which does not live on
+ * the team's `GraphPayload` (that carries only the bare-minimum
+ * fields the node card needs).
  */
 export async function fetchAgentMeta(agentId: number): Promise<AgentMeta | null> {
     try {

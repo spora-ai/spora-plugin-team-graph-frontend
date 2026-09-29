@@ -214,15 +214,15 @@ describe('TeamGraphPage.vue (single-sidebar layout)', () => {
         wrapper.unmount()
     })
 
-    it('renders the compact header + owner + description + edges when an agent is selected', async () => {
+    it('renders the compact header + description + edges when an agent is selected', async () => {
         const wrapper = mount(TeamGraphPage, { props: { hostContext } })
         await flushPromises()
         const selection = useSelectionStore()
         selection.setSelected(11)
         await flushPromises()
 
-        // /agents/11 was called by the detail panel for description
-        // / owner — these come from /agents/{id}, not the graph
+        // /agents/11 was called by the detail panel for the
+        // description — that comes from /agents/{id}, not the graph
         // payload. The compact variant no longer reads m.tools.
         expect(fetchAgentMetaMock).toHaveBeenCalledWith(11)
 
@@ -239,12 +239,6 @@ describe('TeamGraphPage.vue (single-sidebar layout)', () => {
         // Tools section is gone in the compact variant (the
         // dashboard's AgentCard already carries the tool list).
         expect(wrapper.find('[data-testid="tg-tool-tiles"]').exists()).toBe(false)
-
-        // Owner label says "Personal agent" because the agent is
-        // owned by the user's user-principal.
-        expect(wrapper.text()).toContain('Owner')
-        expect(wrapper.text()).toContain('Personal agent')
-        expect(wrapper.text()).toContain('max 25 steps per run')
 
         // Description renders the agent's body copy (line-clamped).
         expect(wrapper.text()).toContain('Owns the marketing strategy')

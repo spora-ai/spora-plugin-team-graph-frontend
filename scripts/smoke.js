@@ -117,6 +117,49 @@ for (const sel of ['.tg-node-card', '.tg-status-running', '.tg-edge-badge']) {
     }
 }
 
+/*
+ * Nothing in the plugin's stylesheet may style the host document.
+ *
+ * The host injects this file as a plain
+ * `<link rel="stylesheet" href="/plugins/team-graph/style.css">` in
+ * `document.head` (`spora-frontend/src/apps/registry.ts`), so any
+ * unscoped rule here applies to the host SPA — not to the plugin. An
+ * `html, body, #app { color: #1f2937; background: #f9fafb }` block
+ * shipped for a long time and did exactly that: the host declares
+ * `body { background-color: hsl(var(--background)) }` inside
+ * `@layer base`, and an unlayered rule beats a layered one regardless
+ * of order, so the whole host application was forced light for as
+ * long as the plugin was mounted.
+ *
+ * The signature to guard on is the *declaration*, not the selector
+ * name: `background:#f9fafb` / `color:#1f2937` are hard-coded
+ * plugin-local values that must never appear, whereas a legitimate
+ * `html`/`body` selector with no such value is not automatically a
+ * bug. The value-level check is what actually catches the regression
+ * if the rule is reintroduced with different colours.
+ */
+const hostDocLeaks = [
+    { re: /(^|[};])\s*html\s*,\s*body\s*,\s*#app\s*\{/m, what: 'an unscoped `html, body, #app` rule' },
+    { re: /(^|[};])\s*body\s*\{[^}]*\b(background|color)\s*:\s*#[0-9a-f]{3,8}\b/i, what: 'an unscoped `body` rule with a hard-coded colour' },
+    { re: /(^|[};])\s*:root\s*\{[^}]*\bcolor-scheme\b/i, what: 'a `:root` rule setting `color-scheme` (belongs on the plugin root)' },
+]
+for (const { re, what } of hostDocLeaks) {
+    if (re.test(css)) {
+        failures.push(`stylesheet leaks into the host document: ${what}`)
+    }
+}
+if (css.includes('#f9fafb') || css.includes('#1f2937')) {
+    failures.push('stylesheet contains the hard-coded dev-harness colours #f9fafb / #1f2937 (host tokens must be used)')
+}
+
+// The plugin root must carry the plugin-local typography. Its absence
+// is what let the unscoped `html, body, #app` block look reasonable:
+// with the scope in place, the same properties belong on the wrapper
+// `App.vue` renders.
+if (!/#spora-plugin-team-graph\s*\{[^}]*font-family/.test(css)) {
+    failures.push("stylesheet does not set font-family on the plugin's #spora-plugin-team-graph root")
+}
+
 if (failures.length > 0) {
     console.error('smoke: FAIL')
     for (const f of failures) console.error(`  - ${f}`)

@@ -298,7 +298,11 @@ function onTapEmptyCanvas(): void {
             </div>
 
             <aside class="min-w-0">
-                <AgentDetailPanel v-if="graph !== null" :graph="graph" />
+                <AgentDetailPanel
+                    v-if="graph !== null"
+                    :graph="graph"
+                    :router="hostContext.router"
+                />
                 <div
                     v-else
                     class="surface-card border border-border rounded-xl bg-card text-card-foreground p-6 text-center"

@@ -3,15 +3,13 @@
  * Right-sidebar agent detail panel — compact variant.
  *
  * Layout (top → bottom):
- *   1. Compact header: name + #ID on one line, status chip on the
- *      same row (right-aligned). The chip lives in its own component
- *      (`AgentStatusChip`) so a status poll re-renders only the chip
- *      and not the static name + ID text.
+ *   1. Compact header: name + status chip on one line. The chip
+ *      lives in its own component (`AgentStatusChip`) so a status
+ *      poll re-renders only the chip and not the static name.
  *   2. Activity counts (active + 24 h)
  *   3. Hierarchy chain (root → ... → this agent)
- *   4. Owner / Principal (live /agents/{id} payload)
- *   5. Description (line-clamped, from /agents/{id})
- *   6. Outbound + Inbound edges, capped at MAX_EDGES_DISPLAYED = 4
+ *   4. Description (line-clamped, from /agents/{id})
+ *   5. Outbound + Inbound edges, capped at MAX_EDGES_DISPLAYED = 4
  *      each, with a "+N more" overflow line. Each row leads with the
  *      shared `@spora-ai/components` `AgentAvatar` (size `sm`), which
  *      supersedes the hand-written `w-7 h-7 rounded-full` div + inline
@@ -19,16 +17,25 @@
  *      itself is owned by the package, so the status swatch moved to a
  *      `.tg-agent-tile` ring — see `lib/agentAvatar.ts` and the
  *      `style.css` rule.
- *   7. Active chats, capped at MAX_CHATS_DISPLAYED = 4
- *   8. Recent chats, capped at MAX_CHATS_DISPLAYED = 4
+ *   6. Active chats, capped at MAX_CHATS_DISPLAYED = 4
+ *   7. Recent chats, capped at MAX_CHATS_DISPLAYED = 4
  *
  * The Tools section was removed in this compact variant — the
  * dashboard's AgentCard already carries the tool list, and
  * surfacing it twice on the same screen dilutes the header.
+ * The Owner section went the same way: the owning principal is
+ * chosen by the pill row at the top of the page, so the row was a
+ * duplicate of a control one screen above it.
  *
  * Edge rows are deep-link buttons — clicking one calls
  * `selection.setSelected(otherId)` so the canvas highlights the
  * target and the panel re-renders for the new agent.
+ *
+ * **Chat rows navigate to the host's task chat.** Each row is a
+ * real `<button type="button">` that calls
+ * `hostContext.router.push(taskChatPath(id))` — see
+ * `lib/hostNavigation.ts` for the route string and the null-router
+ * policy.
  */
 import { computed, ref, watch } from 'vue'
 import { AgentAvatar } from '@spora-ai/components/avatar'
@@ -42,13 +49,20 @@ import {
     type AgentMeta,
 } from '../api/agentDetail'
 import { avatarSubject, statusRingColor, type AgentAvatarSubject } from '../lib/agentAvatar'
-import { statusColor } from '../lib/nodeStatus'
+import { chatRowAction, type ChatRowAction, type PluginRouter } from '../lib/hostNavigation'
+import { statusPillClass, statusLabel } from '../lib/nodeStatus'
 import { inDegree, outDegree } from '../lib/stats'
 import type { ChatSummary, GraphEdge, GraphNode, GraphPayload } from '../types'
 import AgentStatusChip from './AgentStatusChip.vue'
 
 const props = defineProps<{
     graph: GraphPayload
+    /**
+     * The host's router, threaded down from `TeamGraphPage`. Nullable
+     * by contract — see `lib/hostNavigation.ts` for what a chat row
+     * becomes when it is absent.
+     */
+    router: PluginRouter | null
 }>()
 
 /* Display caps. The user asked to limit outbound to a maximum of 4;
@@ -140,6 +154,15 @@ interface AncestorLink {
 
 const MAX_HIERARCHY_DEPTH = 3
 
+/**
+ * The host router, through a computed rather than read off `props`
+ * at each call site. A `computed` (not a plain `const` snapshot)
+ * because the prop is reactive and a host that re-mounts the plugin
+ * with a different context must not leave the rows bound to the
+ * previous router.
+ */
+const hostRouter = computed<PluginRouter | null>(() => props.router)
+
 const hierarchyChain = computed<{ path: AncestorLink[]; isRoot: boolean }>(() => {
     const node = selectedNode.value
     if (node === null) return { path: [], isRoot: false }
@@ -224,12 +247,68 @@ function jumpTo(id: number): void {
     selection.setSelected(id)
 }
 
-const ownerLabel = computed<string>(() => {
-    const m = agentMeta.value
-    if (m === null || m.principal === null) return ''
-    if (m.principal.type === 'user') return 'Personal agent'
-    return m.principal.name
-})
+/**
+ * One chat row, with everything the template needs pre-resolved.
+ *
+ * `action` is the navigation decision from `lib/hostNavigation.ts`,
+ * `pill` / `pillClass` are the plugin's existing status→label and
+ * status→colour pair (the same two functions `AgentStatusChip` and
+ * the Variant M node card use, so the panel has exactly one status
+ * table). Computing them here rather than in the template keeps the
+ * `v-for` body to attribute binding and stops the two lookups
+ * re-running per render.
+ */
+interface ChatRow {
+    chat: ChatSummary
+    action: ChatRowAction
+    pill: string
+    pillClass: string
+    /** Relative start time, or `''` when the wire omits it. */
+    started: string
+}
+
+function toChatRow(chat: ChatSummary): ChatRow {
+    return {
+        chat,
+        action: chatRowAction(hostRouter.value, chat.id),
+        pill: statusLabel(chat.status),
+        pillClass: statusPillClass(chat.status),
+        started: chat.started_at === null ? '' : formatRelativeTime(chat.started_at),
+    }
+}
+
+const visibleActiveChats = computed<ChatRow[]>(() =>
+    activeChats.value.slice(0, MAX_CHATS_DISPLAYED).map(toChatRow),
+)
+const visibleRecentChats = computed<ChatRow[]>(() =>
+    recentChats.value.slice(0, MAX_CHATS_DISPLAYED).map(toChatRow),
+)
+const hiddenActiveCount = computed<number>(() =>
+    Math.max(0, activeChats.value.length - visibleActiveChats.value.length),
+)
+const hiddenRecentCount = computed<number>(() =>
+    Math.max(0, recentChats.value.length - visibleRecentChats.value.length),
+)
+
+/**
+ * Perform a row's navigation.
+ *
+ * Awaits the host router's promise: vue-router rejects when a
+ * navigation is aborted or redirected, and an unhandled rejection
+ * here would surface as a console error with no owner. The void
+ * return type is what `void router.push(...)` would give anyway —
+ * nothing downstream waits on the navigation.
+ */
+function openChat(row: ChatRow): void {
+    if (row.action.kind !== 'push') return
+    // Read the router through a local rather than `props.router`
+    // directly: `vue/no-mutating-props` cannot tell a method *call*
+    // on a prop from an assignment to one, so `props.router?.push(…)`
+    // is reported as a prop mutation. The optional chain is also
+    // redundant here — `row.action.kind === 'push'` already proves a
+    // router was present when the row was built.
+    void hostRouter.value?.push(row.action.to)
+}
 </script>
 
 <template>
@@ -265,14 +344,21 @@ const ownerLabel = computed<string>(() => {
                 </div>
                 <AgentStatusChip :status="selectedNode.status" />
             </header>
-            <div class="tg-agent-panel-body p-4 space-y-5">
-                <section class="flex items-center justify-between text-xs">
-                    <span class="text-muted-foreground">Activity</span>
-                    <span>
-                        <strong class="text-foreground">{{ selectedNode.active_chats }}</strong>
-                        active ·
-                        <strong class="text-foreground">{{ selectedNode.recent_chats_24h }}</strong>
-                        / 24 h
+            <div class="tg-agent-panel-body p-4 space-y-4">
+                <!--
+                    Activity. The one section with no heading of its
+                    own — the counts are the whole content, so a
+                    label/value row reads better than a heading
+                    stacked over a single line.
+                -->
+                <section class="tg-panel-stats">
+                    <span class="tg-panel-stats-label">Activity</span>
+                    <span class="tg-panel-stats-value">
+                        <strong class="tg-panel-stats-num">{{ selectedNode.active_chats }}</strong>
+                        active
+                        <span aria-hidden="true" class="tg-panel-stats-sep">·</span>
+                        <strong class="tg-panel-stats-num">{{ selectedNode.recent_chats_24h }}</strong>
+                        in 24 h
                     </span>
                 </section>
 
@@ -281,8 +367,9 @@ const ownerLabel = computed<string>(() => {
                 <section
                     v-if="hierarchyChain.path.length > 0 || hierarchyChain.isRoot"
                     data-testid="tg-hierarchy-chain"
+                    class="tg-panel-section"
                 >
-                    <h4 class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">
+                    <h4 class="tg-panel-heading">
                         Hierarchy
                     </h4>
                     <p
@@ -311,26 +398,15 @@ const ownerLabel = computed<string>(() => {
                     </p>
                 </section>
 
-                <!-- Owner / Principal (live /agents/{id} payload). -->
-                <section v-if="agentMeta !== null">
-                    <h4 class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">
-                        Owner
-                    </h4>
-                    <p class="text-xs text-foreground">{{ ownerLabel || '—' }}</p>
-                    <p
-                        v-if="agentMeta.max_steps > 0"
-                        class="text-[11px] text-muted-foreground mt-0.5"
-                    >
-                        max {{ agentMeta.max_steps }} steps per run
-                    </p>
-                </section>
-
                 <!-- Description (line-clamped, from /agents/{id}). -->
-                <section v-if="agentMeta?.description">
-                    <h4 class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">
+                <section
+                    v-if="agentMeta?.description"
+                    class="tg-panel-section"
+                >
+                    <h4 class="tg-panel-heading">
                         Description
                     </h4>
-                    <p class="text-xs leading-[1.4] text-foreground/90 line-clamp-3">
+                    <p class="tg-panel-prose line-clamp-3">
                         {{ agentMeta.description }}
                     </p>
                 </section>
@@ -340,12 +416,15 @@ const ownerLabel = computed<string>(() => {
                     row deep-links to the target agent. A "+N more"
                     line appears when there are more than the cap.
                 -->
-                <section data-testid="tg-outbound-section">
-                    <h4 class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">
-                        Outbound — spawned ({{ outboundEdges.length }})
+                <section
+                    data-testid="tg-outbound-section"
+                    class="tg-panel-section"
+                >
+                    <h4 class="tg-panel-heading">
+                        Outbound — spawned <span class="tg-panel-count">({{ outboundEdges.length }})</span>
                     </h4>
-                    <p v-if="outboundEdges.length === 0" class="text-xs text-muted-foreground">None.</p>
-                    <div v-else class="space-y-1">
+                    <p v-if="outboundEdges.length === 0" class="tg-panel-empty">None.</p>
+                    <div v-else class="tg-panel-list">
                         <button
                             v-for="row in visibleOutboundRows"
                             :key="row.edge.id"
@@ -359,22 +438,23 @@ const ownerLabel = computed<string>(() => {
                             >
                                 <AgentAvatar size="sm" :agent="row.agent" />
                             </span>
-                            <div class="flex-1 min-w-0">
-                                <p class="text-sm font-medium truncate">
+                            <span class="flex-1 min-w-0">
+                                <span class="tg-row-title">
                                     {{ row.node?.name ?? 'Unknown' }}
-                                </p>
-                                <p class="text-[11px] text-muted-foreground">
-                                    → sub_agent · {{ edgeActivity(row.edge) }}
-                                </p>
-                            </div>
+                                </span>
+                                <span class="tg-row-sub">
+                                    <span aria-hidden="true">→</span> sub_agent · {{ edgeActivity(row.edge) }}
+                                </span>
+                            </span>
                             <Icon
                                 name="chevron-right"
-                                class="w-4 h-4 text-muted-foreground"
+                                class="tg-row-chevron w-4 h-4"
+                                aria-hidden="true"
                             />
                         </button>
                         <p
                             v-if="hiddenOutboundCount > 0"
-                            class="text-[11px] text-muted-foreground pl-9"
+                            class="tg-panel-more"
                         >
                             +{{ hiddenOutboundCount }} more — open the dashboard
             to inspect.
@@ -383,12 +463,15 @@ const ownerLabel = computed<string>(() => {
                 </section>
 
                 <!-- Inbound edges, capped at MAX_EDGES_DISPLAYED. -->
-                <section data-testid="tg-inbound-section">
-                    <h4 class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">
-                        Inbound — spawned by ({{ inboundEdges.length }})
+                <section
+                    data-testid="tg-inbound-section"
+                    class="tg-panel-section"
+                >
+                    <h4 class="tg-panel-heading">
+                        Inbound — spawned by <span class="tg-panel-count">({{ inboundEdges.length }})</span>
                     </h4>
-                    <p v-if="inboundEdges.length === 0" class="text-xs text-muted-foreground">None.</p>
-                    <div v-else class="space-y-1">
+                    <p v-if="inboundEdges.length === 0" class="tg-panel-empty">None.</p>
+                    <div v-else class="tg-panel-list">
                         <button
                             v-for="row in visibleInboundRows"
                             :key="row.edge.id"
@@ -402,22 +485,23 @@ const ownerLabel = computed<string>(() => {
                             >
                                 <AgentAvatar size="sm" :agent="row.agent" />
                             </span>
-                            <div class="flex-1 min-w-0">
-                                <p class="text-sm font-medium truncate">
+                            <span class="flex-1 min-w-0">
+                                <span class="tg-row-title">
                                     {{ row.node?.name ?? 'Unknown' }}
-                                </p>
-                                <p class="text-[11px] text-muted-foreground">
-                                    ← sub_agent · {{ edgeActivity(row.edge) }}
-                                </p>
-                            </div>
+                                </span>
+                                <span class="tg-row-sub">
+                                    <span aria-hidden="true">←</span> sub_agent · {{ edgeActivity(row.edge) }}
+                                </span>
+                            </span>
                             <Icon
                                 name="chevron-right"
-                                class="w-4 h-4 text-muted-foreground"
+                                class="tg-row-chevron w-4 h-4"
+                                aria-hidden="true"
                             />
                         </button>
                         <p
                             v-if="hiddenInboundCount > 0"
-                            class="text-[11px] text-muted-foreground pl-9"
+                            class="tg-panel-more"
                         >
                             +{{ hiddenInboundCount }} more — open the dashboard
             to inspect.
@@ -425,71 +509,172 @@ const ownerLabel = computed<string>(() => {
                     </div>
                 </section>
 
-                <!-- Active chats, capped at MAX_CHATS_DISPLAYED. -->
-                <section data-testid="tg-active-chats-section">
-                    <h4 class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">
-                        Active chats ({{ activeChats.length }})
+                <!--
+                    Active + recent chats, capped at MAX_CHATS_DISPLAYED.
+                    Both sections render the same row, because a chat is a
+                    chat: the operator's question ("what is this agent
+                    doing, and what did it just do?") is the same whether
+                    the run is still in flight or already finished. Only
+                    the heading and the overflow wording differ.
+
+                    Each row is a real `<button type="button">` that
+                    navigates to the host's task chat
+                    (`router.push('/tasks/{id}')` — see
+                    `lib/hostNavigation.ts`). A `<button>` rather than an
+                    `<a>` because the plugin has no `vue-router` and
+                    cannot render a `RouterLink`; the destination is a
+                    host route, but the *mechanism* is a programmatic
+                    navigation, and a bare href would be resolved
+                    against the plugin's own mount path. Using the native
+                    element also means Enter/Space activation, the tab
+                    order and the focus ring are the browser's, with no
+                    hand-written key handling to drift out of sync.
+
+                    Nothing encloses these rows in another control: the
+                    panel body is a plain scrollable `<div>` inside
+                    `<aside>`, and the panel lives in its own grid
+                    column — outside `.tg-canvas-wrap`, which is the only
+                    element with the drag-to-pan pointer capture. So
+                    there is no pan gesture to conflict with (and no need
+                    for the `data-tg-no-pan` opt-out the node cards use
+                    on the canvas).
+
+                    **The old bullet dot is gone, and status is not.**
+                    The dot was a bare `background: statusColor(...)`
+                    swatch carrying the only status signal on the row.
+                    It is replaced by the same `.tg-status-pill` the
+                    panel header and the node cards use, driven by the
+                    same `statusPillClass()` / `statusLabel()` pair —
+                    one status→colour table in the plugin, unchanged. The
+                    pill is strictly more informative than the dot: it
+                    pairs the colour with a text label, so the status
+                    survives for a screen reader and for the ~8 % of
+                    operators with a colour-vision deficiency, neither
+                    of whom could read a 6 px hue swatch. The dashboard's
+                    chat row keeps its dot, but it pairs that dot with a
+                    `chatLabel()` text line; we get the same
+                    text-plus-colour result from the shared pill.
+
+                    When the host hands us no router the row renders as a
+                    **disabled** button: same element, same layout, same
+                    label, `aria-disabled` + native `disabled` so it
+                    leaves the tab order rather than lying to a keyboard
+                    user. See `lib/hostNavigation.ts` for why not an
+                    `<a href>`.
+                -->
+                <section
+                    data-testid="tg-active-chats-section"
+                    class="tg-panel-section"
+                >
+                    <h4 class="tg-panel-heading">
+                        Active chats <span class="tg-panel-count">({{ activeChats.length }})</span>
                     </h4>
-                    <p v-if="activeChats.length === 0" class="text-xs text-muted-foreground">
+                    <p v-if="activeChats.length === 0" class="tg-panel-empty">
                         No active chats. The agent hasn't run anything in flight.
                     </p>
-                    <div v-else class="space-y-1">
-                        <div
-                            v-for="chat in activeChats.slice(0, MAX_CHATS_DISPLAYED)"
-                            :key="chat.id"
-                            class="tg-task-row"
+                    <div v-else class="tg-panel-list">
+                        <button
+                            v-for="row in visibleActiveChats"
+                            :key="row.chat.id"
+                            type="button"
+                            class="tg-chat-row"
+                            :class="{ 'is-disabled': row.action.kind === 'disabled' }"
+                            :disabled="row.action.kind === 'disabled'"
+                            :aria-disabled="row.action.kind === 'disabled'"
+                            :data-testid="`tg-chat-row-${row.chat.id}`"
+                            @click="openChat(row)"
                         >
-                            <div class="flex items-start gap-2">
+                            <span class="tg-chat-row-head">
+                                <span class="tg-row-title">{{ row.chat.title }}</span>
                                 <span
-                                    class="w-1.5 h-1.5 rounded-full mt-1.5 shrink-0"
-                                    :style="{ background: statusColor(chat.status) }"
-                                />
-                                <div class="flex-1 min-w-0">
-                                    <p class="text-sm font-medium truncate">{{ chat.title }}</p>
-                                    <p class="text-xs text-muted-foreground truncate">{{ chat.preview ?? '' }}</p>
-                                </div>
-                            </div>
-                        </div>
+                                    v-if="row.started"
+                                    class="tg-row-time"
+                                >{{ row.started }}</span>
+                            </span>
+                            <span class="tg-chat-row-foot">
+                                <span
+                                    class="tg-status-pill tg-chat-row-status"
+                                    :class="row.pillClass"
+                                >
+                                    <span class="dot" />
+                                    {{ row.pill }}
+                                </span>
+                                <span
+                                    v-if="row.chat.preview"
+                                    class="tg-row-sub"
+                                >{{ row.chat.preview }}</span>
+                            </span>
+                        </button>
                         <p
-                            v-if="activeChats.length > MAX_CHATS_DISPLAYED"
-                            class="text-[11px] text-muted-foreground"
+                            v-if="hiddenActiveCount > 0"
+                            class="tg-panel-more"
                         >
-                            +{{ activeChats.length - MAX_CHATS_DISPLAYED }} more in flight.
+                            +{{ hiddenActiveCount }} more in flight.
                         </p>
                     </div>
                 </section>
 
-                <!-- Recent chats, capped at MAX_CHATS_DISPLAYED. -->
-                <section data-testid="tg-recent-chats-section">
-                    <h4 class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">
-                        Recent chats ({{ recentChats.length }})
+                <section
+                    data-testid="tg-recent-chats-section"
+                    class="tg-panel-section"
+                >
+                    <h4 class="tg-panel-heading">
+                        Recent chats <span class="tg-panel-count">({{ recentChats.length }})</span>
                     </h4>
-                    <p v-if="recentChats.length === 0" class="text-xs text-muted-foreground">
+                    <p v-if="recentChats.length === 0" class="tg-panel-empty">
                         No recent chats.
                     </p>
-                    <div v-else class="space-y-1">
-                        <div
-                            v-for="chat in recentChats.slice(0, MAX_CHATS_DISPLAYED)"
-                            :key="chat.id"
-                            class="tg-task-row"
+                    <div v-else class="tg-panel-list">
+                        <button
+                            v-for="row in visibleRecentChats"
+                            :key="row.chat.id"
+                            type="button"
+                            class="tg-chat-row"
+                            :class="{ 'is-disabled': row.action.kind === 'disabled' }"
+                            :disabled="row.action.kind === 'disabled'"
+                            :aria-disabled="row.action.kind === 'disabled'"
+                            :data-testid="`tg-chat-row-${row.chat.id}`"
+                            @click="openChat(row)"
                         >
-                            <div class="flex items-start gap-2">
+                            <span class="tg-chat-row-head">
+                                <span class="tg-row-title">{{ row.chat.title }}</span>
                                 <span
-                                    class="w-1.5 h-1.5 rounded-full mt-1.5 shrink-0"
-                                    :style="{ background: statusColor(chat.status) }"
-                                />
-                                <div class="flex-1 min-w-0">
-                                    <p class="text-sm font-medium truncate">{{ chat.title }}</p>
-                                    <p class="text-xs text-muted-foreground truncate">{{ chat.preview ?? '' }}</p>
-                                </div>
-                            </div>
-                        </div>
+                                    v-if="row.started"
+                                    class="tg-row-time"
+                                >{{ row.started }}</span>
+                            </span>
+                            <span class="tg-chat-row-foot">
+                                <span
+                                    class="tg-status-pill tg-chat-row-status"
+                                    :class="row.pillClass"
+                                >
+                                    <span class="dot" />
+                                    {{ row.pill }}
+                                </span>
+                                <span
+                                    v-if="row.chat.preview"
+                                    class="tg-row-sub"
+                                >{{ row.chat.preview }}</span>
+                            </span>
+                        </button>
+                        <!--
+                            The old note here read "+N more — open the
+                            dashboard for the full history", which was a
+                            workaround for the very thing this change
+                            fixes: there was no way to open a chat from
+                            the panel, so the only route to one was the
+                            dashboard. Now every visible row is a
+                            deep-link, so the note only has to be true
+                            about what it *is* — the display cap, not a
+                            missing feature.
+                        -->
                         <p
-                            v-if="recentChats.length > MAX_CHATS_DISPLAYED"
-                            class="text-[11px] text-muted-foreground"
+                            v-if="hiddenRecentCount > 0"
+                            class="tg-panel-more"
+                            data-testid="tg-recent-chats-more"
                         >
-                            +{{ recentChats.length - MAX_CHATS_DISPLAYED }} more — open the dashboard
-                            for the full history.
+                            +{{ hiddenRecentCount }} more not shown — the panel caps
+                            each list at {{ MAX_CHATS_DISPLAYED }}.
                         </p>
                     </div>
                 </section>
