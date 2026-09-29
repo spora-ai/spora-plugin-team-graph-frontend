@@ -6,6 +6,7 @@ import {
     reanchorEdgePath,
 } from '../../src/lib/edgeGeometry'
 import { NODE_CARD_HEIGHT, NODE_CARD_WIDTH } from '../../src/lib/nodeLayout'
+import { turnAngles } from '../fixtures/pathMetrics'
 
 /**
  * `lib/edgeGeometry.ts` — re-anchoring Mermaid's edges onto the cards.
@@ -343,36 +344,78 @@ describe('reanchorEdgePath', () => {
         expect(two.last.y).toBeCloseTo(one.last.y, 3)
     })
 
-    it('preserves the start and end tangents (the curve stays smooth)', () => {
+    it('preserves the direction the path leaves the card and arrives by (C1 at both ends)', () => {
+        /*
+         * The invariant, on the quantity that is actually invariant.
+         *
+         * The path used to be rewritten by translating a run of points,
+         * so the *length* of its first and last legs survived as well as
+         * their direction — and the test could compare the raw vectors. It
+         * is now re-emitted from d3's own formulas with a different exit
+         * point, so the lead-in is a different length (it spans one sixth
+         * of a different `q₀ → q₁`) while its **direction** is exactly
+         * dagre's. Direction is the whole of "smooth" here: a lead-in at
+         * a different angle is a visible kink at the card border, and one
+         * at the same angle is not, whatever its length.
+         *
+         * It is preserved *because* `q₀` slides along the line `q₁` was
+         * already on. d3's router put the source centre, `q₀` and `q₁`
+         * on one line (its entry is `intersectNode(tail, points[0])`, the
+         * intersection of that ray with the label box), and
+         * `cardBorderPoint` walks `q₀` out along the same ray. The
+         * collinearity is asserted first, because the invariant is
+         * conditional on it and would otherwise be a coincidence.
+         */
         const out = reanchorEdgePath(MERMAID_D, source, target, halfW, halfH)!
-        const before = parsePathPoints(MERMAID_D)!
-        const after = parsePathPoints(out)!
-        const flatBefore = before.flatMap((s) => s.points)
-        const flatAfter = after.flatMap((s) => s.points)
-        // The endpoint moved by `delta`; the first control point moved
-        // by the same `delta`, so the vector between them is unchanged.
-        const d0 = {
-            x: flatAfter[1]!.x - flatAfter[0]!.x,
-            y: flatAfter[1]!.y - flatAfter[0]!.y,
+        const before = parsePathPoints(MERMAID_D)!.flatMap((s) => s.points)
+        const after = parsePathPoints(out)!.flatMap((s) => s.points)
+
+        /** 2·a − b: d3's two controls invert exactly to their two spline points. */
+        const reflect = (a: { x: number; y: number }, b: { x: number; y: number }) => ({
+            x: 2 * a.x - b.x,
+            y: 2 * a.y - b.y,
+        })
+        const q0 = before[0]!
+        const q1 = reflect(before[3]!, before[2]!)
+        const q2 = before[before.length - 1]!
+        // Collinearity the re-anchoring relies on, to 1 part in 10³ of
+        // the slope. `MERMAID_D` is a three-decimal hand transcription of
+        // a Mermaid path, so the three points are collinear only to the
+        // `d`'s own precision; the real paths in the corpus are
+        // collinear to the same bound. The invariant is conditional on
+        // this, and asserting it is what stops the direction claim above
+        // being a coincidence of this one fixture.
+        const slope = (a: { x: number; y: number }, b: { x: number; y: number }) => (b.x - a.x) / (b.y - a.y)
+        expect(slope(q0, q1)).toBeCloseTo(slope(source, q0), 3)
+        expect(slope(q1, q2)).toBeCloseTo(slope(target, q2), 3)
+
+        /** Direction of the path's first / last leg, as a unit vector. */
+        const dir = (
+            from: { x: number; y: number },
+            to: { x: number; y: number },
+        ): { x: number; y: number } => {
+            const dx = to.x - from.x
+            const dy = to.y - from.y
+            const length = Math.hypot(dx, dy)
+            return { x: dx / length, y: dy / length }
         }
-        const b0 = {
-            x: flatBefore[1]!.x - flatBefore[0]!.x,
-            y: flatBefore[1]!.y - flatBefore[0]!.y,
-        }
-        expect(d0.x).toBeCloseTo(b0.x, 3)
-        expect(d0.y).toBeCloseTo(b0.y, 3)
-        // Same at the end, in reverse.
-        const n = flatAfter.length
-        const d1 = {
-            x: flatAfter[n - 2]!.x - flatAfter[n - 1]!.x,
-            y: flatAfter[n - 2]!.y - flatAfter[n - 1]!.y,
-        }
-        const b1 = {
-            x: flatBefore[n - 2]!.x - flatBefore[n - 1]!.x,
-            y: flatBefore[n - 2]!.y - flatBefore[n - 1]!.y,
-        }
-        expect(d1.x).toBeCloseTo(b1.x, 3)
-        expect(d1.y).toBeCloseTo(b1.y, 3)
+        // Leaving the card, and arriving by it. The bound is a
+        // thousandth of a unit of direction, not a millionth, because
+        // Mermaid's own `d` carries three decimals: the three points are
+        // collinear only to their own rounding, which over a 78-unit leg
+        // is 0.0002 units of lateral slack. That is four orders of
+        // magnitude below the 180° fold the first regression produced.
+        expect(dir(after[0]!, after[1]!).x).toBeCloseTo(dir(before[0]!, before[1]!).x, 3)
+        expect(dir(after[0]!, after[1]!).y).toBeCloseTo(dir(before[0]!, before[1]!).y, 3)
+        const n = after.length
+        expect(dir(after[n - 2]!, after[n - 1]!).x).toBeCloseTo(dir(before[n - 2]!, before[n - 1]!).x, 3)
+        expect(dir(after[n - 2]!, after[n - 1]!).y).toBeCloseTo(dir(before[n - 2]!, before[n - 1]!).y, 3)
+        // …and both are the tangent at an interior join, so the joins
+        // either side of them are C1 as dagre drew them. The bound is
+        // the same hundredth of a degree the corpus suite holds every
+        // join on, and the value compared is dagre's own 0.00° straight
+        // lead-in — the one the pre-fix implementation turned into 180°.
+        expect(Math.abs(turnAngles(out)[0]! - turnAngles(MERMAID_D)[0]!)).toBeLessThan(0.01)
     })
 
     it('never lets the end handle overshoot its neighbour into a loop', () => {
@@ -389,31 +432,34 @@ describe('reanchorEdgePath', () => {
         expect(points[0]!.x).toBeLessThanOrEqual(100 + halfW)
     })
 
-    it('translates the two runs rigidly, rescales the two straddling handles, and leaves the vertex between them alone', () => {
+    it('re-emits the path from d3\'s own formulas over the *same* routing', () => {
         /*
          * The exact edit, stated on this one path. `MERMAID_D` is
          * `M exit L lead-in C … C … L entry`, so its nine points are
-         * `[exit, lead-in, c1, c2, v1, c1', c2', v2, entry]`, and the
-         * re-anchoring does four things and no more:
+         * `[exit, lead-in, c1, c2, v1, c1', c2', v2, entry]` — and every
+         * one of the seven after the exit is a *derived* quantity, not
+         * something dagre chose. This test states the new mechanism's
+         * whole contract in one place:
          *
-         *   - `0‥2` — the start endpoint, the lead-in vertex and the
-         *     first cubic's head control point — translate **rigidly** by
-         *     the source border walk-out. All three lie at or before the
-         *     new start point along the path's departure direction, so
-         *     they slide along the line they were already on.
-         *   - `3` — the first cubic's *tail* control point — is rescaled
-         *     about its own vertex `4`, because the run moved that
-         *     vertex's neighbour and the segment is now shorter. Its
-         *     direction from the vertex is unchanged.
-         *   - `5` — the last cubic's *head* control point — is rescaled
-         *     about its anchor `4` for the same reason at the other end.
-         *   - `6‥8` — the last cubic's tail control point, its vertex and
-         *     the end point — translate **rigidly** by the target border
-         *     walk-out.
+         *   1. d3's three routing points are recovered from the `d`
+         *      exactly (a cubic's two controls invert to the two spline
+         *      points they span: `2c₂ − c₁ = q_k`, `2c₁ − c₂ = q_{k-1}`),
+         *      which is the assertion that the shape is understood rather
+         *      than approximated;
+         *   2. `q₀` and `q₂` are the *only* things that change, and they
+         *      land on the card borders — the endpoint one arrowhead short
+         *      of the target's;
+         *   3. `q₁` — dagre's routing, the one point that is not derived
+         *      from the endpoints — comes back **bit-identical**, and
+         *   4. every other point is exactly what d3's formulas say for
+         *      the new `q`s.
          *
-         * `4` is dagre's, and comes out byte-identical. Its two joins are
-         * tangent-continuous because each side's *adjacent* handle kept
-         * its direction, which is the whole point.
+         * Point 3 is the one that matters for "shape is preserved": the
+         * previous mechanism left the middle of the path byte-identical
+         * too, but by *translating* the points around it, which is what
+         * put a control point on the wrong side of its partner. Here the
+         * middle is re-derived, and what is held fixed is the routing
+         * that produced it.
          *
          * The old version of this test looped `2 … n - 3` and would have
          * caught *nothing* on a real path: it assumed the point at index
@@ -421,37 +467,141 @@ describe('reanchorEdgePath', () => {
          * this shape it is not.
          */
         const out = reanchorEdgePath(MERMAID_D, source, target, halfW, halfH)!
-        const firstAfter = endpoint(out).first
         const before = parsePathPoints(MERMAID_D)!.flatMap((s) => s.points)
         const after = parsePathPoints(out)!.flatMap((s) => s.points)
         expect(after).toHaveLength(before.length)
+        expect(parsePathPoints(out)!.map((s) => s.command)).toEqual(['M', 'L', 'C', 'C', 'L'])
+
+        const reflect = (a: { x: number; y: number }, b: { x: number; y: number }) => ({
+            x: 2 * a.x - b.x,
+            y: 2 * a.y - b.y,
+        })
         const at = (points: Array<{ x: number; y: number }>, i: number): { x: number; y: number } =>
             points[i] as { x: number; y: number }
-        // The one point dagre owns outright.
-        expect(after[4]).toEqual(before[4])
-        // Each run translates as a unit.
-        const delta = (i: number): { x: number; y: number } => ({
-            x: at(after, i).x - at(before, i).x,
-            y: at(after, i).y - at(before, i).y,
+        /** The `(wₐa + w_b b + w_c c) / Σw` blends d3's emitter uses. */
+        const blend = (
+            a: { x: number; y: number },
+            b: { x: number; y: number },
+            c: { x: number; y: number },
+            wa: number,
+            wb: number,
+            wc: number,
+        ): { x: number; y: number } => ({
+            x: (wa * a.x + wb * b.x + wc * c.x) / (wa + wb + wc),
+            y: (wa * a.y + wb * b.y + wc * c.y) / (wa + wb + wc),
         })
-        expect(delta(1).x).toBeCloseTo(delta(0).x, 3)
-        expect(delta(1).y).toBeCloseTo(delta(0).y, 3)
-        expect(delta(7).x).toBeCloseTo(delta(8).x, 3)
-        expect(delta(7).y).toBeCloseTo(delta(8).y, 3)
-        // The two rescaled handles stay on the ray they were drawn on, so
-        // the tangents at the untouched vertex are exactly dagre's.
-        expect(Math.abs(cross(at(after, 3), at(after, 4), at(before, 3), at(before, 4))), 'c2 ray').toBeLessThan(1e-3)
-        expect(Math.abs(cross(at(after, 5), at(after, 4), at(before, 5), at(before, 4))), "c1' ray").toBeLessThan(1e-3)
-        // …and they got shorter, not longer, because the segment did.
-        expect(dist(at(after, 3), at(after, 4))).toBeLessThan(dist(at(before, 3), at(before, 4)))
-        expect(dist(at(after, 5), at(after, 4))).toBeLessThan(dist(at(before, 5), at(before, 4)))
-        // The start delta is the source border walk-out, and the endpoint
-        // ends up exactly one arrowhead short of the target border: this
-        // edge is vertical, so the tangent and the border's normal are the
-        // same line.
-        expect(delta(0).x).toBeCloseTo(firstAfter.x - 203.725, 3)
-        expect(delta(0).y).toBeCloseTo(firstAfter.y - 42, 3)
-        expect(endpoint(out).last.y).toBeCloseTo(target.y - halfH - ARROWHEAD_OVERSHOOT, 3)
+        const towards = (
+            a: { x: number; y: number },
+            b: { x: number; y: number },
+            t: number,
+        ): { x: number; y: number } => ({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t })
+
+        // (1) the three routing points, decoded from Mermaid's own `d`.
+        // The interior one takes the mean of the two cubics that name it,
+        // exactly as the module does, because Mermaid's three decimals
+        // make the two readings differ by ~0.0015 and one of them alone
+        // is the less accurate figure. `after` is checked against the same
+        // definition below, so this compares like with like.
+        const q0 = at(before, 0)
+        const mean = (a: { x: number; y: number }, b: { x: number; y: number }) => ({
+            x: (a.x + b.x) / 2,
+            y: (a.y + b.y) / 2,
+        })
+        // 2·tail − head names the interval's *end*, 2·head − tail its
+        // *start*, so the first cubic names q₁ as its end and the second
+        // as its start: two independent readings of the same point.
+        const q1 = mean(reflect(at(before, 3), at(before, 2)), reflect(at(before, 5), at(before, 6)))
+        // …and the trailing `L` is q₂, which d3 writes out verbatim. Its
+        // own reading back out of the last cubic's controls agrees to
+        // within the `d`'s own step (0.001), which is exactly why the
+        // module reads the two ends verbatim rather than inverting them:
+        // inverting cannot beat the rounding it is fed. Bound is a
+        // thousandth, one ulp of Mermaid's serialisation.
+        // Rounded to Mermaid's own precision before comparing: the residual
+        // is `132.701 − 132.700`, and in binary floating point that is
+        // 0.0010000000000047748 rather than 0.001 exactly.
+        const rounded = (v: number): number => Math.round(v * 1000) / 1000
+        expect(rounded(Math.hypot(
+            at(before, 8).x - reflect(at(before, 6), at(before, 5)).x,
+            at(before, 8).y - reflect(at(before, 6), at(before, 5)).y,
+        ))).toBeLessThanOrEqual(0.001)
+
+        // (2) the two endpoints, on the cards.
+        const border = cardBorderPoint(source, q0, halfW, halfH)
+        expect(at(after, 0).x).toBeCloseTo(border.x, 6)
+        expect(at(after, 0).y).toBeCloseTo(border.y, 6)
+        // The *path* end is short of the target border by the marker; the
+        // tip is what meets it. This edge is vertical, so the end tangent
+        // and the border's normal are the same line — within the three
+        // decimals of dagre's own entry point, which is what put the
+        // border 0.0001 off the target's axis.
+        expect(at(after, 8).x).toBeCloseTo(target.x, 3)
+        expect(at(after, 8).y).toBeCloseTo(target.y - halfH - ARROWHEAD_OVERSHOOT, 3)
+
+        // (3) dagre's routing survives exactly. q₁ read back out of the
+        // rewritten path — twice, from the two cubics that name it — is
+        // the q₁ read out of Mermaid's.
+        const q1After = {
+            x: (reflect(at(after, 3), at(after, 2)).x + reflect(at(after, 5), at(after, 6)).x) / 2,
+            y: (reflect(at(after, 3), at(after, 2)).y + reflect(at(after, 5), at(after, 6)).y) / 2,
+        }
+        expect(q1After.x).toBeCloseTo(q1.x, 3)
+        expect(q1After.y).toBeCloseTo(q1.y, 3)
+
+        // (4) every derived point is d3's own expression of the new q's.
+        const n0 = at(after, 0)
+        const n1 = q1After
+        const end = at(after, 8)
+        expect(at(after, 1).x).toBeCloseTo(blend(n0, n1, n1, 5, 1, 0).x, 5)
+        expect(at(after, 1).y).toBeCloseTo(blend(n0, n1, n1, 5, 1, 0).y, 5)
+        expect(at(after, 2).x).toBeCloseTo(towards(n0, n1, 1 / 3).x, 5)
+        expect(at(after, 2).y).toBeCloseTo(towards(n0, n1, 1 / 3).y, 5)
+        expect(at(after, 3).x).toBeCloseTo(towards(n0, n1, 2 / 3).x, 5)
+        expect(at(after, 3).y).toBeCloseTo(towards(n0, n1, 2 / 3).y, 5)
+        expect(at(after, 4).x).toBeCloseTo(blend(n0, n1, end, 1, 4, 1).x, 5)
+        expect(at(after, 4).y).toBeCloseTo(blend(n0, n1, end, 1, 4, 1).y, 5)
+        expect(at(after, 5).x).toBeCloseTo(towards(n1, end, 1 / 3).x, 5)
+        expect(at(after, 5).y).toBeCloseTo(towards(n1, end, 1 / 3).y, 5)
+        expect(at(after, 6).x).toBeCloseTo(towards(n1, end, 2 / 3).x, 5)
+        expect(at(after, 6).y).toBeCloseTo(towards(n1, end, 2 / 3).y, 5)
+        expect(at(after, 7).x).toBeCloseTo(blend(n1, end, end, 1, 5, 0).x, 5)
+        expect(at(after, 7).y).toBeCloseTo(blend(n1, end, end, 1, 5, 0).y, 5)
+
+        // …which also means no control point can be on the wrong side of
+        // its partner: within one cubic, the lead-in `L` and the two
+        // control pairs are each collinear and *ordered* along the
+        // interval they belong to, because d3 puts them at a third and
+        // two thirds of the way along it. Ordered is the part that
+        // matters — it is exactly the property the pre-fix run
+        // translation broke, and the reason the S appeared. `q → q → q`
+        // is 1 for a forward pair and −1 for a folded one.
+        const at_ = (p: { x: number; y: number }, from: { x: number; y: number }, to: { x: number; y: number }) => {
+            const dx = to.x - from.x
+            const dy = to.y - from.y
+            return ((p.x - from.x) * dx + (p.y - from.y) * dy) / (dx * dx + dy * dy)
+        }
+        for (const [lo, hi, from, to] of [
+            [2, 3, n0, n1],
+            [5, 6, n1, end],
+        ] as const) {
+            // Sine of the angle between the segment and the interval d3
+            // built it from: 0 when the two are parallel.
+            expect(Math.abs(cross(from, to, at(after, lo), at(after, hi))), 'collinear').toBeLessThan(1e-6)
+            // Each control is strictly inside the interval, and the first
+            // is strictly before the second — as a fraction of the
+            // interval, 1/3 and 2/3 by construction. A handle that had
+            // been dragged past its partner reads as a fraction *outside*
+            // this range, so this is the assertion the S would fail.
+            const loAt = at_(at(after, lo), from, to)
+            const hiAt = at_(at(after, hi), from, to)
+            expect(loAt).toBeCloseTo(1 / 3, 6)
+            expect(hiAt).toBeCloseTo(2 / 3, 6)
+        }
+        // The leading `L` is the same statement one sixth of the way
+        // along, which is where d3 puts it and therefore the direction
+        // the path leaves the card on.
+        expect(Math.abs(cross(n0, n1, n0, at(after, 1)))).toBeLessThan(1e-6)
+        expect(at_(at(after, 1), n0, n1)).toBeCloseTo(1 / 6, 6)
     })
 
     it('clamps a start handle that would overshoot its own vertex', () => {
@@ -492,6 +642,158 @@ describe('reanchorEdgePath', () => {
         // stopped: the run reached the card, the clamp only kept the
         // segment from folding.
         expect(points[0]).toEqual({ x: 0, y: halfH })
+    })
+
+    /*
+     * The codec has to *decline* anything that is not a d3
+     * `curveBundle.basis`, because the fallback is correct for those
+     * shapes and this path is not. A false positive here is not a wrong
+     * curve — it is a polyline re-anchored by a spline rule, which is
+     * exactly the class of bug the corpus exists to catch.
+     *
+     * Every case below is either a real command sequence Mermaid emits
+     * for a non-`basis` `flowchart.curve`, or the nearest neighbour of
+     * the real one.
+     */
+    describe('the curveBundle.basis codec declines everything else', () => {
+        const SOURCE = { x: 262.578125, y: 21 }
+        const TARGET = { x: 69.203125, y: 159 }
+        /** Re-anchored, and the commands of the result — unchanged means declined. */
+        const reanchor = (d: string): { out: string; commands: string[] } => {
+            const out = reanchorEdgePath(d, SOURCE, TARGET, halfW, halfH)!
+            return { out, commands: (parsePathPoints(out) ?? []).map((s) => s.command) }
+        }
+
+        it('takes a polyline on the fallback, not the codec', () => {
+            // `curveLinear` is `M L L`; d3's basis is `M L C C L`. A
+            // three-point polyline has no cubic at all, so there is
+            // nothing for the codec to invert.
+            const { commands: c } = reanchor('M67.906,42L67.906,96.1L67.906,144.9')
+            expect(c).toEqual(['M', 'L', 'L'])
+        })
+
+        it('takes a staircase on the fallback', () => {
+            // `curveStep` is all `L`s — d3 emits a zero-length final step.
+            const { commands: c } = reanchor('M0,42L0,60L0,80L0,100L0,120L0,140L0,144.9')
+            expect(c.every((x) => x === 'L' || x === 'M')).toBe(true)
+        })
+
+        it('takes curveBumpX on the fallback, whose controls sit on the vertices', () => {
+            // `curveBumpX` is `M C C` with no leading or trailing `L`, so
+            // it fails the command-sequence test before any arithmetic.
+            const { commands: c } = reanchor('M202.589,42C133.88,42,133.88,96.1,65.172,96.1C65.172,96.1,65.172,144.9,65.172,144.9')
+            expect(c).toEqual(['M', 'C', 'C'])
+        })
+
+        it('takes a path whose trailing command is a curve, not a line', () => {
+            // A `curveBasis` with the entry folded into the last cubic is
+            // one command away from the real thing and must not be
+            // claimed by the codec: `emitBundleBasis` would put a point
+            // back.
+            const { commands: c } = reanchor('M0,42L0,51C0,60 0,78 0,95C0,112 0,128 0,136')
+            expect(c[c.length - 1]).toBe('C')
+        })
+
+        it('takes a path with only one cubic, which is not a bundle', () => {
+            // `M L C L`: the shape in `MERMAID_D`'s own family with a
+            // single cubic. Two points is the minimum d3's basis emits,
+            // and one is not enough to invert.
+            const { commands: c } = reanchor('M0,42L0,51C0,60 0,78 0,95L0,110')
+            expect(c).toEqual(['M', 'L', 'C', 'L'])
+        })
+
+        it('takes a path whose last command is a curve, not a line', () => {
+            // A `curveBasis` with the entry folded into the last cubic is
+            // one command away from the real thing and must not be
+            // claimed by the codec: `emitBundleBasis` would put a point
+            // back. Long enough for the command test to reach the
+            // *closing* check rather than the length check.
+            const d = 'M203.725,42L181.305,50C158.884,58 114.044,74 91.623,89.117C69.203,104.233 69.203,118.467 69.203,125.583C69.203,130 69.203,131 69.203,132.7'
+            const { commands: c } = reanchor(d)
+            expect(c).toEqual(['M', 'L', 'C', 'C', 'C'])
+        })
+
+        it('takes a path whose first command is a line, not a move', () => {
+            // The command test reads the *last* repetition as well as the
+            // first, because a `… C … C` with no trailing `L` is the same
+            // command sequence one character away. `M` is checked first
+            // in `reanchorEdgePath`, so this reaches the codec only
+            // because the opening `M` is there and the closing `L` is not.
+            const { commands: c } = reanchor('M0,42L0,51C0,60 0,78 0,95C0,112 0,128 0,136')
+            expect(c[c.length - 1]).toBe('C')
+        })
+
+        it('takes a path with a leading L but no opening M', () => {
+            // `reanchorEdgePath` rejects this before the codec, and the
+            // assertion is on the rejection: a path that does not open
+            // with `M` has no endpoint for the ray to start from.
+            expect(reanchorEdgePath('L0,51C0,60 0,78 0,95C0,112 0,128 0,136L0,143', SOURCE, TARGET, halfW, halfH))
+                .toBeNull()
+        })
+
+        it('uses the border point itself when the last leg is shorter than the arrowhead', () => {
+            /*
+             * `room` is the distance from dagre's second-to-last spline
+             * point to the target's border — the whole room the endpoint
+             * has to be short by. A path whose last leg is *shorter*
+             * than the 4.8-unit marker has no room to stop in, and the
+             * endpoint becomes the border point: the tip then overshoots
+             * into the card, which is the same outcome d3's own
+             * zero-length terminal `L` on `curveStep` produces, and is a
+             * property of the shape rather than of the re-anchoring.
+             *
+             * Built from `MERMAID_D` with its whole tail crushed up
+             * against the target's border, so the codec still accepts
+             * the path and `room` is genuinely under 4.8: the last
+             * spline point lands at y = 115 and the border is at
+             * 114.9.
+             */
+            const cramped = 'M203.725,42L181.305,50C158.884,58 114.044,74 91.623,89.117C69.203,104.233 69.203,115 69.203,116L69.203,116'
+            const { out } = reanchor(cramped)
+            const last = parsePathPoints(out)!.flatMap((s) => s.points).pop() as { x: number; y: number }
+            expect(last.y).toBeCloseTo(TARGET.y - halfH, 3)
+        })
+
+        it('takes a path whose controls are not d3\'s, however bundle-shaped it looks', () => {
+            /*
+             * The command sequence is right and the *shape* is not, so the
+             * decode has to notice: re-emitting the recovered `q`s would
+             * not reproduce the path, and the codec returns `null` rather
+             * than a curve d3 never drew. One control is pushed a whole
+             * 10 units off d3's fraction, so the disagreement is metres
+             * rather than the `d`'s own rounding — and the assertion is
+             * on the *answer*, not on the rejection, because the
+             * fallback's answer for this path is well defined.
+             */
+            const notD3 = 'M203.725,42L181.305,50C158.884,58 114.044,74 91.623,89.117C69.203,104.233 60,128.467 69.203,135.583L69.203,142.7'
+            const { out, commands: c } = reanchor(notD3)
+            // Declined → the fallback, which keeps the command sequence and
+            // the point count and translates a run.
+            expect(c).toEqual(['M', 'L', 'C', 'C', 'L'])
+            const after = parsePathPoints(out)!.flatMap((s) => s.points)
+            const before = parsePathPoints(notD3)!.flatMap((s) => s.points)
+            expect(after).toHaveLength(before.length)
+        })
+
+        it('declines a path it cannot re-emit, rather than guessing', () => {
+            /*
+             * The re-emit check is the codec's own safety net, and this
+             * is the shape that trips it: a bundle-looking `d` whose
+             * *first* cubic is not d3's, so the `q` recovered from it
+             * cannot reproduce the path it came from. The two ends are
+             * read verbatim (see `decodeBundleBasis`), so this one is
+             * caught on the leading `L` and the first cubic's controls.
+             */
+            const notD3 = 'M203.725,42L181.305,50C158.884,58 114.044,74 91.623,89.117C69.203,104.233 69.203,118.467 69.203,125.583L69.203,132.7'
+            // Control the baseline: the untouched path *is* d3's.
+            const { out: baseline } = reanchor(notD3)
+            expect(baseline).not.toBeNull()
+            // And a single point moved far off its fraction is enough to
+            // lose the re-emit.
+            const broken = notD3.replace('L181.305,50', 'L181.305,80')
+            const { commands: c } = reanchor(broken)
+            expect(c).toEqual(['M', 'L', 'C', 'C', 'L'])
+        })
     })
 
     it('returns null for a path it cannot parse, so the attribute is left alone', () => {

@@ -20,43 +20,87 @@
  * **The fix is geometric, not a re-layout.** For each edge we know the
  * two node centres, and Mermaid routed along the ray from a node's
  * centre through its own path endpoint (measured: the initial tangent
- * and that ray agree to 0.1 % on the same fixture). So we walk the ray
- * out to the card's border and translate the endpoint together with the
- * *handle that governs the curve there*: the curve keeps its tangent,
- * its shape, and its smooth join with the straight lead-in in front of
- * it, and only its reach changes.
+ * and that ray agree to 0.1 % on the same fixture). So the endpoint is
+ * walked out along that ray to the card's border, and *nothing else
+ * about the curve is allowed to change*. How that is done is the whole
+ * content of this module, and the two obvious answers were both wrong.
  *
- * **Which handle is "the handle there" is a question about commands,
- * not about indices.** This is the whole point of the module, and
- * getting it wrong was a shipped bug. dagre + d3's `curveBasis` — what
+ * **Wrong #1: translate a handle.** dagre + d3's `curveBasis` — what
  * `useMermaidRender` configures — emits
  *
  *     M <exit> L <lead-in> C … C … L <entry>
  *
  * so on a path with two cubics the flat point list is
- * `[exit, lead-in, c1, c2, v1, c1', c2', v2, entry]`, and:
+ * `[exit, lead-in, c1, c2, v1, c1', c2', v2, entry]`, and
  *
  *   - index `1` is the **lead-in vertex**, not a control point, and
  *   - index `n - 2` is the last cubic's **on-curve endpoint**, not a
  *     control point either.
  *
- * An implementation that assumed `points[1]` and `points[n - 2]` were
- * bézier control points translated two *vertices* by the endpoint
- * delta. On every real path in the captured corpus that folds the path
- * back on itself: the turn angle at the first interior vertex goes from
- * dagre's 0.00° to **180.00°**, and the interior vertex is displaced by
- * 36.5 – 82.7 user units. The suite stayed green because every fixture
- * was hand-written; `tests/fixtures/edgePathCorpus.ts` is 120 real
- * `d` strings captured from mermaid 10.9.8 in a real browser, and it is
- * what this module is now tested against.
+ * An implementation that read `points[1]` and `points[n - 2]` as
+ * control points translated two *vertices* by the endpoint delta. On
+ * every real path in the captured corpus that folds the path back on
+ * itself: the turn angle at the first interior vertex goes from dagre's
+ * 0.00° to **180.00°**, and the interior vertex is displaced by
+ * 36.5 – 82.7 user units.
  *
- * So the anchoring is **command-aware**: every SVG path command has a
- * known arity and a known split between control points and its single
- * on-curve point (`SHAPE` below), the runs that each endpoint drags
- * along are located through that table rather than by index, and every
- * join angle in the rewritten path is identical to the one Mermaid
- * drew. A path whose start and end handle are the *same* point (a lone
- * `S`/`Q` segment) correctly receives both deltas.
+ * **Wrong #2: translate a *run*, then repair the handles it split.**
+ * Moving the handle alone snaps the curve to a new direction where it
+ * meets the card, so the endpoint drags the whole *run* of geometry it
+ * is attached to — a straight stretch of the path — and the two
+ * repetitions the run straddles are then re-fitted by scaling their
+ * unmoved handle by the span ratio. That kept every join tangent, and
+ * it is what `958084a` shipped. It also wobbles, and it wobbled the
+ * moment the card shrank to its content (`5f24fcd`): 28 of the 33 real
+ * `curveBasis` paths came out with **two reversals of the tangent
+ * angle** each — an S — where Mermaid's own paths have none, because a
+ * run boundary lands *between* the last cubic's two control points. The
+ * run carries the tail control point and the vertex past the head
+ * control point that stayed behind, the control polygon folds back on
+ * itself, and neither the span-ratio rescale nor the clamp can undo it:
+ * both hold a handle's *direction* and change only its *length*, and
+ * what has gone wrong is a direction. Fixing it needs the head handle
+ * to **rotate**, which no amount of rescaling can do.
+ *
+ * **What this module does instead: re-run d3's own emission.** A `d` is
+ * not a free list of control points; it is the *output* of a function of
+ * a handful of routing points. `dagre-d3-es` hands dagre's edge points
+ * to `d3.line().curve(curveBasis)` (`createEdgePaths.js` →
+ * `createLine()`), and d3's `curveBundle` is a straight line at each
+ * end with a `Basis` spline between, which for spline points
+ * `q₀ … q_{n-1}` emits exactly
+ *
+ *     M q₀
+ *     L (5q₀ + q₁)/6
+ *     C (2q_{k-1} + q_k)/3  (q_{k-1} + 2q_k)/3  (q_{k-1} + 4q_k + q_{k+1})/6
+ *     L q_{n-1}
+ *
+ * (`d3-shape@3.2.0` `src/curve/{bundle,basis}.js`; the last cubic, which
+ * `lineEnd` emits after the last point, ends at `(q_{n-2} + 5q_{n-1})/6`
+ * — its own rule, reproduced below). The cubic's two controls sit a
+ * third and two thirds of the way along `q_{k-1} → q_k`, so **they invert
+ * it exactly**: `2·c₁ − c₂ = q_{k-1}` and `2·c₂ − c₁ = q_k`. That is
+ * the codec below. It recovers dagre's routing, moves the two end
+ * points onto the card borders, and re-runs the emission — so the
+ * result is still d3's curve, still a function of the same routing, and
+ * still guaranteed well formed because d3's own formulas built it.
+ *
+ * Every interior join tangent then comes out **unchanged**: the first
+ * `L` and the first cubic's controls are all affine in `q₀`, and `q₁`
+ * is unchanged and collinear with `q₀` and the source centre, so the
+ * lead-in keeps its direction; the same argument runs backwards at the
+ * tail. Measured on the captured corpus, no `curveBasis` path has a
+ * single tangent reversal after re-anchoring, against 28 with two each
+ * before, and 0 in Mermaid's own output.
+ *
+ * **The other three `flowchart.curve` settings keep the run
+ * machinery**, which is the right answer for each of them for a
+ * different reason: `curveLinear` and `curveStep` draw the routing
+ * polyline itself (a straight segment has no curvature to preserve, and
+ * translating a run of its vertices changes no corner angle), and
+ * `curveBumpX` is not a shape this plugin can ask for. It is also the
+ * shape whose controls sit *on* the vertices, so it is a table-
+ * completeness case rather than a rendered one.
  *
  * **The border is not where the arrow is.** Landing the *path end* on
  * the card border looks right in the geometry and is still wrong on
@@ -205,6 +249,8 @@ const SHAPE: Record<string, Shape> = {
  * "whatever happens to be at index + 1".
  */
 interface Group {
+    /** The command this repetition came from — `M`, `L`, `C`, … */
+    command: string
     /** Flat index of the repetition's first point. */
     start: number
     /** Flat index of its on-curve point. */
@@ -320,6 +366,7 @@ function flatten(segments: Segment[]): { points: PathPoint[]; groups: Group[] } 
         if (shape === undefined || shape.points === 0) continue
         for (let at = 0; at + shape.points <= segment.points.length; at += shape.points) {
             const group: Group = {
+                command: segment.command,
                 start: points.length,
                 vertex: points.length + shape.vertex,
                 anchor: previousVertex,
@@ -346,9 +393,30 @@ export function cardBorderPoint(centre: Point, toward: Point, halfWidth: number,
     return { x: centre.x + dx * t, y: centre.y + dy * t }
 }
 
-/** Round to Mermaid's own precision (3 decimals) so the rewritten `d` stays as short and stable. */
+/**
+ * Round a coordinate before it goes into a `d`.
+ *
+ * **Six decimals, not Mermaid's three, and the reason is the
+ * arrowhead.** Three decimals is a step of 0.001 user units, and the
+ * arrow-tip contract is a tolerance of 0.0005. An `orient="auto"` marker
+ * is rotated to the direction of the last *two points of the `d`*, and
+ * the last leg of a re-anchored `curveBasis` path is d3's trailing `L`
+ * — which is one sixth of the last leg, so 8–24 units on the captured
+ * corpus. Aiming the tip 4.8 units short of the border and then
+ * rounding both ends of that chord to 0.001 moves the rendered tip by up
+ * to `4.8 × 0.0014 / 8` = 0.0008, which is the whole tolerance. At six
+ * decimals the same error is 0.0000008 and the tip lands on the border
+ * to 0.000 — measured, on all 33 `basis` paths in the corpus, where the
+ * three-decimal version missed by up to 0.0005 on the four whose
+ * trailing `L` is diagonal.
+ *
+ * The extra digits only appear where a point actually moved, because
+ * `String()` drops trailing zeros: a point that is already on Mermaid's
+ * 3-decimal grid still serialises as `67.906`, so the parts of a path
+ * this module does not touch stay byte-identical to Mermaid's output.
+ */
 function round(value: number): number {
-    return Math.round(value * 1000) / 1000
+    return Math.round(value * 1e6) / 1e6
 }
 
 function serialise(segments: Segment[]): string {
@@ -363,42 +431,220 @@ function unit(x: number, y: number): Point {
     return { x: x / length, y: y / length }
 }
 
+/** `a + (b − a)·t` — a point a fraction `t` of the way from `a` to `b`. */
+function along(a: Point, b: Point, t: number): Point {
+    return { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t }
+}
+
+/** `(wₐ·a + w_b·b + w_c·c) / (wₐ + w_b + w_c)` — d3's three-point blends. */
+function blend(a: Point, b: Point, c: Point, wa: number, wb: number, wc: number): Point {
+    const total = wa + wb + wc
+    return {
+        x: (wa * a.x + wb * b.x + wc * c.x) / total,
+        y: (wa * a.y + wb * b.y + wc * c.y) / total,
+    }
+}
+
+/** `2·a − b`: the point that puts `a` a third of the way from `b` to `a`…'s reflection. */
+function reflect(a: Point, b: Point): Point {
+    return { x: 2 * a.x - b.x, y: 2 * a.y - b.y }
+}
+
+/* ------------------------------------------------------------------ *
+ * The d3 `curveBundle.basis` codec.
+ *
+ * This is the shape `useMermaidRender` ships, and the whole point of
+ * this module. See the file header for why re-running d3's emission is
+ * the only way to relocate an endpoint without changing the curve's
+ * shape; everything below is that one idea, written out.
+ * ------------------------------------------------------------------ */
+
+/**
+ * How far a decoded `q` and a re-emitted path may disagree before the
+ * decode is rejected as "this is not a bundle basis after all".
+ *
+ * The check is exact-arithmetic self-consistency: decode, re-emit,
+ * compare against what was handed in. A `d` Mermaid wrote carries three
+ * decimals, so a correct decode cannot do better than a few thousandths
+ * — measured 0.0009 over the whole captured corpus, from the codec
+ * *inverting a difference* (`2c₁ − c₂`) of two already-rounded numbers.
+ * 0.01 is four orders of magnitude below the shortest leg on any path in
+ * the corpus (4.9 units) and far below anything a mis-decode of another
+ * curve family could accidentally land on: the same comparison rejects
+ * every non-`curveBasis` shape in the corpus by three orders of
+ * magnitude.
+ */
+const BUNDLE_BASIS_TOLERANCE = 0.01
+
+/**
+ * Is this flattened path the one d3's `curveBundle.basis` emits?
+ *
+ * That curve is a straight `L` at each end with a spline between, so
+ * the command sequence is `M L C…C L` with at least two cubics, and its
+ * flat point list is exactly `3n` long for `n` spline points
+ * (`1 + 1 + 3(n − 1) + 1`). Both are asserted, because the codec below
+ * indexes off them.
+ */
+function isBundleBasis(groups: Group[], points: Point[]): boolean {
+    if (groups.length < 5) return false
+    if (groups[0]?.command !== 'M' || groups[1]?.command !== 'L') return false
+    if (groups[groups.length - 1]?.command !== 'L') return false
+    for (const group of groups.slice(2, -1)) {
+        if (group.command !== 'C') return false
+    }
+    return points.length === 3 * (groups.length - 2)
+}
+
+/**
+ * Recover d3's spline points from the `d` its `curveBasis` produced.
+ *
+ * **The inverse is exact, and short.** d3's `Basis` point function
+ * (`d3-shape@3.2.0` `src/curve/basis.js`) emits, for the interval
+ * `q_{k-1} → q_k`,
+ *
+ *     c₁ = (2q_{k-1} + q_k) / 3 = q_{k-1} + (q_k − q_{k-1})/3
+ *     c₂ = (q_{k-1} + 2q_k) / 3 = q_{k-1} + 2(q_k − q_{k-1})/3
+ *
+ * — the two controls a third and two thirds of the way along the
+ * interval, which makes them an exact encoding of their two endpoints:
+ * `2c₂ − c₁ = q_k` and `2c₁ − c₂ = q_{k-1}`. So each cubic names the
+ * pair of spline points it spans, and no iteration is needed.
+ *
+ * **Why not invert the cubic *endpoints* instead**, which is the obvious
+ * other route? Because they amplify. Each is a sixth of a sum of three
+ * spline points, so recovering `q_{k+1}` from it multiplies the
+ * rounding already in `q_k` by four, and the five-spline-point path in
+ * the corpus came back with 0.24 of error by the last point. Inverting
+ * the controls has no such step: the error stays at the two controls'
+ * own half-ulp.
+ *
+ * **The two end points are read verbatim, not inverted.** d3 writes `q₀`
+ * as the `M` and `q_{n-1}` as the trailing `L`, so the `d` already
+ * carries them exactly. An interior point is named by two different
+ * cubics and takes the mean of the two readings, which halves what is
+ * left of the rounding. The consistency of those readings is then
+ * *checked*, not assumed — see `isBundleBasis` and the re-emit below.
+ */
+function decodeBundleBasis(points: Point[]): Point[] | null {
+    // `isBundleBasis` has already established `points.length === 3n` for
+    // some `n ≥ 3`, so both of the length checks below are guards on the
+    // *values* rather than on the shape: a path can be a bundle basis by
+    // command sequence and still carry a control the emitter's formulas
+    // cannot reproduce, and the only honest answer then is to decline.
+    const n = points.length / 3
+    const control = (k: number): { head: Point; tail: Point } => ({
+        head: points[2 + 3 * (k - 1)] as Point,
+        tail: points[3 + 3 * (k - 1)] as Point,
+    })
+    const q: Point[] = []
+    for (let i = 0; i < n; i++) {
+        if (i === 0) {
+            // d3 writes q₀ as the `M` and q_{n-1} as the trailing `L`, so
+            // the `d` already carries the two ends exactly. Inverting them
+            // cannot beat the rounding they are fed, and they are the two
+            // points this function has to move.
+            q.push(points[0] as Point)
+            continue
+        }
+        if (i === n - 1) {
+            q.push(points[points.length - 1] as Point)
+            continue
+        }
+        // The two ends are read verbatim above; every interior point is
+        // named by the cubic that ends at it and by the one that starts
+        // there, and takes the mean of the two readings — which halves
+        // what is left of the `d`'s own rounding.
+        const first = reflect(control(i).tail, control(i).head)
+        const second = reflect(control(i + 1).head, control(i + 1).tail)
+        q.push({ x: (first.x + second.x) / 2, y: (first.y + second.y) / 2 })
+    }
+    // Re-emitting the decode has to reproduce the path d3 drew. This one
+    // comparison validates every formula in the emitter at once — a
+    // decode that is wrong anywhere comes back out differently — so
+    // there is no per-formula tolerance to argue about.
+    const reencoded = emitBundleBasis(q)
+    for (let i = 0; i < points.length; i++) {
+        const a = reencoded[i] as Point
+        const b = points[i] as Point
+        if (Math.hypot(a.x - b.x, a.y - b.y) > BUNDLE_BASIS_TOLERANCE) return null
+    }
+    return q
+}
+
+/**
+ * The inverse of `decodeBundleBasis`: d3's `curveBundle.basis`, written
+ * out point for point.
+ *
+ * Transcribed from `d3-shape@3.2.0` `src/curve/{bundle,basis}.js`, which
+ * is what `dagre-d3-es/src/dagre-js/create-edge-paths.js` feeds the edge
+ * points through (`createLine()` calls `d3.line().curve(edge.curve)`).
+ * The `curveBundle` wrapper first convolves the routing polyline with
+ * its own chord (weight 0.15), and that convolution does not appear
+ * here because `q` is d3's *post*-convolution input: recovering it from
+ * the `d` and handing it straight back is exact, and re-deriving the
+ * pre-convolution polyline would only throw away precision.
+ *
+ * The last cubic is the one `lineEnd` emits, after the last point has
+ * already been consumed, so its two "previous" points are both `q_{n-1}`
+ * and it ends at `(q_{n-2} + 5q_{n-1})/6` rather than at
+ * `(q_{n-2} + 4q_{n-1} + q_{n-1})/6`. Those are the same expression —
+ * the difference is only in what d3's index arithmetic happens to read
+ * — and it is written the way d3 writes it so the two agree by
+ * construction rather than by coincidence.
+ */
+function emitBundleBasis(q: Point[]): Point[] {
+    const n = q.length
+    const out: Point[] = [q[0] as Point, blend(q[0] as Point, q[1] as Point, q[1] as Point, 5, 1, 0)]
+    for (let k = 1; k <= n - 2; k++) {
+        out.push(
+            along(q[k - 1] as Point, q[k] as Point, 1 / 3),
+            along(q[k - 1] as Point, q[k] as Point, 2 / 3),
+            blend(q[k - 1] as Point, q[k] as Point, q[k + 1] as Point, 1, 4, 1),
+        )
+    }
+    out.push(
+        along(q[n - 2] as Point, q[n - 1] as Point, 1 / 3),
+        along(q[n - 2] as Point, q[n - 1] as Point, 2 / 3),
+        blend(q[n - 2] as Point, q[n - 1] as Point, q[n - 1] as Point, 1, 5, 0),
+    )
+    out.push(q[n - 1] as Point)
+    return out
+}
+
 /**
  * Move the path's start point onto `newStart` and its end point onto
  * `newEnd` by rigidly translating the **run** of geometry that each
  * endpoint is attached to.
  *
+ * **This is the fallback, not the main path.** `reanchorEdgePath` only
+ * comes here for a `d` that `decodeBundleBasis` declines — a
+ * `curveLinear` or `curveStep` polyline, or a `curveBumpX`. For the
+ * shipped `curveBasis` the run is the wrong instrument, for the reason
+ * the file header spells out: it drags a control point past its partner
+ * and no repair available here can put it back, because the repair
+ * moves lengths and the damage is to a direction. What follows is
+ * retained because it is the right answer for the shapes that reach it,
+ * and because it is where the corpus's `curveLinear` and `curveStep`
+ * coverage is earned.
+ *
  * **Why a run and not just a handle.** A bézier segment's tangent at
  * an end point is the vector to that end's control point, so moving an
  * endpoint alone snaps the curve to a new direction where it meets the
- * card, and moving only the control point is not enough either. The
- * control point is 1/6 of the way along dagre's first leg (d3's
- * `curveBasis` puts it at `(2p₀ + p₁) / 3` against a lead-in vertex at
- * `(5p₀ + p₁) / 6`), so on a *real* path the endpoint has to travel
- * 36 – 83 user units to reach the card border while that lead-in sits
- * only ~11 units along the leg. Drag the handle alone and the lead-in
- * vertex is left behind: the path leaves the card, the curve turns back
- * to meet it, and the tangent is gone. Drag the lead-in vertex *too*
- * and the run slides along the line it was already on, which is
- * invisible — the path is the same curve, reached a little further.
+ * card, and moving only the control point is not enough either. Drag the
+ * neighbouring vertex *too* and the run slides along the line it was
+ * already on, which is invisible on a straight stretch.
  *
  * So the run at each end is measured **positionally**: it reaches from
  * the endpoint back along the path's own direction of travel, as far as
  * the points that lie at or before the endpoint's new position, and no
  * further.
  *
- * That single rule covers both ends of the problem. d3's `curveBasis`
- * puts the first control point 1/6 of the way along the first leg and
- * the last 1/6 of the way back from the last, so on a real path the
- * runs come out as `[exit, lead-in, first control]` and
- * `[last control, its vertex, entry]` — a rigid translation of a
- * straight stretch, which preserves every join angle exactly. It also
- * covers the shapes where there is no handle to speak of: a `curveLinear`
- * polyline needs no run at all (its neighbouring vertex is already on
- * the ray the endpoint is walked out along), while d3's `curveStep`
- * staircase *does* need one, because its terminal `L` is a duplicate of
- * the point before it and leaving that behind doubles the path back over
- * itself.
+ * That single rule covers both ends of the problem, and it covers the
+ * shapes where there is no handle to speak of: a `curveLinear` polyline
+ * needs no run at all (its neighbouring vertex is already on the ray the
+ * endpoint is walked out along), while d3's `curveStep` staircase *does*
+ * need one, because its terminal `L` is a duplicate of the point before
+ * it and leaving that behind doubles the path back over itself.
  *
  * A path with no direction of its own — a single point, or one whose
  * first leg is zero-length, which d3 emits for a `curveBumpX` edge
@@ -409,9 +655,10 @@ function unit(x: number, y: number): Point {
  * join *between* a run and the untouched middle: the first repetition's
  * head anchor is in the head run and its tail handle is not, so its
  * start tangent moves with the run and its end tangent does not — the
- * same as if nothing had happened. On the captured corpus the turn
- * angle at every interior vertex is identical before and after, and the
- * middle of the path is byte-for-byte Mermaid's own output.
+ * same as if nothing had happened. On the shapes that reach this
+ * function the turn angle at every interior vertex is identical before
+ * and after, and the middle of the path is byte-for-byte Mermaid's own
+ * output.
  *
  * **Why the runs are accumulated before they are applied.** A lone
  * `S`/`Q` repetition has one control point governing both of its ends,
@@ -721,8 +968,105 @@ function shortOfBorder(border: Point, tangent: Point, overshoot: number): Point 
 }
 
 /**
+ * Re-anchor a d3 `curveBundle.basis` path by re-running d3's own
+ * emission with its two end points moved onto the cards.
+ *
+ * **The move is a re-route, not a translate.** `q₀` and `q_{n-1}` are
+ * what dagre routed the edge *from* and *to*; they are the two points
+ * the emission is a function of, so moving them and re-emitting asks
+ * the same router the same question with a different answer — "leave the
+ * source card here, arrive at the target card here" — and d3 builds the
+ * curve. Every control point in the result is therefore one of d3's own
+ * expressions, which is what makes the result guaranteed not to fold:
+ * there is no code here that can put a control point on the wrong side
+ * of its partner, because there is no code here that places a control
+ * point at all.
+ *
+ * **Why every interior join tangent survives.** A join's tangent is the
+ * direction between an on-curve point and the control point beside it,
+ * and *both* of those are affine in the `q`s. At the head, `q₀` moves
+ * along the ray from the source centre through its old position; `q₁`
+ * is unmoved; and d3's own router put the source centre, `q₀` and `q₁`
+ * on one line, because the entry point it computed is
+ * `intersectNode(tail, points[0])` — the intersection of that very ray
+ * with the label box. So `q₀` slides along the line `q₁` was already on,
+ * and every ratio in the first `L` and the first cubic is unchanged:
+ * the lead-in and the curve leave the card along the same directions
+ * d3 drew. The same argument runs backwards at the tail, where the fixed
+ * point is `q_{n-2}`.
+ *
+ * **The endpoint is where the tip goes, minus the marker.** The tip is
+ * `overshoot` past the path end along the end tangent, and the end
+ * tangent of a re-emitted path is `unit(q_last − q_{n-2})` — d3's last
+ * cubic runs from `(q_{n-2} + 5q_last)/6` to `q_last`, so the trailing
+ * `L` is a sixth of the way along the same ray. So the endpoint that
+ * puts the tip on the border is the border walked back by `overshoot`
+ * *along that ray*, which is the closed form below and exact rather than
+ * iterative. A path whose last leg is shorter than the arrowhead itself
+ * has no room to stop short, and the border point is used unchanged.
+ */
+function reanchorBundleBasis(
+    q: Point[],
+    source: Point,
+    target: Point,
+    halfWidth: number,
+    halfHeight: number,
+    endOvershoot: number,
+): string {
+    const n = q.length
+    const last = q[n - 1] as Point
+    const beforeLast = q[n - 2] as Point
+    const start = cardBorderPoint(source, q[0] as Point, halfWidth, halfHeight)
+    const tip = cardBorderPoint(target, last, halfWidth, halfHeight)
+    const room = Math.hypot(tip.x - beforeLast.x, tip.y - beforeLast.y)
+    const end = room > endOvershoot ? along(beforeLast, tip, (room - endOvershoot) / room) : tip
+    return serialise(emitBundleBasisSegments([start, ...q.slice(1, n - 1), end]))
+}
+
+/** `emitBundleBasis`, shaped as the `Segment[]` `serialise` consumes. */
+function emitBundleBasisSegments(q: Point[]): Segment[] {
+    const n = q.length
+    const segments: Segment[] = []
+    const push = (command: string, points: Point[]): void => {
+        segments.push({
+            command,
+            points: points.map((p) => ({ x: p.x, y: p.y, onCurve: command === 'L' || command === 'M' })),
+        })
+    }
+    push('M', [q[0] as Point])
+    push('L', [blend(q[0] as Point, q[1] as Point, q[1] as Point, 5, 1, 0)])
+    for (let k = 1; k <= n - 2; k++) {
+        push('C', [
+            along(q[k - 1] as Point, q[k] as Point, 1 / 3),
+            along(q[k - 1] as Point, q[k] as Point, 2 / 3),
+            blend(q[k - 1] as Point, q[k] as Point, q[k + 1] as Point, 1, 4, 1),
+        ])
+    }
+    push('C', [
+        along(q[n - 2] as Point, q[n - 1] as Point, 1 / 3),
+        along(q[n - 2] as Point, q[n - 1] as Point, 2 / 3),
+        blend(q[n - 2] as Point, q[n - 1] as Point, q[n - 1] as Point, 1, 5, 0),
+    ])
+    push('L', [q[n - 1] as Point])
+    return segments
+}
+
+/**
  * Re-anchor one edge path so it starts on `source`'s card border and
  * its arrow **tip** lands on `target`'s card border.
+ *
+ * Two mechanisms, chosen by what the `d` turns out to be:
+ *
+ *   - **d3 `curveBundle.basis`** — the shipped `flowchart.curve` — goes
+ *     through `reanchorBundleBasis`, which decodes d3's routing out of
+ *     the `d`, moves its two end points onto the cards and re-runs d3's
+ *     own emission. This is the path every real edge takes, and it is
+ *     the only one of the two that keeps the curve's *shape*; see the
+ *     file header for the measurement that says so.
+ *   - **everything else** falls back to `anchorEnds`, which translates
+ *     the run of geometry at each end. Correct for a polyline, where
+ *     there is no curvature to disturb, and the answer for the three
+ *     `flowchart.curve` settings the plugin does not ship.
  *
  * `endOvershoot` is how far past the path's end the end marker's tip
  * is drawn (see `ARROWHEAD_OVERSHOOT`, which is the default because
@@ -756,6 +1100,10 @@ export function reanchorEdgePath(
     const first = points[0]
     const last = points[points.length - 1]
     if (first === undefined || last === undefined) return null
+    if (isBundleBasis(groups, points)) {
+        const q = decodeBundleBasis(points)
+        if (q !== null) return reanchorBundleBasis(q, source, target, halfWidth, halfHeight, endOvershoot)
+    }
     const { departure, arrival } = endDirections(groups, points)
     return serialise(
         anchorEnds(

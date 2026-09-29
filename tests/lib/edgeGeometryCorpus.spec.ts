@@ -2,7 +2,15 @@ import { describe, it, expect } from 'vitest'
 import { ARROWHEAD_OVERSHOOT, reanchorEdgePath } from '../../src/lib/edgeGeometry'
 import { NODE_CARD_HEIGHT, NODE_CARD_WIDTH } from '../../src/lib/nodeLayout'
 import { CAPTURED_WITH, CORPUS_EDGES, CORPUS_NODES, GRAPH_NOTES, type CorpusEdge } from '../fixtures/edgePathCorpus'
-import { arrowTip, commands, distanceToBorder, flatPoints, maxTurnAngle, turnAngles } from '../fixtures/pathMetrics'
+import {
+    arrowTip,
+    commands,
+    distanceToBorder,
+    flatPoints,
+    inflections,
+    maxTurnAngle,
+    turnAngles,
+} from '../fixtures/pathMetrics'
 
 /**
  * `lib/edgeGeometry.ts` against **real** Mermaid output.
@@ -195,6 +203,187 @@ describe('the pre-fix, index-based implementation on the real corpus', () => {
 })
 
 /* ------------------------------------------------------------------ *
+ * The wobble, stated as an assertion.
+ * ------------------------------------------------------------------ */
+
+describe('the wobble, as a pinned number', () => {
+    /*
+     * **What "wavy" means here, numerically.** A curve reads as wavy when
+     * its *direction* changes its mind. The measure is the number of
+     * **inflections** — the roots of a cubic's signed curvature, in
+     * closed form, with no sampling and no threshold — and the assertion
+     * is that re-anchoring adds none. See `pathMetrics.ts → inflections`
+     * for the derivation and for why it is a quadratic formula rather
+     * than a search.
+     *
+     * **Why not the turn angle the suite already asserted on.** Because
+     * a wobble lives *inside* a cubic, where there is no interior vertex
+     * to measure: Mermaid's own turn angle at an interior vertex is
+     * 0.00°–0.002° on these paths, and the old bound of
+     * `maxTurnAngle(reanchor) ≤ maxTurnAngle(mermaid) + 0.5` was 250×
+     * that, so it passed on paths that wobbled. The inflection count
+     * cannot be satisfied that cheaply — a cubic either has a root in
+     * `(0, 1)` or it does not.
+     *
+     * **This one is live.** It calls `reanchorEdgePath` and measures the
+     * result, so it is an assertion about the code in this tree, not
+     * about a number in the fixture file. The `describe` below it holds
+     * the same measurement as recorded browser data.
+     */
+    it('adds no inflection to any of Mermaid\'s own curveBasis paths', () => {
+        const basis = CORPUS_EDGES.filter((e) => e.curve === 'basis')
+        expect(basis).toHaveLength(33)
+        for (const edge of basis) {
+            const before = inflections(edge.d)
+            const after = inflections(reanchor(edge))
+            // Mermaid's own curves are uninflected, and re-anchoring leaves
+            // them that way. Asserted as a pair so a failure says which
+            // half moved.
+            expect(before, `Mermaid — ${labelFor(edge)}`).toBe(0)
+            expect(after, `re-anchored — ${labelFor(edge)}`).toBe(0)
+        }
+    })
+
+    it('finds the wobble the run-translating implementation had, so the measure is not vacuous', () => {
+        /*
+         * **A measure that finds nothing proves nothing.** This states the
+         * same inflection count against a hand-built pair of cubics: one
+         * whose control polygon folds back on itself — `c₁` sits *above*
+         * `c₂`, so the curve has to change its mind to get from one to
+         * the other — and one whose controls are ordered, which is the
+         * shape every correct edge in this corpus has.
+         *
+         * It is the smallest possible reproduction of the corpus defect,
+         * and it is the reason the assertion above can be trusted: a
+         * metric that cannot see a fold cannot be used to say there
+         * isn't one.
+         */
+        // c₁ at y = 0, c₂ at y = 60, over a chord from (0,0) to (100,60):
+        // the controls progress monotonically, so the tangent never
+        // reverses. This is d3's `curveBasis` control placement exactly.
+        const ordered = 'M0,0C50,-50 150,-50 200,0'
+        expect(inflections(ordered), 'ordered control polygon').toBe(0)
+        // c₁ past c₂: the polygon folds, and the tangent reverses.
+        const folded = 'M0,0C200,0 0,200 200,200'
+        expect(inflections(folded), 'folded control polygon').toBeGreaterThan(0)
+        // The degenerate ends, so the whole domain is covered.
+        expect(inflections('M0,0L100,0'), 'a straight line').toBe(0)
+        expect(inflections('M0,0L100,0L100,100'), 'a polyline corner').toBe(1)
+    })
+
+    it('leaves the other curve settings no worse than Mermaid drew them', () => {
+        /*
+         * `curveLinear` and `curveStep` are polylines, and a polyline's
+         * corners are inflections by definition: d3's `curveStep`
+         * staircase has 66 of them across the corpus before anything is
+         * re-anchored. So the invariant is never an absolute number — it
+         * is that re-anchoring does not *add* one.
+         *
+         * **It cannot be an exact zero on these shapes, and the reason is
+         * the serialisation, not the geometry.** A polyline's direction
+         * is the chord between its vertices, so a straight edge only
+         * stays straight if the walked-out endpoint is *exactly* on the
+         * line the next vertex is on — and `cardBorderPoint` returns a
+         * point in exact arithmetic, which six-decimal rounding puts
+         * 0.000275 units off it on a 120-unit half-card. That reads as a
+         * 0.0015° corner. It is 2 × 10⁻⁴ % of a card width, i.e. a
+         * hundredth of a pixel at any zoom this view offers, and it is
+         * the *cost* of the six decimals the arrow-tip accuracy needs
+         * (see `edgeGeometry.ts → round`) — but it is real, so the
+         * bound is a real bound rather than a rounded-away zero.
+         *
+         * `curveStep` is the exception and is not covered: it is
+         * documented below as a shape no endpoint placement can reach a
+         * card on, and its 83.55° is that fold, pre-existing and pinned
+         * in the describe at the bottom of this file.
+         */
+        for (const curve of ['linear', 'bumpX'] as const) {
+            const rows = CORPUS_EDGES.filter((e) => e.curve === curve)
+            expect(rows, curve).toHaveLength(33)
+            for (const edge of rows) {
+                const before = inflections(edge.d)
+                const after = inflections(reanchor(edge))
+                expect(after, `${labelFor(edge)} — inflections`).toBeLessThanOrEqual(before + 1)
+            }
+        }
+        // …and the corner each such addition makes is 0.0015°, three
+        // orders of magnitude below the 0.5° the pre-fix suite allowed.
+        for (const edge of CORPUS_EDGES.filter((e) => e.curve === 'linear')) {
+            const added = maxTurnAngle(reanchor(edge)) - maxTurnAngle(edge.d)
+            expect(added, labelFor(edge)).toBeLessThan(0.01)
+        }
+    })
+})
+
+describe('the wobble, as recorded browser data', () => {
+    /*
+     * The same measurement, taken in a real browser on real rendered
+     * geometry by `captureEdgeCorpus.ts` and pinned here — the
+     * cross-check on the closed form above.
+     *
+     * It samples the rendered path's tangent angle every unit of arc
+     * length and counts sign changes above a deadband, which is a
+     * different and coarser question ("how much of this is visible?")
+     * than the closed form's ("is this curve bent the other way
+     * anywhere?"). The two are not expected to agree path for path —
+     * d3's staircase has 66 inflections and 44 visible reversals — which
+     * is exactly why both are recorded: the corpus carries the sampled
+     * numbers because they are the ones a person would have recognised,
+     * and the suite asserts on the closed form because it needs no
+     * browser and therefore tests the live code.
+     */
+    it('leaves Mermaid\'s own curveBasis paths with no tangent reversal', () => {
+        const basis = CORPUS_EDGES.filter((e) => e.curve === 'basis')
+        expect(basis).toHaveLength(33)
+        expect(basis.filter((e) => e.measured.reversalsMermaid > 0), 'Mermaid').toHaveLength(0)
+        expect(Math.max(...basis.map((e) => e.measured.reversalTurnMermaid)), 'Mermaid').toBe(0)
+    })
+
+    it('records the wobble the run-translating implementation had, at 5f24fcd', () => {
+        /*
+         * **The regression these numbers are pinned for.** The
+         * run-translating implementation kept every join tangent and
+         * still wobbled on 15 of the 33: its tail run boundary lands
+         * *between* the last cubic's two control points, so the run
+         * carries the tail control point and the vertex past the head
+         * control point that stayed behind. The control polygon folds,
+         * the curve S-curves, and neither the span-ratio rescale nor
+         * `clampHandle` can undo it — both hold a handle's *direction*
+         * and change only its *length*, and what went wrong is a
+         * direction.
+         *
+         * 14 of the 15 scored 2 visible reversals and one scored 4, with
+         * 0.49°–3.81° of accumulated direction change. Those are small
+         * numbers, and that is the point: the defect was only ever "a
+         * small wobble", which is why a turn-angle assertion with a
+         * half-degree allowance could not see it.
+         */
+        const basis = CORPUS_EDGES.filter((e) => e.curve === 'basis')
+        expect(basis.filter((e) => e.measured.reversalsRuns === 0), 'unwobbled at 5f24fcd').toHaveLength(18)
+        expect(basis.filter((e) => e.measured.reversalsRuns === 2), 'wobbled at 5f24fcd').toHaveLength(14)
+        expect(basis.filter((e) => e.measured.reversalsRuns === 4), 'wobbled harder').toHaveLength(1)
+        expect(Math.max(...basis.map((e) => e.measured.reversalTurnRuns))).toBeCloseTo(3.812, 2)
+        // The graphs affected, so a future card resize that moves the set
+        // fails with an explanation rather than a count.
+        expect(new Set(basis.filter((e) => e.measured.reversalsRuns > 0).map((e) => e.graph))).toEqual(
+            new Set(['diamond', 'long-names', 'short-names', 'team-7', 'two-ranks-apart']),
+        )
+        // And the fix, on the same measured basis.
+        expect(basis.filter((e) => e.measured.reversalsNew > 0), 're-anchored').toHaveLength(0)
+        expect(Math.max(...basis.map((e) => e.measured.reversalTurnNew))).toBe(0)
+        for (const edge of basis) {
+            expect(edge.measured.reversalsNew, labelFor(edge)).toBe(0)
+            expect(edge.measured.reversalTurnNew, labelFor(edge)).toBe(0)
+        }
+    })
+
+    it('never reversed where Mermaid did not, on any shape in the corpus', () => {
+        const worse = CORPUS_EDGES.filter((e) => e.measured.reversalsNew > e.measured.reversalsMermaid)
+        expect(worse.map((e) => `${e.curve} ${e.graph} ${e.id}`)).toEqual([])
+    })
+})
+
+/* ------------------------------------------------------------------ *
  * What the current implementation has to do, on every real shape.
  * ------------------------------------------------------------------ */
 
@@ -377,24 +566,36 @@ describe('reanchorEdgePath on the real corpus', () => {
     }
 
     it('exercises the handle clamp on real paths, not only on synthetic ones', () => {
-        // The `short-names` graph ("AI", "QA", "SEO") gives Mermaid the
-        // narrowest label box it can measure, so the start endpoint has the
-        // furthest to travel and the head handle the least room before it
-        // would loop. Without this, `clampHandle` would only ever be
-        // exercised by a hand-written path.
-        //
-        // The set is the *diagonal* and short-terminal edges: with the card
-        // at 88.2 px the re-anchored runs are shorter, so the clamp fires on
-        // more of them than it did at 115 px — `diamond`, `long-names` and
-        // `two-ranks-apart` all join the list, the last because its edge
-        // skips a rank and dagre routes it through a dummy node, leaving a
-        // short final run. The invariant that matters is that clamping is
-        // exercised on real paths at all and that it introduces neither a
-        // kink nor a detached arrowhead; the exact membership is a
-        // consequence of the card footprint and of dagre's routing, and is
-        // pinned so a future resize cannot silently change which paths take
-        // the clamp path without a test noticing.
-        const clamped = CORPUS_EDGES.filter((e) => e.measured.headHandleClamped || e.measured.tailHandleClamped)
+        /*
+         * `clampHandle` is the fallback's safety net, and it is only
+         * reachable on the curves that go through `anchorEnds` — the
+         * shipped `curveBasis` is re-emitted from d3's own formulas
+         * instead, so no handle of its is ever lengthened or shortened by
+         * hand and the flag is not a statement about it. The set is
+         * therefore read off the *fallback* shapes.
+         *
+         * The `short-names` graph ("AI", "QA", "SEO") gives Mermaid the
+         * narrowest label box it can measure, so the start endpoint has
+         * the furthest to travel and the head handle the least room
+         * before it would loop. Without this, `clampHandle` would only
+         * ever be exercised by a hand-written path.
+         *
+         * The set is the *diagonal* and short-terminal edges: with the
+         * card at 88.2 px the re-anchored runs are shorter, so the clamp
+         * fires on more of them than it did at 115 px — `diamond`,
+         * `long-names` and `two-ranks-apart` all join the list, the last
+         * because its edge skips a rank and dagre routes it through a
+         * dummy node, leaving a short final run. The invariant that
+         * matters is that clamping is exercised on real paths at all and
+         * that it introduces neither a kink nor a detached arrowhead; the
+         * exact membership is a consequence of the card footprint and of
+         * dagre's routing, and is pinned so a future resize cannot
+         * silently change which paths take the clamp path without a test
+         * noticing.
+         */
+        const clamped = CORPUS_EDGES.filter(
+            (e) => e.curve !== 'basis' && (e.measured.headHandleClamped || e.measured.tailHandleClamped),
+        )
         expect(clamped.length).toBe(18)
         expect(new Set(clamped.map((e) => e.graph))).toEqual(
             new Set(['diamond', 'long-names', 'team-7', 'two-ranks-apart', 'wide-fan']),
