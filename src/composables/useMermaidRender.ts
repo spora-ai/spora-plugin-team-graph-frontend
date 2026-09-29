@@ -23,14 +23,19 @@
  *      the label text; growing them is what makes the SVG's own
  *      bounding box — and therefore `getBBox()` below — enclose the
  *      cards the overlay is about to draw.
- *   3. `viewBox` is reset to that `getBBox()` + `SVG_PADDING`
+ *   3. Every edge is **re-anchored onto the card borders**. Mermaid
+ *      routed the edges against the (much smaller) label boxes it
+ *      measured, so growing the rects in step 2 leaves the arrows
+ *      floating short of the cards. Each endpoint is walked out along
+ *      the same ray to the new border; see `lib/edgeGeometry.ts`.
+ *   4. `viewBox` is reset to that `getBBox()` + `SVG_PADDING`
  *      padding, and `width`/`height` are pinned to the same numbers
  *      so one SVG user unit equals one content-layer pixel.
- *   4. `measureNodePositions()` converts each node's centre into a
+ *   5. `measureNodePositions()` converts each node's centre into a
  *      card top-left in content-layer pixels. Re-run on *every*
  *      render, so a re-render (poll, principal switch, edge
  *      selection) can never leave a card where it used to be.
- *   5. Edge paths are tagged `out` / `in` / `dim` for the current
+ *   6. Edge paths are tagged `out` / `in` / `dim` for the current
  *      selection.
  *
  * Pan/zoom is handled by the parent component via `setPointerCapture`
@@ -41,12 +46,15 @@
 import mermaid from 'mermaid'
 import { onBeforeUnmount, ref, watch, type Ref } from 'vue'
 import { buildMermaidSource } from '../lib/mermaidSource'
+import { reanchorEdgePath } from '../lib/edgeGeometry'
 import {
     SVG_PADDING,
     edgeEndsFromMermaidId,
+    measureNodeCentres,
     measureNodePositions,
     NODE_CARD_HEIGHT,
     NODE_CARD_WIDTH,
+    type NodeCentre,
     type NodePosition,
 } from '../lib/nodeLayout'
 import { useSelectionStore } from '../stores/selection'
@@ -176,6 +184,36 @@ export function useMermaidRender({ hostRef, graph, onRender }: UseMermaidRenderO
         })
     }
 
+    function reanchorEdges(svgEl: SVGSVGElement, centres: Record<number, NodeCentre>): void {
+        /*
+         * Mermaid routed every edge against the *label* box it measured
+         * before the render; the rects above have since been grown to the
+         * 240 × 76 card footprint, so the endpoints now sit inside (or
+         * short of) the cards. Walk each endpoint out along the same ray
+         * to the card's border, translating the adjacent control point by
+         * the same delta so the curve stays smooth. See
+         * `lib/edgeGeometry.ts` for the measurement that motivates it.
+         *
+         * Runs before the `getBBox()` below on purpose: a re-anchored
+         * endpoint lands exactly on a node rect, which is already the
+         * widest geometry in the diagram, so the bounding box cannot
+         * grow — but taking it afterwards keeps that true by
+         * construction rather than by argument.
+         */
+        svgEl.querySelectorAll('path.flowchart-link').forEach((edgeEl) => {
+            const ends = edgeEndsFromMermaidId(edgeEl.id)
+            if (ends === null) return
+            const [src, tgt] = ends
+            const source = centres[src]
+            const target = centres[tgt]
+            if (source === undefined || target === undefined) return
+            const d = edgeEl.getAttribute('d')
+            if (d === null) return
+            const next = reanchorEdgePath(d, source, target, NODE_CARD_WIDTH / 2, NODE_CARD_HEIGHT / 2)
+            if (next !== null) edgeEl.setAttribute('d', next)
+        })
+    }
+
     async function renderInto(host: HTMLElement, payload: GraphPayload): Promise<SVGSVGElement | null> {
         const myRenderId = ++renderCounter
         renderId.value = myRenderId
@@ -209,13 +247,35 @@ export function useMermaidRender({ hostRef, graph, onRender }: UseMermaidRenderO
              * enclose the cards rather than the text labels. The
              * boxes stay transparent (style.css), so this is purely
              * geometry.
+             *
+             * The `fill: none; stroke: none` inline declaration is
+             * load-bearing rather than belt-and-braces: an inline
+             * style outranks the `<style>` Mermaid injects *into* the
+             * SVG, so the node boxes stay unpainted even if the
+             * plugin's own stylesheet never loads — which is the one
+             * case where Mermaid's default theme would otherwise paint
+             * them `#ECECFF` with a `#9370DB` stroke, straight over
+             * cards that would themselves have no surface. `style.css`
+             * still owns this (it must also cover `polygon` / `circle`
+             * / `ellipse` for the other node shapes); this just makes
+             * the guarantee independent of the stylesheet.
              */
-            svgEl.querySelectorAll('g.node rect').forEach((shape) => {
+            svgEl.querySelectorAll<SVGRectElement>('g.node rect').forEach((shape) => {
+                shape.style.fill = 'none'
+                shape.style.stroke = 'none'
                 shape.setAttribute('x', String(-NODE_CARD_WIDTH / 2))
                 shape.setAttribute('y', String(-NODE_CARD_HEIGHT / 2))
                 shape.setAttribute('width', String(NODE_CARD_WIDTH))
                 shape.setAttribute('height', String(NODE_CARD_HEIGHT))
             })
+
+            /*
+             * The node boxes are now card-sized, but Mermaid already
+             * routed the edges against the label boxes it measured. Pull
+             * the endpoints onto the new borders before anything reads
+             * the geometry, so the arrows meet the cards they connect.
+             */
+            reanchorEdges(svgEl, measureNodeCentres(svgEl))
 
             try {
                 const bb = svgEl.getBBox()

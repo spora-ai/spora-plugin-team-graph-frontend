@@ -50,7 +50,7 @@
 import { computed } from 'vue'
 import { AgentAvatar } from '@spora-ai/components/avatar'
 import { Icon } from '@spora-ai/components/icons'
-import { avatarSubject } from '../lib/agentAvatar'
+import { avatarPaletteStyle, avatarSubject } from '../lib/agentAvatar'
 import { statusLabel, statusPillClass } from '../lib/nodeStatus'
 import type { GraphNode } from '../types'
 
@@ -100,6 +100,20 @@ const cardClass = computed(() => ({
     'is-dimmed': props.dimmed,
 }))
 
+/**
+ * Placement plus the agent's palette. The two `--spora-avatar-*`
+ * custom properties are the package's own theming hook for the
+ * initials tile, so an agent with no archetype keeps the colour the
+ * backend resolved for it instead of dropping to the hard-coded slate
+ * default. Set on the card (the avatar inherits custom properties),
+ * which keeps one palette source for the whole card. See
+ * `lib/agentAvatar.ts → avatarPaletteStyle`.
+ */
+const cardStyle = computed(() => ({
+    transform: `translate3d(${props.x}px, ${props.y}px, 0)`,
+    ...avatarPaletteStyle(props.node),
+}))
+
 function onActivate(): void {
     emit('toggle', props.node.id)
 }
@@ -127,7 +141,7 @@ function onActivate(): void {
     <button
         type="button"
         :class="cardClass"
-        :style="{ transform: `translate3d(${x}px, ${y}px, 0)` }"
+        :style="cardStyle"
         :data-testid="`tg-node-${node.id}`"
         :data-node-id="node.id"
         :aria-pressed="selected"

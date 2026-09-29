@@ -108,15 +108,23 @@ const pendingFit = ref(false)
  *      animation frames, by which time any in-flight render
  *      has either completed and consumed the flag, or will
  *      consume it next).
+ *
+ * **`consumeFit()` clears the flag only once a fit has actually
+ * happened.** A fit requested before Mermaid has committed its SVG
+ * finds no diagram to measure; clearing the flag on that no-op would
+ * strand the view at its untransformed default, because the `onRender`
+ * fit is the one that runs *after* the SVG exists. Keeping the request
+ * pending lets that later fit be the one that consumes it.
  */
+function consumeFit(): void {
+    if (!pendingFit.value) return
+    if (!fit()) return
+    pendingFit.value = false
+}
+
 function scheduleFit(): void {
     pendingFit.value = true
-    requestAnimationFrame(() => requestAnimationFrame(() => {
-        if (pendingFit.value) {
-            pendingFit.value = false
-            fit()
-        }
-    }))
+    requestAnimationFrame(() => requestAnimationFrame(consumeFit))
 }
 
 const { positions } = useMermaidRender({
@@ -124,25 +132,23 @@ const { positions } = useMermaidRender({
     graph: graphRef,
     /*
      * Two RAFs: the first lets the freshly committed SVG attach to
-     * the DOM, the second lets layout propagate so wrap.clientWidth
-     * and the SVG's width/height attributes are valid by the time
-     * fit() reads them. Without this double-rAF the first fit is
-     * sometimes called before the browser has sized the new node.
+     * the DOM, the second lets layout propagate so the wrap's box and
+     * the SVG's width/height attributes are valid by the time fit()
+     * reads them. Without this double-rAF the first fit is sometimes
+     * called before the browser has sized the new node.
      *
-     * On every render we check the `pendingFit` flag — if a fit
-     * was requested (principal change or Refresh), run it now
-     * that the SVG has its final dimensions.
+     * This is the path that actually frames the *first* graph: the
+     * `pendingFit` set by the principal-change watcher fires long
+     * before Mermaid has resolved, and `consumeFit` leaves that request
+     * pending until there is a diagram to frame — which is exactly
+     * what this callback is.
      */
-    onRender: () => requestAnimationFrame(() => requestAnimationFrame(() => {
-        if (pendingFit.value) {
-            pendingFit.value = false
-            fit()
-        }
-    })),
+    onRender: () => requestAnimationFrame(() => requestAnimationFrame(consumeFit)),
 })
 const { fit, zoomIn, zoomOut } = usePanZoom({
     wrapRef: canvasWrap,
     contentRef: canvasContent,
+    hostRef,
 })
 
 const selection = useSelectionStore()

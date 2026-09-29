@@ -218,13 +218,21 @@ body,
  * zoom / fit / resize move both layers together with no JavaScript.
  *
  * These boxes and their `<text>` labels are therefore painted fully
- * transparent. Deliberately done from the stylesheet rather than with
- * a Mermaid `classDef fill:transparent`: Mermaid's own theme
- * (`primaryColor` / `primaryTextColor`) then survives as the fallback,
- * so a stylesheet that fails to load degrades to a plain but readable
- * diagram instead of a blank canvas. `!important` is still required —
- * Mermaid ships an inline `style="fill:…"` on each shape and a
- * `.node rect` rule in the SVG's own <style>.
+ * transparent, in **every** state: these selectors are keyed on
+ * `g.node`, not on `g.node.selected` / `g.node.dimmed`, so nothing the
+ * selection store does can re-expose a fill. `!important` is required
+ * because Mermaid ships an inline `style="fill:…"` on each shape and a
+ * `#m-N .node rect` rule inside the SVG's own `<style>`.
+ *
+ * `useMermaidRender` additionally writes the same `fill: none;
+ * stroke: none` as an **inline style** on each shape it resizes. That
+ * is the belt to this braces: an inline declaration outranks the
+ * SVG's own stylesheet, so the boxes stay unpainted even in the one
+ * scenario this file cannot cover — `style.css` failing to load at
+ * all, which is exactly when the host would otherwise show Mermaid's
+ * raw node boxes (its default theme paints them `#ECECFF` with a
+ * `#9370DB` stroke: a light-lavender box with a purple border) on top
+ * of a card with no surface of its own.
  */
 #spora-plugin-team-graph .tg-canvas-content svg g.node rect,
 #spora-plugin-team-graph .tg-canvas-content svg g.node polygon,
@@ -307,7 +315,7 @@ body,
     cursor: pointer;
     pointer-events: auto;
     text-align: left;
-    transition: box-shadow 150ms, border-color 150ms, opacity 150ms;
+    transition: box-shadow 150ms, border-color 150ms;
 }
 .tg-node-card:hover { border-color: #4f46e5; }
 .tg-node-card:focus-visible { outline: 2px solid #4f46e5; outline-offset: 2px; }
@@ -315,8 +323,30 @@ body,
     border-color: #4f46e5;
     box-shadow: 0 0 0 2px rgba(79, 70, 229, 0.25);
 }
-.tg-node-card.is-adjacent { border-color: rgba(79, 70, 229, 0.55); }
-.tg-node-card.is-dimmed { opacity: 0.28; }
+
+/**
+ * Selection states must not dissolve the card's own surface.
+ *
+ * The card is the only painted node box on the canvas — Mermaid's
+ * `g.node` shapes are forced transparent above, and the `<svg>` sits
+ * *below* the overlay — so anything that fades the button fades the
+ * prototype-M surface with it. `opacity: 0.28` on a dimmed card was
+ * measured rendering `#f9fafb` (the canvas showing through) where an
+ * un-dimmed card renders `#ffffff`, and a `rgba()` border on an
+ * adjacent card composites to a washed-out edge for the same reason.
+ * Both read as a pale, half-painted box rather than a card.
+ *
+ * So: every state keeps `background: #fff` at full opacity and
+ * recedes through *colours* only — an opaque muted border for the
+ * dimmed case, the selected/adjacent pair distinguished by hue and by
+ * the ring. The dimmed card's *contents* are what actually fade.
+ */
+.tg-node-card.is-adjacent { border-color: #a5b4fc; }
+.tg-node-card.is-dimmed {
+    border-color: #e2e8f0;
+    box-shadow: none;
+}
+.tg-node-card.is-dimmed > * { opacity: 0.35; }
 
 /**
  * `.avatar--sm` from `@spora-ai/components` is already 32 × 32 px,
@@ -325,6 +355,29 @@ body,
  * keeps the prototype's own shadow.
  */
 .tg-node-card-avatar { flex-shrink: 0; box-shadow: 0 1px 2px rgba(15, 23, 41, 0.18); }
+
+/**
+ * The tile's shape, in one place.
+ *
+ * `AgentNodeCard` and `AgentDetailPanel` must both paint the same
+ * silhouette, and the archetype branch already does the right thing:
+ * `.avatar--sm { border-radius: .5rem }`. The **initials** branch does
+ * not — the package forces `border-radius: 9999px` on
+ * `.avatar--initials[data-v-0a52efe6]`, so the same card showed a
+ * rounded square for an agent with an archetype and a circle for one
+ * without. `AgentNodeCard` now sets `--spora-avatar-bg` / `--fg` on
+ * the card (so the fallback tile keeps the agent's palette) and this
+ * rule forces its *radius* back to the prototype's 8 px square.
+ *
+ * These rules are **unlayered**, which is the whole mechanism: the
+ * package ships `.avatar--initials` inside `@layer components`, and
+ * unlayered author rules beat layered ones regardless of specificity.
+ * That is why the override needs no `!important` and cannot be beaten
+ * by the package bumping its own selector.
+ */
+.tg-node-card-avatar.avatar--initials,
+.tg-agent-tile .avatar--initials,
+.tg-agent-tile { border-radius: 0.5rem; }
 
 /* The body and the two rows are `<span>`s so the card can be a
  * `<button>` (whose content model is phrasing content). `flex` is
@@ -484,8 +537,13 @@ body,
  * covers, a `color-mix` tint of the plugin's `statusColor()`
  * otherwise. `box-shadow` rather than `border` so the ring adds no
  * layout box and the row's 8 px gap stays 8 px.
+ *
+ * The `border-radius` lives in the tile-shape rule above, together
+ * with the card's — a `box-shadow` ring is clipped to the element's
+ * own radius, so a circle wrapper around a square tile would have
+ * drawn a circular ring around a square avatar.
  */
-.tg-agent-tile { display: inline-flex; border-radius: 9999px; box-shadow: 0 0 0 2px var(--tg-status-ring, transparent); }
+.tg-agent-tile { display: inline-flex; box-shadow: 0 0 0 2px var(--tg-status-ring, transparent); }
 
 /**
  * Hierarchy chain (root → ... → this agent). The links are inline

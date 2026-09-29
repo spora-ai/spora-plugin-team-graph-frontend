@@ -81,6 +81,53 @@ describe('AgentNodeCard — structure', () => {
         expect(wrapper.find('[data-testid="avatar-initials"]').exists()).toBe(true)
     })
 
+    it('carries the agent palette on the card so the initials tile is not slate', () => {
+        /*
+         * The regression: an agent with no archetype drops to the
+         * package's initials branch, which paints
+         * `var(--spora-avatar-bg, #475569)` — so the green agent from
+         * the dashboard rendered as a grey tile on the canvas. The two
+         * custom properties are the package's own theming hook, set
+         * from the backend-resolved pair on the wire node.
+         */
+        const wrapper = mountCard(
+            {},
+            makeNode({
+                name: 'Spora Core Agent',
+                profile_picture: {
+                    kind: 'avatar',
+                    archetype: null,
+                    variant_key: null,
+                    palette_key: 'green',
+                    bg_color: '#15803D',
+                    fg_color: '#F0FDF4',
+                },
+            }),
+        )
+        expect(wrapper.find('[data-testid="avatar-initials"]').exists()).toBe(true)
+        const style = wrapper.find('.tg-node-card').attributes('style') ?? ''
+        expect(style).toContain('--spora-avatar-bg: #15803D')
+        expect(style).toContain('--spora-avatar-fg: #F0FDF4')
+    })
+
+    it('carries the palette for an archetype agent too (the branch that already worked)', () => {
+        const style = mountCard().find('.tg-node-card').attributes('style') ?? ''
+        expect(style).toContain('--spora-avatar-bg: #0F766E')
+        expect(style).toContain('--spora-avatar-fg: #F0FDFA')
+    })
+
+    it('omits the palette hook when the wire carries no usable colours', () => {
+        const style = mountCard(
+            {},
+            makeNode({ profile_picture: { palette_key: 'slate', bg_color: '', fg_color: '' } }),
+        )
+            .find('.tg-node-card')
+            .attributes('style')
+        // The package's own slate fallbacks apply; nothing undefined is
+        // written into a custom property.
+        expect(style).not.toContain('--spora-avatar-bg')
+    })
+
     it('lays out the Variant M rows: name on top, pill + badges underneath', () => {
         const wrapper = mountCard()
         expect(wrapper.find('.tg-node-card-row1 .tg-node-card-name').text()).toBe('Marketing Lead')

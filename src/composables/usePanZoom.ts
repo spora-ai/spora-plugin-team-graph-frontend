@@ -11,16 +11,37 @@
  * element, so we have to handle all pointer semantics in
  * `pointerup`. A `moved` flag distinguishes a real drag from a
  * tap-on-empty-canvas (which clears the selection).
+ *
+ * **`fit()` scales up as well as down.** The SVG is sized from its own
+ * content (`viewBox` + matching `width`/`height`, see
+ * `composables/useMermaidRender.ts`), so a small graph is a small
+ * element and used to sit unscaled in the middle of the canvas. The
+ * scale is now whatever makes the diagram fill the viewport on its
+ * tighter axis, capped at `FIT_MAX_SCALE` so a two-node graph is not
+ * blown up to fill a 700 px canvas.
  */
 import { onBeforeUnmount, ref, watch, type Ref } from 'vue'
 
 export interface UsePanZoomOptions {
     wrapRef: Ref<HTMLElement | null>
     contentRef: Ref<HTMLElement | null>
+    /**
+     * The element Mermaid's diagram SVG is committed into (the
+     * `tg-mermaid-host` div). Required rather than searched for: see
+     * `readSvgSize` for why an unscoped `querySelector('svg')` on the
+     * wrap measures the wrong element.
+     */
+    hostRef: Ref<HTMLElement | null>
 }
 
 export interface UsePanZoomReturn {
-    fit: () => void
+    /**
+     * Frame the diagram in the viewport. Returns `false` when there was
+     * nothing to frame (no diagram SVG committed yet) so the caller can
+     * keep its "please fit" request pending instead of consuming it
+     * against a no-op.
+     */
+    fit: () => boolean
     zoomIn: () => void
     zoomOut: () => void
 }
@@ -34,7 +55,29 @@ interface View {
 const MIN_SCALE = 0.2
 const MAX_SCALE = 3
 
-export function usePanZoom({ wrapRef, contentRef }: UsePanZoomOptions): UsePanZoomReturn {
+/**
+ * Breathing room `fit()` keeps between the scaled diagram and the
+ * viewport edge, in CSS pixels. Mirrored by the resize clamp below.
+ */
+const FIT_MARGIN = 16
+
+/**
+ * How far `fit()` may **enlarge** a diagram.
+ *
+ * `fit()` has no upper cap of its own any more: a graph whose natural
+ * size is smaller than the viewport used to be pinned at `scale(1)`,
+ * which left a small diagram marooned in the middle of a large empty
+ * canvas (measured on the 4-node dev fixture: a 666 × 401 diagram in
+ * a 764 × 620 viewport stayed at 100 % and wasted 219 px of height).
+ * Letting `fit()` scale up fills the space, but a two-node graph is
+ * only 280 × 116 px and would balloon to ~2.7×, so the enlargement is
+ * capped here instead. `MIN_SCALE` / `MAX_SCALE` are deliberately not
+ * applied to the lower end: fitting a 100-node principal *has* to go
+ * below 0.2, and clamping it there would stop `fit()` from fitting.
+ */
+const FIT_MAX_SCALE = 1.5
+
+export function usePanZoom({ wrapRef, contentRef, hostRef }: UsePanZoomOptions): UsePanZoomReturn {
     const view = ref<View>({ x: 0, y: 0, k: 1 })
     const panning = ref<{
         startX: number
@@ -51,10 +94,33 @@ export function usePanZoom({ wrapRef, contentRef }: UsePanZoomOptions): UsePanZo
         content.style.transform = `translate(${view.value.x}px, ${view.value.y}px) scale(${view.value.k})`
     }
 
+    /**
+     * The diagram's own intrinsic size, in content-layer pixels.
+     *
+     * Scoped to the Mermaid host on purpose. An unscoped
+     * `wrap.querySelector('svg')` returns the **first** `<svg>` in
+     * document order, and the wrap's own zoom toolbar renders three
+     * `Icon` components — each one a `<svg class="spora-icon">`, in the
+     * DOM long before Mermaid commits the diagram. Instrumented on the
+     * dev server: `fit()` ran at t = 61 ms with the Mermaid host still
+     * empty, read the "zoom out" icon (no `width` attribute, so it fell
+     * through to `clientWidth` = 12) and computed a transform for a
+     * 12 × 12 "diagram" — `translate(376px, 304px) scale(1)` at the
+     * time, throwing the real 667 × 401 graph off the bottom-right of
+     * the canvas. Which of the two `<svg>`s wins is a race against
+     * Mermaid's async render, so the mis-measurement is intermittent
+     * rather than constant — but it is reachable, and requiring the host
+     * ref makes it unrepresentable.
+     *
+     * Returning `null` until the diagram exists is the other half of
+     * the fix: it lets the caller's pending fit survive to the render
+     * that can actually satisfy it (see `TeamGraphCanvas.vue →
+     * consumeFit`).
+     */
     function readSvgSize(): { w: number; h: number } | null {
-        const wrap = wrapRef.value
-        if (wrap === null) return null
-        const svgEl = wrap.querySelector('svg')
+        const host = hostRef.value
+        if (host === null) return null
+        const svgEl = host.querySelector('svg')
         if (svgEl === null) return null
         const w = Number(svgEl.getAttribute('width')) || svgEl.clientWidth
         const h = Number(svgEl.getAttribute('height')) || svgEl.clientHeight
@@ -62,19 +128,28 @@ export function usePanZoom({ wrapRef, contentRef }: UsePanZoomOptions): UsePanZo
         return { w, h }
     }
 
-    function fit(): void {
+    function fit(): boolean {
         const wrap = wrapRef.value
         const size = readSvgSize()
-        if (wrap === null || size === null) return
+        if (wrap === null || size === null) return false
         const vw = wrap.clientWidth
         const vh = wrap.clientHeight
-        const k = Math.min((vw - 16) / size.w, (vh - 16) / size.h, 1)
+        /*
+         * Both axes are constrained, so a graph that is wider than it
+         * is tall lands on the horizontal limit and is centred
+         * vertically (and vice versa) — the diagram always fits, and
+         * the axis it does not fill just gets symmetric slack. Capped
+         * at FIT_MAX_SCALE so a small diagram is enlarged to fill the
+         * canvas without being blown up out of proportion.
+         */
+        const k = Math.min((vw - FIT_MARGIN) / size.w, (vh - FIT_MARGIN) / size.h, FIT_MAX_SCALE)
         view.value = {
             k,
             x: (vw - size.w * k) / 2,
             y: (vh - size.h * k) / 2,
         }
         applyView()
+        return true
     }
 
     function zoomBy(factor: number, cx: number, cy: number): void {
@@ -206,10 +281,10 @@ export function usePanZoom({ wrapRef, contentRef }: UsePanZoomOptions): UsePanZo
         const wrap = wrapRef.value
         const vw = wrap.clientWidth
         const vh = wrap.clientHeight
-        const minX = vw - size.w * view.value.k - 16
-        const minY = vh - size.h * view.value.k - 16
-        const nextX = Math.min(16, Math.max(minX, view.value.x))
-        const nextY = Math.min(16, Math.max(minY, view.value.y))
+        const minX = vw - size.w * view.value.k - FIT_MARGIN
+        const minY = vh - size.h * view.value.k - FIT_MARGIN
+        const nextX = Math.min(FIT_MARGIN, Math.max(minX, view.value.x))
+        const nextY = Math.min(FIT_MARGIN, Math.max(minY, view.value.y))
         view.value = { ...view.value, x: nextX, y: nextY }
         applyView()
     }

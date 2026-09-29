@@ -78,6 +78,40 @@ export function avatarSubject(node: GraphNode | undefined): AgentAvatarSubject {
 }
 
 /**
+ * Inline custom properties that carry the agent's server-resolved
+ * palette onto the tile, for the **initials fallback** branch.
+ *
+ * **The gap this closes.** The package's `Avatar` only paints the
+ * initials tile with `var(--spora-avatar-bg, #475569)` /
+ * `var(--spora-avatar-fg, #f8fafc)` — the two documented theming
+ * hooks. Its archetype branch ignores them (it derives its own inline
+ * gradient from `bg_color` / `fg_color`), so an agent with no
+ * archetype silently fell back to the hard-coded *slate* defaults and
+ * lost its palette entirely: the operator saw a grey "SC" tile on an
+ * agent the dashboard paints green. Feeding the same two resolved hex
+ * values through the hook the package already reads restores the
+ * colour without reimplementing the tile.
+ *
+ * **One source of truth.** The values are read straight off the wire
+ * node — the same `bg_color` / `fg_color` pair
+ * `Spora\Services\AgentPictures\Palette` resolved and the same pair
+ * the detail panel's avatar preview shows. No palette table is
+ * duplicated here.
+ *
+ * Returns an empty object when either colour is missing or is not a
+ * string (an older envelope, or a hand-written fixture), so the
+ * package's own fallbacks apply rather than an `undefined` leaking
+ * into a custom property.
+ */
+export function avatarPaletteStyle(node: GraphNode | undefined): Record<string, string> {
+    const picture = node?.profile_picture
+    if (picture === undefined) return {}
+    const { bg_color: bg, fg_color: fg } = picture
+    if (typeof bg !== 'string' || typeof fg !== 'string') return {}
+    return { '--spora-avatar-bg': bg, '--spora-avatar-fg': fg }
+}
+
+/**
  * Tint strength (percent white) mixed into `statusColor()` for the
  * five wire statuses the shared `STATUS_PALETTE` does not cover:
  * `APPROVED`, `AWAITING_INPUT`, `AWAITING_FINAL_APPROVAL`,

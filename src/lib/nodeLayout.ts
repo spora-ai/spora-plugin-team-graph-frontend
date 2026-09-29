@@ -58,6 +58,12 @@ export interface NodePosition {
     y: number
 }
 
+/** A point in the SVG's own user space. */
+export interface NodeCentre {
+    x: number
+    y: number
+}
+
 /**
  * Parse a Mermaid node DOM id (e.g. `flowchart-n11-2`) back to the
  * wire agent id (`11`). Snapshot-tested so we catch Mermaid upgrades
@@ -125,15 +131,38 @@ export function viewBoxOrigin(viewBox: string | null): { x: number; y: number } 
 }
 
 /**
+ * Read every `g.node`'s own `translate(cx, cy)` — the node's *centre*
+ * in the SVG's own user space, keyed by wire agent id.
+ *
+ * This is the primitive both consumers need: `measureNodePositions`
+ * turns a centre into a card top-left in content-layer pixels, and
+ * `lib/edgeGeometry.ts` needs the same centre to re-anchor an edge
+ * endpoint onto the card's border. Reading it once per consumer would
+ * let the two disagree about what "the node's centre" is.
+ *
+ * Nodes whose id or transform can't be read are skipped rather than
+ * guessed at, so a Mermaid upgrade that changes either format degrades
+ * to "fewer cards" instead of "cards in a heap at (0, 0)".
+ */
+export function measureNodeCentres(svg: SVGSVGElement): Record<number, NodeCentre> {
+    const out: Record<number, NodeCentre> = {}
+    svg.querySelectorAll('g.node').forEach((nodeEl) => {
+        const id = nodeIdFromMermaidId(nodeEl.id)
+        if (id === null) return
+        const centre = parseTranslate(nodeEl.getAttribute('transform'))
+        if (centre === null) return
+        out[id] = { x: centre.x, y: centre.y }
+    })
+    return out
+}
+
+/**
  * Measure every `g.node` in a freshly rendered Mermaid SVG and return
  * the card top-left for each, keyed by wire agent id.
  *
  * Must run *after* the root `viewBox` / `width` / `height` have been
  * pinned (see `composables/useMermaidRender.ts`) — the viewBox origin
  * is the only offset between SVG user space and content-layer pixels.
- * Nodes whose id or transform can't be read are skipped rather than
- * guessed at, so a Mermaid upgrade that changes either format
- * degrades to "fewer cards" instead of "cards in a heap at (0, 0)".
  */
 export function measureNodePositions(
     svg: SVGSVGElement,
@@ -143,15 +172,11 @@ export function measureNodePositions(
     const out: Record<number, NodePosition> = {}
     const origin = viewBoxOrigin(svg.getAttribute('viewBox'))
     if (origin === null) return out
-    svg.querySelectorAll('g.node').forEach((nodeEl) => {
-        const id = nodeIdFromMermaidId(nodeEl.id)
-        if (id === null) return
-        const centre = parseTranslate(nodeEl.getAttribute('transform'))
-        if (centre === null) return
-        out[id] = {
+    for (const [id, centre] of Object.entries(measureNodeCentres(svg))) {
+        out[Number(id)] = {
             x: centre.x - origin.x - cardWidth / 2,
             y: centre.y - origin.y - cardHeight / 2,
         }
-    })
+    }
     return out
 }

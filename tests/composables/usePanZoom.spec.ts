@@ -22,7 +22,8 @@ import { usePanZoom } from '../../src/composables/usePanZoom'
 interface Harness {
     wrapRef: Ref<HTMLElement | null>
     contentRef: Ref<HTMLElement | null>
-    fit: () => void
+    hostRef: Ref<HTMLElement | null>
+    fit: () => boolean
     zoomIn: () => void
     zoomOut: () => void
 }
@@ -44,32 +45,52 @@ function stubLayout(el: Element, width: number, height: number): void {
 }
 
 /**
- * Build the wrap → content → svg structure, hand the composable refs
- * that start empty and are filled afterwards, so the internal
+ * Build the wrap → content → host → svg structure, hand the composable
+ * refs that start empty and are filled afterwards, so the internal
  * `watch(wrapRef, …)` actually fires and attaches the listeners.
- * The returned harness is only usable after the caller's first
- * `await nextTick()`.
+ *
+ * The zoom toolbar's `Icon` components are stubbed in too: each is a
+ * real `<svg>`, and the harness used to leave the wrap holding only
+ * those, so a wrap-scoped `querySelector('svg')` found a 14 × 14
+ * toolbar icon instead of the diagram. That is the bug the `hostRef`
+ * requirement exists to make unrepresentable, so the decoys stay.
  */
 async function mountHarness(svg: Box = SVG, viewport: Box = VIEWPORT): Promise<Harness> {
     const wrap = document.createElement('div')
     wrap.setAttribute('data-testid', 'wrap')
     const content = document.createElement('div')
     content.setAttribute('data-testid', 'content')
+    const host = document.createElement('div')
+    host.setAttribute('data-testid', 'host')
     const svgEl = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
     if (svg.w > 0) svgEl.setAttribute('width', String(svg.w))
     if (svg.h > 0) svgEl.setAttribute('height', String(svg.h))
-    content.appendChild(svgEl)
+    host.appendChild(svgEl)
+    content.appendChild(host)
     wrap.appendChild(content)
+    const toolbar = document.createElement('div')
+    for (const name of ['zoom-in', 'zoom-out', 'zoom-fit']) {
+        const btn = document.createElement('button')
+        btn.setAttribute('data-testid', name)
+        const icon = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
+        icon.setAttribute('class', 'spora-icon')
+        stubLayout(icon, 14, 14)
+        btn.appendChild(icon)
+        toolbar.appendChild(btn)
+    }
+    wrap.appendChild(toolbar)
     document.body.appendChild(wrap)
     stubLayout(wrap, viewport.w, viewport.h)
 
     const wrapRef = ref<HTMLElement | null>(null)
     const contentRef = ref<HTMLElement | null>(null)
-    const api = usePanZoom({ wrapRef, contentRef })
+    const hostRef = ref<HTMLElement | null>(null)
+    const api = usePanZoom({ wrapRef, contentRef, hostRef })
     wrapRef.value = wrap
     contentRef.value = content
+    hostRef.value = host
     await nextTick()
-    return { wrapRef, contentRef, ...api }
+    return { wrapRef, contentRef, hostRef, ...api }
 }
 
 /**
@@ -113,20 +134,70 @@ afterEach(() => {
 })
 
 describe('usePanZoom — fit()', () => {
-    it('centres a diagram smaller than the viewport without upscaling it', async () => {
+    it('enlarges a diagram smaller than the viewport so it fills the canvas', async () => {
         const h = await mountHarness()
+        expect(h.fit()).toBe(true)
+        // k = min(784/400, 584/200, 1.5) = 1.5 — the enlargement cap.
+        // Both axes stay constrained and the slack is split evenly, so
+        // the 400 × 200 diagram becomes 600 × 300 centred in 800 × 600.
+        expect(transformOf(h)).toBe('translate(100px, 150px) scale(1.5)')
+    })
+
+    it('fills the tighter axis and centres the slack on the other one', async () => {
+        // A 4-node graph is wider than it is tall (667 × 401 in a
+        // 722 × 618 canvas): the width binds, and the leftover height
+        // is split above and below the diagram.
+        const h = await mountHarness({ w: 666.75, h: 401 }, { w: 722, h: 618 })
+        expect(h.fit()).toBe(true)
+        const [, x, y, k] = /^translate\((-?[\d.]+)px, (-?[\d.]+)px\) scale\(([\d.]+)\)$/.exec(
+            transformOf(h),
+        ) as RegExpExecArray
+        // k = min(706/666.75, 602/401, 1.5) = 1.0588…
+        expect(Number(k)).toBeCloseTo(1.0588, 3)
+        expect(Number(x)).toBeCloseTo(8, 1)
+        expect(Number(y)).toBeCloseTo((618 - 401 * Number(k)) / 2, 1)
+    })
+
+    it("ignores the zoom toolbar's icon SVGs and measures the diagram", async () => {
+        /*
+         * The regression: `readSvgSize()` used to run
+         * `wrap.querySelector('svg')`, which returns the *first* svg in
+         * document order — and the wrap's own zoom toolbar renders
+         * three `Icon` components, each a 14 × 14 `<svg>`, long before
+         * Mermaid commits the diagram. Measured live, that made `fit()`
+         * compute `translate(373px, 301px) scale(1.5)` from a 12 × 12
+         * "diagram" and threw the real graph off the canvas. The
+         * harness keeps the toolbar icons in the wrap on purpose.
+         */
+        const h = await mountHarness()
+        expect(h.wrapRef.value?.querySelector('svg.spora-icon')).not.toBeNull()
+        expect(transformOf(h)).toBe('')
         h.fit()
-        // k = min(784/400, 584/200, 1) = 1 (never above 1).
-        expect(transformOf(h)).toBe('translate(200px, 200px) scale(1)')
+        // 400 × 200, not 14 × 14: 784/400 = 1.96, 584/200 = 2.92.
+        expect(transformOf(h)).toBe('translate(100px, 150px) scale(1.5)')
+    })
+
+    it('reports "did not fit" and leaves the view alone when no diagram is committed yet', async () => {
+        /*
+         * The other half of the first-load bug: the pending fit was
+         * cleared *before* `fit()` ran, so a fit that fired before
+         * Mermaid resolved was consumed by a no-op and the graph was
+         * never framed. `fit()` now returns false so the caller keeps
+         * its request pending for the render that can satisfy it.
+         */
+        const h = await mountHarness()
+        ;(h.hostRef.value as HTMLElement).innerHTML = ''
+        expect(h.fit()).toBe(false)
+        expect(transformOf(h)).toBe('')
     })
 
     it('scales a diagram larger than the viewport down to fit, centred', async () => {
         const h = await mountHarness({ w: 1600, h: 1200 })
-        h.fit()
+        expect(h.fit()).toBe(true)
         const m = /^translate\((-?[\d.]+)px, (-?[\d.]+)px\) scale\(([\d.]+)\)$/.exec(transformOf(h))
         expect(m).not.toBeNull()
         const [, x, y, k] = m as RegExpExecArray
-        // k = min(784/1600, 584/1200, 1) = 0.48666…
+        // k = min(784/1600, 584/1200, 1.5) = 0.48666…
         expect(Number(k)).toBeCloseTo(0.4867, 3)
         // x / y centre the scaled 1600 × 1200 box in 800 × 600.
         expect(Number(x)).toBeCloseTo((800 - 1600 * Number(k)) / 2, 1)
@@ -135,25 +206,25 @@ describe('usePanZoom — fit()', () => {
 
     it('falls back to clientWidth/clientHeight when the SVG has no size attributes', async () => {
         const h = await mountHarness({ w: 0, h: 0 })
-        const svgEl = h.wrapRef.value?.querySelector('svg') as SVGElement
+        const svgEl = h.hostRef.value?.querySelector('svg') as SVGElement
         stubLayout(svgEl, 400, 200)
-        expect(() => h.fit()).not.toThrow()
-        expect(transformOf(h)).toBe('translate(200px, 200px) scale(1)')
+        expect(h.fit()).toBe(true)
+        expect(transformOf(h)).toBe('translate(100px, 150px) scale(1.5)')
     })
 
     it('no-ops when the SVG reports a zero size', async () => {
         const h = await mountHarness()
-        const svgEl = h.wrapRef.value?.querySelector('svg') as SVGElement
+        const svgEl = h.hostRef.value?.querySelector('svg') as SVGElement
         svgEl.setAttribute('width', '0')
         svgEl.setAttribute('height', '0')
         stubLayout(svgEl, 0, 0)
-        h.fit()
+        expect(h.fit()).toBe(false)
         expect(transformOf(h)).toBe('')
     })
 
     it('no-ops before the wrap is mounted (first render lands late)', () => {
-        const api = usePanZoom({ wrapRef: ref(null), contentRef: ref(null) })
-        expect(() => api.fit()).not.toThrow()
+        const api = usePanZoom({ wrapRef: ref(null), contentRef: ref(null), hostRef: ref(null) })
+        expect(api.fit()).toBe(false)
         expect(() => api.zoomIn()).not.toThrow()
         expect(() => api.zoomOut()).not.toThrow()
     })
@@ -164,10 +235,11 @@ describe('usePanZoom — fit()', () => {
         document.body.appendChild(wrap)
         const wrapRef = ref<HTMLElement | null>(null)
         const contentRef = ref<HTMLElement | null>(null)
-        const api = usePanZoom({ wrapRef, contentRef })
+        const hostRef = ref<HTMLElement | null>(null)
+        const api = usePanZoom({ wrapRef, contentRef, hostRef })
         wrapRef.value = wrap
         await nextTick()
-        expect(() => api.fit()).not.toThrow()
+        expect(api.fit()).toBe(false)
     })
 })
 
@@ -330,11 +402,15 @@ describe('usePanZoom — window resize', () => {
         const h = await mountHarness()
         const wrap = h.wrapRef.value as HTMLElement
         h.fit()
+        // fit() enlarges to the FIT_MAX_SCALE cap, so the drag starts
+        // from translate(100px, 150px) scale(1.5) — what this is about
+        // is the pan delta and the resize clamp, not the scale.
+        expect(transformOf(h)).toBe('translate(100px, 150px) scale(1.5)')
         wrap.dispatchEvent(down(wrap, 0, 0, 11))
         wrap.dispatchEvent(move(wrap, 5000, 5000, 11))
-        expect(transformOf(h)).toBe('translate(5200px, 5200px) scale(1)')
+        expect(transformOf(h)).toBe('translate(5100px, 5150px) scale(1.5)')
         window.dispatchEvent(new Event('resize'))
-        expect(transformOf(h)).toBe('translate(16px, 16px) scale(1)')
+        expect(transformOf(h)).toBe('translate(16px, 16px) scale(1.5)')
     })
 
     it('leaves a view that is already inside the clamp window untouched', async () => {
@@ -348,7 +424,7 @@ describe('usePanZoom — window resize', () => {
     })
 
     it('is a no-op when the wrap is not mounted or the SVG is not rendered yet', () => {
-        const api = usePanZoom({ wrapRef: ref(null), contentRef: ref(null) })
+        const api = usePanZoom({ wrapRef: ref(null), contentRef: ref(null), hostRef: ref(null) })
         expect(() => window.dispatchEvent(new Event('resize'))).not.toThrow()
         expect(api.fit).toBeTypeOf('function')
     })
@@ -356,12 +432,13 @@ describe('usePanZoom — window resize', () => {
     it('detaches every listener on unmount', async () => {
         const wrapper = mount(
             {
-                template: '<div ref="wrapRef" data-testid="wrap"><div ref="contentRef" data-testid="content"><svg width="400" height="200" /></div></div>',
+                template: '<div ref="wrapRef" data-testid="wrap"><div ref="contentRef" data-testid="content"><div ref="hostRef" data-testid="host"><svg width="400" height="200" /></div></div></div>',
                 setup() {
                     const wrapRef = ref<HTMLElement | null>(null)
                     const contentRef = ref<HTMLElement | null>(null)
-                    const api = usePanZoom({ wrapRef, contentRef })
-                    return { wrapRef, contentRef, api }
+                    const hostRef = ref<HTMLElement | null>(null)
+                    const api = usePanZoom({ wrapRef, contentRef, hostRef })
+                    return { wrapRef, contentRef, hostRef, api }
                 },
             },
             { attachTo: document.body },

@@ -92,6 +92,68 @@ beforeEach(() => {
     })
 })
 
+describe('TeamGraphCanvas — the first graph is framed', () => {
+    /*
+     * The regression, measured live: on the real first load the page
+     * mounts with `graph === null`, the payload arrives, the principal
+     * watcher schedules a fit — and Mermaid has still not resolved, so
+     * there is no SVG to measure. The old code cleared `pendingFit`
+     * *before* calling `fit()`, so that no-op consumed the request and
+     * the `onRender` fit (the only one that runs after the SVG
+     * exists) saw a cleared flag. The graph was left at the
+     * untransformed default: origin, scale 1, a small band in the
+     * corner of a large empty canvas.
+     *
+     * The Mermaid mock is held pending on purpose so the ordering is
+     * deterministic — in the real browser the fit landed before the
+     * render on a fast machine and after it on a slow one, which is
+     * exactly why the bug was intermittent.
+     */
+    async function mountAndFrame(graph: GraphPayload): Promise<ReturnType<typeof mount>> {
+        let release: (v: { svg: string }) => void = () => {}
+        renderFn.mockReturnValueOnce(
+            new Promise<{ svg: string }>((resolve) => {
+                release = resolve
+            }),
+        )
+        const wrapper = mount(TeamGraphCanvas, { props: { graph: null } })
+        await nextTick()
+
+        // The payload lands; the principal watcher schedules a fit while
+        // the render is still in flight.
+        await wrapper.setProps({ graph })
+        await nextTick()
+        await flushRafs()
+        await flushRafs()
+
+        // Now let Mermaid answer. This is the moment the SVG appears.
+        release({
+            svg: '<svg viewBox="0 0 200 100" width="200" height="100"><g class="node" id="flowchart-n1-0"></g></svg>',
+        })
+        await flushPromises()
+        await flushRafs()
+        await flushRafs()
+        return wrapper
+    }
+
+    it('still frames the graph when the fit request predates the render', async () => {
+        const wrapper = await mountAndFrame(makeGraph(1, [1, 2, 3], [[1, 2]]))
+        expect(wrapper.find('[data-testid="tg-mermaid-host"]').html()).toContain('<svg')
+        const transform = (wrapper.find('.tg-canvas-content').element as HTMLElement).style.transform
+        expect(transform).toMatch(/scale\(/)
+    })
+
+    it('leaves the content layer untouched while there is still no diagram', async () => {
+        const wrapper = mount(TeamGraphCanvas, { props: { graph: null } })
+        await flushPromises()
+        await flushRafs()
+        await flushRafs()
+        // Nothing to measure, so nothing is written — a fit against a
+        // non-existent diagram is what used to strand the view.
+        expect(wrapper.find('.tg-canvas-content').element.getAttribute('style') ?? '').not.toContain('scale(')
+    })
+})
+
 describe('TeamGraphCanvas — view reset on principal change', () => {
     it('resets the view when the principal changes (different graph)', async () => {
         const graphA = makeGraph(1, [1, 2, 3], [[1, 2]])

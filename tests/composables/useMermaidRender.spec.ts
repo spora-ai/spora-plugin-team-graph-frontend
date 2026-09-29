@@ -8,6 +8,7 @@ import {
     SVG_PADDING,
     nodeIdFromMermaidId,
 } from '../../src/lib/nodeLayout'
+import { parsePathPoints } from '../../src/lib/edgeGeometry'
 import { useSelectionStore } from '../../src/stores/selection'
 import type { GraphPayload } from '../../src/types'
 
@@ -49,7 +50,13 @@ function makeSvgFixture(centres: Array<[number, [number, number]]> = [[1, [200, 
         )
         .join('')
     return `<svg viewBox="0 0 200 100" style="max-width: 200px" width="200" height="100">${nodes}` +
-        `<path class="flowchart-link LS-n1 LE-n2" id="L-n1-n2-0" d="M200 52 L200 148" /></svg>`
+        `<path class="flowchart-link LS-n1 LE-n2" id="L-n1-n2-0" d="M200 52 L200 148" />` +
+        // The path Mermaid 10 really emits for a `curveBasis` edge:
+        // `M <start> L <control> C … C … L <end>`.
+        `<path class="flowchart-link LS-n1 LE-n2" id="L-n1-n2-9" d="M185,58L170,64C150,70,120,80,105,90C90,100,90,110,90,115L90,120" />` +
+        `<path class="flowchart-link" id="L-unparseable" d="M0,0H10" />` +
+        `<path class="flowchart-link" id="L-n1-n99-0" d="M200 52 L200 148" />` +
+        `</svg>`
 }
 
 const tinyStartup: GraphPayload = {
@@ -346,6 +353,81 @@ describe('useMermaidRender — post-processing', () => {
         await vi.waitFor(() => expect(renderFn).toHaveBeenCalledTimes(2))
         expect(Object.keys(positions.value)).toEqual(['1'])
         expect(positions.value[1]).not.toEqual(first[1])
+    })
+})
+
+describe('useMermaidRender — edge re-anchoring', () => {
+    it('moves every edge endpoint onto the card borders', async () => {
+        renderFn.mockResolvedValue({ svg: makeSvgFixture() })
+        const el = host()
+        useMermaidRender({ hostRef: ref<HTMLElement | null>(el), graph: ref<GraphPayload | null>(tinyStartup) })
+        await vi.waitFor(() => expect(renderFn).toHaveBeenCalledTimes(1))
+        const svg = el.querySelector('svg') as SVGSVGElement
+        const centre = (id: number): { x: number; y: number } => {
+            const t = /translate\(([-\d.]+), ([-\d.]+)\)/.exec(
+                (svg.querySelector(`#flowchart-n${id}-0`) as SVGGElement).getAttribute('transform') ?? '',
+            ) as RegExpExecArray
+            return { x: Number(t[1]), y: Number(t[2]) }
+        }
+        for (const path of [...svg.querySelectorAll('path.flowchart-link')]) {
+            const id = path.id
+            const m = /^L-n(\d+)-n(\d+)/.exec(id)
+            if (m === null) continue
+            const [src, tgt] = [Number(m[1]), Number(m[2])]
+            // n99 is a decoy with no `g.node`; it must come back byte
+            // identical, and "on the border" is vacuously true for it.
+            if (svg.querySelector(`#flowchart-n${src}-0`) === null) continue
+            if (svg.querySelector(`#flowchart-n${tgt}-0`) === null) continue
+            const segments = parsePathPoints(path.getAttribute('d') ?? '')
+            if (segments === null) continue
+            const points = segments.flatMap((seg) => seg.points)
+            const first = points[0] as { x: number; y: number }
+            const last = points[points.length - 1] as { x: number; y: number }
+            // Exactly on the source card's border: |dx| = 120 or |dy| = 38.
+            const onSource = Math.abs(Math.abs(first.x - centre(src).x) - NODE_CARD_WIDTH / 2) < 0.01 ||
+                Math.abs(Math.abs(first.y - centre(src).y) - NODE_CARD_HEIGHT / 2) < 0.01
+            const onTarget = Math.abs(Math.abs(last.x - centre(tgt).x) - NODE_CARD_WIDTH / 2) < 0.01 ||
+                Math.abs(Math.abs(last.y - centre(tgt).y) - NODE_CARD_HEIGHT / 2) < 0.01
+            expect(onSource, `start of ${id}`).toBe(true)
+            expect(onTarget, `end of ${id}`).toBe(true)
+        }
+    })
+
+    it('leaves a path it cannot parse exactly as Mermaid wrote it', async () => {
+        renderFn.mockResolvedValue({ svg: makeSvgFixture() })
+        const el = host()
+        useMermaidRender({ hostRef: ref<HTMLElement | null>(el), graph: ref<GraphPayload | null>(tinyStartup) })
+        await vi.waitFor(() => expect(renderFn).toHaveBeenCalledTimes(1))
+        const bad = el.querySelector('#L-unparseable') as SVGElement
+        expect(bad.getAttribute('d')).toBe('M0,0H10')
+    })
+
+    it('leaves an edge whose target node was never placed untouched', async () => {
+        renderFn.mockResolvedValue({ svg: makeSvgFixture() })
+        const el = host()
+        useMermaidRender({ hostRef: ref<HTMLElement | null>(el), graph: ref<GraphPayload | null>(tinyStartup) })
+        await vi.waitFor(() => expect(renderFn).toHaveBeenCalledTimes(1))
+        // n99 has no `g.node`, so there is no centre to aim at.
+        const orphan = el.querySelector('#L-n1-n99-0') as SVGElement
+        expect(orphan.getAttribute('d')).toBe('M200 52 L200 148')
+    })
+
+    it('stamps fill:none / stroke:none on every node box it resizes', async () => {
+        renderFn.mockResolvedValue({ svg: makeSvgFixture() })
+        const el = host()
+        useMermaidRender({ hostRef: ref<HTMLElement | null>(el), graph: ref<GraphPayload | null>(tinyStartup) })
+        await vi.waitFor(() => expect(renderFn).toHaveBeenCalledTimes(1))
+        const rects = [...el.querySelectorAll('g.node rect')] as SVGRectElement[]
+        expect(rects.length).toBeGreaterThan(0)
+        for (const rect of rects) {
+            // An inline declaration outranks the `<style>` Mermaid
+            // injects into the SVG, so the boxes stay unpainted even if
+            // the plugin's own stylesheet never loads — the case where
+            // Mermaid's default theme would paint them #ECECFF with a
+            // #9370DB stroke, straight over cards with no surface.
+            expect(rect.style.fill).toBe('none')
+            expect(rect.style.stroke).toBe('none')
+        }
     })
 })
 
