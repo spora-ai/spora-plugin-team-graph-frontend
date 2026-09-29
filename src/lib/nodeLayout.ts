@@ -35,14 +35,86 @@
  */
 
 /**
- * Card footprint in content-layer pixels. Mirrored by
- * `.tg-node-card { width; height }` in `style.css`; the two must
- * stay equal or the cards drift from the space Mermaid reserved for
- * them. 240 px is fixed by the Variant M prototype — the card never
+ * Card footprint in content-layer pixels — the single source of truth
+ * for every consumer of the box.
+ *
+ * **Three consumers, one number.** `measureNodePositions` turns a node
+ * centre into a card top-left with it, `useMermaidRender` grows each
+ * `g.node` rect to it so dagre's spacing accounts for the card, and
+ * `reanchorEdges` walks each arrow tip onto its border with the same
+ * half-extents. They are all this module, so they cannot disagree
+ * with each other. The fourth consumer — the CSS that actually paints
+ * the box — used to carry its own `width: 240px; height: 76px`
+ * literal, which is the seam the two earlier regressions came through:
+ * resizing the card in one place left the other three describing a box
+ * that no longer existed, and the arrowheads detached. So the card
+ * takes its `width` / `height` as **inline** declarations built from
+ * these constants (`AgentNodeCard.vue → cardStyle`), and `style.css`
+ * carries no footprint literal at all. `tests/style.spec.ts` asserts
+ * that, and `tests/lib/nodeLayout.spec.ts` asserts the arithmetic.
+ *
+ * 240 px of width is fixed by the Variant M prototype — the card never
  * grows with the agent name (the name ellipsises instead).
  */
 export const NODE_CARD_WIDTH = 240
-export const NODE_CARD_HEIGHT = 76
+
+/**
+ * Avatar tile edge, in px — the package's `size="md"`
+ * (`2.75rem`, i.e. 44 px at the default root size).
+ *
+ * **Why the tile is pinned in px rather than left to the package's
+ * `rem`.** `.avatar--md` is `2.75rem`, so its rendered edge tracks the
+ * *root* font size, while the card's height is a fixed px box. A host
+ * that set `html { font-size: 18px }` would therefore paint a 49.5 px
+ * tile inside a box derived from 44 px, and the tile would spill past
+ * the headline row it is supposed to sit on. The card therefore states
+ * the edge itself (`.tg-node-card-avatar { inline-size: var(--tg-avatar-size) }`)
+ * and reuses the same number for the row the headline is centred in, so
+ * the two cannot drift from each other or from `NODE_CARD_HEIGHT`.
+ */
+export const NODE_CARD_AVATAR_SIZE = 44
+
+/**
+ * The card's block padding, its border, the gap between the two rows
+ * and the status row's reserved height — the four terms of
+ * `NODE_CARD_HEIGHT` below. They are named (rather than inlined into
+ * the sum) so the height reads as the equation the stylesheet
+ * implements, and so a future resize changes one line.
+ *
+ * `NODE_CARD_ROW2_MIN_HEIGHT` is not cosmetic: the status pill wraps to
+ * two or three lines inside the fixed-width card, so the row's height
+ * would otherwise vary with the *status* and the card would stop being a
+ * fixed box. Reserving the pill's **three**-line height is what makes one
+ * `NODE_CARD_HEIGHT` correct for every agent. Three, not two, because the
+ * shared `STATUS_PALETTE`'s longest label ("awaiting final approval")
+ * does not fit on two inside the pill's 92 px `max-width` beside the
+ * edge badges: measured at 45.563 px tall — 3 × the 13.2 px line box
+ * plus 6 px of block padding — where a two-line reserve is 32.4 px, and
+ * the two-line card put that pill 0.563 px *below* its bottom edge. The
+ * team-graph endpoint only ever emits `RUNNING` /
+ * `AWAITING_SUB_AGENTS` / `PENDING_APPROVAL` / `COMPLETED` (see
+ * `NodeResolver::resolveNodes`'s `status IN (…)` sub-select), whose
+ * longest label is two lines, so the third line is headroom for the
+ * `AWAITING_FINAL_APPROVAL` row `WireStatus` is widened to tolerate —
+ * bought here rather than paid for as a card that overflows.
+ */
+export const NODE_CARD_BORDER = 1.5
+export const NODE_CARD_PADDING_BLOCK = 9
+export const NODE_CARD_ROW_GAP = 4
+export const NODE_CARD_ROW2_MIN_HEIGHT = 46
+
+/**
+ * Card height in content-layer pixels, *derived* from the parts above
+ * rather than authored beside them: border + block padding + the
+ * headline row (which is exactly the tile's edge, so the headline is
+ * centred on the tile) + the row gap + the status row.
+ */
+export const NODE_CARD_HEIGHT =
+    NODE_CARD_BORDER * 2 +
+    NODE_CARD_PADDING_BLOCK * 2 +
+    NODE_CARD_AVATAR_SIZE +
+    NODE_CARD_ROW_GAP +
+    NODE_CARD_ROW2_MIN_HEIGHT
 
 /**
  * Padding between the rendered content's bounding box and the

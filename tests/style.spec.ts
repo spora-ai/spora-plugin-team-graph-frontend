@@ -94,9 +94,26 @@ describe('style.css — the card always paints an opaque prototype-M surface', (
         expect(rule).toContain('border: 1.5px solid #7c3aed')
         expect(rule).toContain('border-radius: 10px')
         expect(rule).toContain('padding: 9px 13px')
-        expect(rule).toContain('width: 240px')
-        expect(rule).toContain('height: 76px')
         expect(rule).toContain('box-shadow: 0 2px 6px -2px rgba(15, 23, 41, 0.08)')
+    })
+
+    it('does not paint the box here — the footprint comes from the constants', () => {
+        /*
+         * `width` / `height` moved to the card's inline style
+         * (`AgentNodeCard.vue` builds them from `NODE_CARD_WIDTH` /
+         * `NODE_CARD_HEIGHT`). The card's box is load-bearing in four
+         * places — the painted card, the overlay's `translate3d`, the
+         * `g.node` rect `useMermaidRender` grows, and the border
+         * `edgeGeometry` walks each arrow tip onto — and three of them
+         * read the constants. A literal here is a fourth, independent
+         * copy: every earlier regression on this card arrived through
+         * exactly that seam, with the arrowheads left describing a box
+         * that no longer existed. The arithmetic behind the constants is
+         * asserted in `tests/lib/nodeLayout.spec.ts`.
+         */
+        const rule = declarationsFor('.tg-node-card')
+        expect(rule).not.toMatch(/(?:^|[\s;])width\s*:/)
+        expect(rule).not.toMatch(/(?:^|[\s;])height\s*:/)
     })
 
     it('never fades the card itself — only its contents', () => {
@@ -122,14 +139,35 @@ describe('style.css — the card always paints an opaque prototype-M surface', (
 })
 
 describe('style.css — the avatar tile shape', () => {
-    it('forces the initials tile to the prototype\'s rounded square, unlayered', () => {
-        // The package ships `.avatar--initials[data-v-0a52efe6] { border-radius: 9999px }`
-        // inside `@layer components`; an unlayered rule beats a layered
-        // one regardless of specificity, which is why this needs no
-        // `!important`. `.avatar--sm`, the archetype branch, is 0.5rem.
+    it('forces one radius on the tile element, for every Avatar branch', () => {
+        /*
+         * The package does not give the branches a shared silhouette:
+         * `.avatar--sm` is `.5rem`, `.avatar--md` is **`.75rem`**, and
+         * `.avatar--initials` is forced to `9999px` whatever the size. The
+         * rule therefore targets the tile itself, not the initials
+         * modifier — otherwise moving the card up a size step would have
+         * made the *same* card draw a 12 px-rounded square for an agent
+         * with an archetype and a circle for one without.
+         *
+         * It stays unlayered, which is the whole mechanism: the package
+         * ships those rules inside `@layer components`, and unlayered
+         * author rules beat layered ones regardless of specificity. That
+         * is why the override needs no `!important`.
+         */
         expect(css).toContain(
-            '.tg-node-card-avatar.avatar--initials, .tg-agent-tile .avatar--initials, .tg-agent-tile { border-radius: 0.5rem; }',
+            '.tg-node-card-avatar, .tg-node-card-avatar.avatar--initials, ' +
+            '.tg-agent-tile .avatar--initials, .tg-agent-tile { border-radius: 0.5rem; }',
         )
+    })
+
+    it('sizes the tile from a custom property, not from the package\'s rem', () => {
+        // `.avatar--md` is `2.75rem`, which resolves against the *root*
+        // font size while the card is a fixed px box — so a host that set
+        // `html { font-size: 18px }` would paint a 49.5 px tile in a box
+        // derived from 44 px. The card states the edge itself.
+        expect(css).toContain('.tg-node-card-avatar {')
+        expect(declarationsFor('.tg-node-card-avatar')).toContain('inline-size: var(--tg-avatar-size)')
+        expect(declarationsFor('.tg-node-card-avatar')).toContain('block-size: var(--tg-avatar-size)')
     })
 
     it('gives the detail-panel status ring the same radius as the tile it wraps', () => {

@@ -5,16 +5,17 @@
  * (`dagre-d3-es/src/dagre-js/create-nodes.js` takes the label's
  * `getBBox()`), and `intersectRect()` routes every edge endpoint to that
  * same box — the routing is baked into the path's `d` before anything
- * else runs. The card, on the other hand, is a fixed 240 × 76 box drawn
- * by a Vue component (`lib/nodeLayout.ts`), and `useMermaidRender` grows
- * the SVG's `g.node rect` to match *after* the render, because the
- * layout maths and the viewBox need the bigger box. Growing the rect
- * therefore fixes the box the card covers and the box `getBBox()`
- * measures, but it cannot move an edge endpoint that was already
- * computed against the smaller label box. Measured on the 4-node dev
- * fixture: node 11's label box is 147 × 42, so its outgoing edge left
- * the endpoint 17 px *inside* the card and arrived 11.7 px *inside* the
- * target — the arrows visibly floated in the gap between the boxes.
+ * else runs. The card, on the other hand, is a fixed
+ * `NODE_CARD_WIDTH` × `NODE_CARD_HEIGHT` box drawn by a Vue component
+ * (`lib/nodeLayout.ts`), and `useMermaidRender` grows the SVG's
+ * `g.node rect` to match *after* the render, because the layout maths and
+ * the viewBox need the bigger box. Growing the rect therefore fixes the
+ * box the card covers and the box `getBBox()` measures, but it cannot
+ * move an edge endpoint that was already computed against the smaller
+ * label box. Measured on the 4-node dev fixture: node 11's label box is
+ * 147 × 42, so its outgoing edge left the endpoint 17 px *inside* the
+ * card and arrived 11.7 px *inside* the target — the arrows visibly
+ * floated in the gap between the boxes.
  *
  * **The fix is geometric, not a re-layout.** For each edge we know the
  * two node centres, and Mermaid routed along the ray from a node's

@@ -11,12 +11,12 @@ import { NODE_CARD_HEIGHT, NODE_CARD_WIDTH } from '../../src/lib/nodeLayout'
  * `lib/edgeGeometry.ts` — re-anchoring Mermaid's edges onto the cards.
  *
  * Mermaid sizes a node box from its *label* and routes every edge
- * endpoint to that box, so growing the rect to the 240 × 76 card
- * footprint afterwards (which `useMermaidRender` does, because the
- * layout maths needs the bigger box) leaves the arrows short of the
- * cards. These tests pin the geometry that closes that gap: an
- * endpoint walks out along the ray from its node's centre to the
- * card's border, carrying its control point so the curve stays smooth.
+ * endpoint to that box, so growing the rect to the card footprint
+ * afterwards (which `useMermaidRender` does, because the layout maths
+ * needs the bigger box) leaves the arrows short of the cards. These
+ * tests pin the geometry that closes that gap: an endpoint walks out
+ * along the ray from its node's centre to the card's border, carrying
+ * its control point so the curve stays smooth.
  */
 
 /** The exact `d` Mermaid 10 emits for one `curveBasis` edge. */
@@ -133,10 +133,26 @@ describe('reanchorEdgePath', () => {
         const out = reanchorEdgePath(MERMAID_D, source, target, halfW, halfH)
         expect(out).not.toBeNull()
         const { first, last } = endpoint(out!)
-        // Start: on the source card's bottom border (y = cy + halfH).
-        expect(first.y).toBeCloseTo(source.y + halfH, 3)
-        // Both are vertical rays, so x follows the centre.
-        expect(first.x).toBeLessThan(source.x)
+        // Start: on the source card's border, 0.000 px outside it.
+        //
+        // Measured against the *rect*, not against "x is half a card to
+        // the left OR y is half a card below": the ray from this centre
+        // through the path's first point leaves through the vertical edge
+        // at `halfH = 38` and through the left edge at
+        // `halfH = 57.5` (the taller card), so an axis-wise assertion
+        // would be silently describing whichever edge the current
+        // footprint happens to pick.
+        const onBorder = (p: { x: number; y: number }, c: { x: number; y: number }): number => {
+            const dx = Math.abs(p.x - c.x)
+            const dy = Math.abs(p.y - c.y)
+            if (dx <= halfW && dy <= halfH) return Math.min(halfW - dx, halfH - dy)
+            return Math.hypot(Math.max(dx - halfW, 0), Math.max(dy - halfH, 0))
+        }
+        expect(onBorder(first, source)).toBeCloseTo(0, 3)
+        // …and it is on the *source's* border, not the target's: these
+        // two centres are 138 apart and the card is 115 tall, so they
+        // cannot be the same box.
+        expect(onBorder(first, target)).toBeGreaterThan(0)
         expect(last.x).toBeCloseTo(target.x, 3)
     })
 
@@ -308,5 +324,153 @@ describe('reanchorEdgePath', () => {
     it('returns null for a path it cannot parse, so the attribute is left alone', () => {
         expect(reanchorEdgePath('', source, target, halfW, halfH)).toBeNull()
         expect(reanchorEdgePath('M0,0H10', source, target, halfW, halfH)).toBeNull()
+    })
+})
+
+/**
+ * The coupling this file exists for.
+ *
+ * The card's box is described in **three** places that all have to
+ * agree, and two of the three earlier regressions on this canvas came
+ * from them disagreeing:
+ *
+ *   - `useMermaidRender` grows each `g.node` rect to the footprint, so
+ *     dagre's spacing reserves room for the card and `getBBox()` (and
+ *     therefore the `viewBox`) encloses it;
+ *   - `edgeGeometry.reanchorEdgePath` walks each endpoint onto that same
+ *     box's border;
+ *   - `AgentNodeCard` paints it, from the same constants.
+ *
+ * Nothing at runtime can catch a drift between the first two — they
+ * are separate passes over separate data, and a mismatch does not throw,
+ * it just draws an arrowhead in the gap. So it is asserted here, at the
+ * one level where all the numbers are known: re-anchor a real
+ * `curveBasis` path with the shipped constants and measure where the
+ * **tip** (not the path end) lands against the very rect
+ * `useMermaidRender` writes.
+ */
+describe('the arrowhead tip lands on the card box, at the shipped footprint', () => {
+    const halfW = NODE_CARD_WIDTH / 2
+    const halfH = NODE_CARD_HEIGHT / 2
+
+    /** The rect `useMermaidRender.renderInto` writes on every `g.node`. */
+    const cardRect = { x: -halfW, y: -halfH, w: NODE_CARD_WIDTH, h: NODE_CARD_HEIGHT }
+
+    /**
+     * Shortest distance from a point to the card's **outline** — 0 on the
+     * border, and the gap to the nearest edge when the point is inside.
+     *
+     * Not the distance to the *filled* box (which is 0 for anything
+     * inside, and so would call a path end 4.8 units short of the border
+     * "on" it), and not an axis-wise "is |dx| half the width?" (which
+     * reads a diagonal endpoint as on the border the moment one of its
+     * two components happens to match).
+     */
+    function distanceToBorder(p: { x: number; y: number }): number {
+        const halfW = NODE_CARD_WIDTH / 2
+        const halfH = NODE_CARD_HEIGHT / 2
+        const ax = Math.abs(p.x)
+        const ay = Math.abs(p.y)
+        if (ax <= halfW && ay <= halfH) return Math.min(halfW - ax, halfH - ay)
+        return Math.hypot(Math.max(ax - halfW, 0), Math.max(ay - halfH, 0))
+    }
+
+    function endOf(d: string): { first: { x: number; y: number }; last: { x: number; y: number }; unit: { x: number; y: number } } {
+        const points = parsePathPoints(d)!.flatMap((s) => s.points)
+        const first = points[0]!
+        const last = points[points.length - 1]!
+        const prev = points[points.length - 2]!
+        const len = Math.hypot(last.x - prev.x, last.y - prev.y) || 1
+        return { first, last, unit: { x: (last.x - prev.x) / len, y: (last.y - prev.y) / len } }
+    }
+
+    /**
+     * The dagre layout of the 7-agent dev graph after the card grew to
+     * 240 × 115: the sources sit in the top rank, the targets in the one
+     * below, and the four sub-edges of each source fan out sideways.
+     *
+     * Each `d` is written so its own first point sits on the ray from its
+     * source centre and its last point on the ray into its target — the
+     * same relationship Mermaid's router produces, and the one
+     * `reanchorEdgePath` relies on.
+     */
+    const topRankY = 21
+    const bottomRankY = 21 + NODE_CARD_HEIGHT + 20 + NODE_CARD_HEIGHT
+    const straightDown = (x: number): string =>
+        `M${x - 40},${topRankY + 21}C${x - 40},${topRankY + 60} ${x - 40},${bottomRankY - 60} ${x - 40},${bottomRankY - 40}`
+    const fan = (from: number, to: number): string => {
+        const y0 = topRankY + 21
+        const y1 = bottomRankY - 40
+        return `M${from},${y0}C${from},${y0 + 40} ${to},${y1 - 40} ${to},${y1}`
+    }
+    const cases: Array<{ name: string; src: { x: number; y: number }; tgt: { x: number; y: number }; d: string }> = [
+        {
+            name: 'straight down (two ranks apart)',
+            src: { x: 620.578125, y: topRankY },
+            tgt: { x: 620.578125, y: bottomRankY },
+            d: straightDown(620.578125),
+        },
+        {
+            name: 'diagonal, down and to the left',
+            src: { x: 1035.6171875, y: topRankY },
+            tgt: { x: 640.0, y: bottomRankY },
+            d: fan(1035.6171875, 640.0),
+        },
+        {
+            name: 'diagonal, down and to the right',
+            src: { x: 205.6171875, y: topRankY },
+            tgt: { x: 601.2, y: bottomRankY },
+            d: fan(205.6171875, 601.2),
+        },
+        {
+            name: 'sideways within a rank (nodesep, not ranksep)',
+            src: { x: 300, y: topRankY },
+            tgt: { x: 300 + NODE_CARD_WIDTH + 20, y: topRankY },
+            // The path's own endpoints are *offset* from the node centres,
+            // the way Mermaid's router leaves them: `cardBorderPoint`
+            // walks the ray from the centre through the endpoint, so an
+            // endpoint sitting exactly on its own centre has no ray and
+            // degenerates to the centre itself.
+            d: `M260,${topRankY}C340,${topRankY} ${300 + NODE_CARD_WIDTH},${topRankY} ${300 + NODE_CARD_WIDTH + 50},${topRankY}`,
+        },
+    ]
+
+    for (const { name, src, tgt, d } of cases) {
+        it(`puts the tip on the border for an edge that runs ${name}`, () => {
+            const out = reanchorEdgePath(d, src, tgt, halfW, halfH)!
+            const { first, last, unit } = endOf(out)
+            // The start point is not compensated (Mermaid emits no
+            // `marker-start`), so it sits on the source border.
+            expect(distanceToBorder({ x: first.x - src.x, y: first.y - src.y })).toBeCloseTo(0, 3)
+            // The path end is one arrowhead short of it, along the
+            // direction the marker is actually drawn.
+            const tip = { x: last.x + ARROWHEAD_OVERSHOOT * unit.x, y: last.y + ARROWHEAD_OVERSHOOT * unit.y }
+            // The tip is ON the border — not floating in the gap between
+            // the boxes, and not buried under the opaque card where it
+            // would read as a clipped arrowhead.
+            expect(distanceToBorder({ x: tip.x - tgt.x, y: tip.y - tgt.y })).toBeCloseTo(0, 3)
+            // …and the path end really is one arrowhead short of it.
+            expect(distanceToBorder({ x: last.x - tgt.x, y: last.y - tgt.y })).toBeCloseTo(ARROWHEAD_OVERSHOOT, 3)
+        })
+    }
+
+    it('grows the node rect to exactly the box the endpoints are aimed at', () => {
+        // The two passes in `useMermaidRender`, asserted as one: the rect
+        // it writes and the half-extents it hands `reanchorEdgePath` are
+        // the same numbers, and the border the ray leaves from is one of
+        // that rect's own four edges.
+        expect(cardRect).toEqual({ x: -120, y: -57.5, w: 240, h: 115 })
+        const c = { x: 500, y: 500 }
+        // Straight up → the top edge; straight left → the left edge.
+        expect(cardBorderPoint(c, { x: 500, y: 200 }, halfW, halfH)).toEqual({ x: 500, y: 500 - halfH })
+        expect(cardBorderPoint(c, { x: 200, y: 500 }, halfW, halfH)).toEqual({ x: 500 - halfW, y: 500 })
+        // A shallow ray leaves through the vertical edge, but not at the
+        // centre's height — which is the case an axis-wise "is it at half
+        // the width?" check would accept without ever looking at y.
+        const shallow = cardBorderPoint(c, { x: 0, y: 495 }, halfW, halfH)
+        expect(shallow.x).toBe(500 - halfW)
+        expect(shallow.y).not.toBeCloseTo(500, 3)
+        // t = halfW / 500 = 0.24, so the ray has covered 24 % of its dy.
+        expect(shallow.y).toBeCloseTo(500 - 5 * (halfW / 500), 3)
     })
 })

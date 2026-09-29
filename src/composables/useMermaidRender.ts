@@ -190,11 +190,12 @@ export function useMermaidRender({ hostRef, graph, onRender }: UseMermaidRenderO
         /*
          * Mermaid routed every edge against the *label* box it measured
          * before the render; the rects above have since been grown to the
-         * 240 × 76 card footprint, so the endpoints now sit inside (or
-         * short of) the cards. Walk each endpoint out along the same ray
-         * to the card's border, translating the adjacent control point by
-         * the same delta so the curve stays smooth. See
-         * `lib/edgeGeometry.ts` for the measurement that motivates it.
+         * `NODE_CARD_WIDTH` × `NODE_CARD_HEIGHT` card footprint, so the
+         * endpoints now sit inside (or short of) the cards. Walk each
+         * endpoint out along the same ray to the card's border,
+         * translating the adjacent control point by the same delta so the
+         * curve stays smooth. See `lib/edgeGeometry.ts` for the
+         * measurement that motivates it.
          *
          * The overshoot is passed explicitly because it is not a guess:
          * every edge `lib/mermaidSource.ts` emits is a `-->`, so every

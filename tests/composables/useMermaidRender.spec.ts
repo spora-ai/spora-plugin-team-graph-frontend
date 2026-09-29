@@ -113,7 +113,7 @@ describe('useMermaidRender — Mermaid initialisation', () => {
         expect(cfg.flowchart.htmlLabels).toBe(false)
         expect(cfg.flowchart.useMaxWidth).toBe(false)
         // Both spacings are lower bounds on the gap dagre leaves
-        // between node boxes, sized so the 240 × 76 cards can never
+        // between node boxes, sized so the cards can never
         // overlap. This is the layout guarantee, pinned.
         expect(cfg.flowchart.nodeSpacing).toBeGreaterThanOrEqual(NODE_CARD_WIDTH)
         expect(cfg.flowchart.rankSpacing).toBeGreaterThanOrEqual(NODE_CARD_HEIGHT)
@@ -381,6 +381,26 @@ describe('useMermaidRender — edge re-anchoring', () => {
             return { x: Number(t[1]), y: Number(t[2]) }
         }
         let checked = 0
+        /**
+         * Shortest distance from a point to a card's **outline**, for a
+         * card centred on `centre` and sized by the shipped constants:
+         * 0 on the border, the gap to the nearest edge when the point is
+         * inside, the Euclidean gap when it is outside.
+         *
+         * Deliberately not "is |dx| half the width OR is |dy| half the
+         * height": that reads a diagonal endpoint as "on the border" the
+         * moment one of its two components happens to match, which is how
+         * a re-anchored path that is really 4.8 units short can pass as
+         * one that is short of nothing.
+         */
+        const distanceToBorder = (p: { x: number; y: number }, centre: { x: number; y: number }): number => {
+            const halfW = NODE_CARD_WIDTH / 2
+            const halfH = NODE_CARD_HEIGHT / 2
+            const dx = Math.abs(p.x - centre.x)
+            const dy = Math.abs(p.y - centre.y)
+            if (dx <= halfW && dy <= halfH) return Math.min(halfW - dx, halfH - dy)
+            return Math.hypot(Math.max(dx - halfW, 0), Math.max(dy - halfH, 0))
+        }
         for (const path of [...svg.querySelectorAll('path.flowchart-link')]) {
             const id = path.id
             const m = /^L-n(\d+)-n(\d+)/.exec(id)
@@ -397,11 +417,12 @@ describe('useMermaidRender — edge re-anchoring', () => {
             const last = points[points.length - 1] as { x: number; y: number }
             const prev = points[points.length - 2] as { x: number; y: number }
             checked += 1
-            // Start: exactly on the source card's border,
-            // |dx| = 120 or |dy| = 38. No marker there to compensate.
-            const onSource = Math.abs(Math.abs(first.x - centre(src).x) - NODE_CARD_WIDTH / 2) < 0.01 ||
-                Math.abs(Math.abs(first.y - centre(src).y) - NODE_CARD_HEIGHT / 2) < 0.01
-            expect(onSource, `start of ${id}`).toBe(true)
+            // Start: exactly on the source card's border. No marker there
+            // to compensate, so it is the border itself — 0.000 px away.
+            expect(
+                distanceToBorder(first, centre(src)),
+                `start of ${id} is on the source card's border`,
+            ).toBeCloseTo(0, 3)
 
             // End: walk the overshoot back off the tip and the tip must
             // then be exactly on the target card's border. The tangent
@@ -413,13 +434,24 @@ describe('useMermaidRender — edge re-anchoring', () => {
                 x: last.x + (ARROWHEAD_OVERSHOOT * (last.x - prev.x)) / len,
                 y: last.y + (ARROWHEAD_OVERSHOOT * (last.y - prev.y)) / len,
             }
-            const onTarget = Math.abs(Math.abs(tip.x - centre(tgt).x) - NODE_CARD_WIDTH / 2) < 0.01 ||
-                Math.abs(Math.abs(tip.y - centre(tgt).y) - NODE_CARD_HEIGHT / 2) < 0.01
-            expect(onTarget, `arrow tip of ${id} lands on the target border`).toBe(true)
-            // …and the path end itself is *not* on the border any more.
-            const endOnTarget = Math.abs(Math.abs(last.x - centre(tgt).x) - NODE_CARD_WIDTH / 2) < 0.01 ||
-                Math.abs(Math.abs(last.y - centre(tgt).y) - NODE_CARD_HEIGHT / 2) < 0.01
-            expect(endOnTarget, `path end of ${id} is held back, not on the border`).toBe(false)
+            expect(
+                distanceToBorder(tip, centre(tgt)),
+                `arrow tip of ${id} lands on the target border`,
+            ).toBeCloseTo(0, 3)
+            // …and the path end is never more than one arrowhead past it.
+            //
+            // For every edge Mermaid's router produces the end tangent
+            // points *into* the target, so the end sits exactly
+            // `ARROWHEAD_OVERSHOOT` short. The bound is stated as "within
+            // one arrowhead" rather than "exactly one" because the
+            // fixture's `L-n1-n2-9` ends with a vertical `L` that runs
+            // *along* the left border its ray crossed — a shape the real
+            // router does not emit. `tests/lib/edgeGeometry.spec.ts`
+            // pins the exact 4.8 for the four shapes it does.
+            expect(
+                distanceToBorder(last, centre(tgt)),
+                `path end of ${id} is held back by at most the overshoot`,
+            ).toBeLessThanOrEqual(ARROWHEAD_OVERSHOOT + 0.01)
         }
         // Guard against the loop vacuously passing over zero edges.
         expect(checked).toBeGreaterThan(0)

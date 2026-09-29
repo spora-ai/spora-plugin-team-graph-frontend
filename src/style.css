@@ -263,10 +263,10 @@
  *
  * `useMermaidRender.ts` renders the diagram with `htmlLabels: false`
  * and then grows every `g.node` rect to the Variant M card footprint
- * (240 × 76 px, mirrored by `NODE_CARD_WIDTH` / `NODE_CARD_HEIGHT` in
- * `lib/nodeLayout.ts`) so the SVG's own bounding box — and therefore
- * the `viewBox` / `fit()` calculation — encloses the cards the HTML
- * overlay is about to paint.
+ * (`NODE_CARD_WIDTH` × `NODE_CARD_HEIGHT` in `lib/nodeLayout.ts`)
+ * so the SVG's own bounding box — and therefore the `viewBox` /
+ * `fit()` calculation — encloses the cards the HTML overlay is about
+ * to paint.
  *
  * The visible card is `AgentNodeCard.vue`, a sibling of the SVG
  * inside the same transformed `.tg-canvas-content` element, so pan /
@@ -300,7 +300,7 @@
 #spora-plugin-team-graph .tg-canvas-content svg g.node tspan {
     fill: transparent !important;
 }
-/* The 240 × 76 boxes are exactly under the cards, which are a
+/* The card-sized boxes are exactly under the cards, which are a
  * separate HTML layer above the SVG, so nothing needs to hit-test
  * them. Switching them off keeps every pointerdown outside a card on
  * the SVG background (and therefore pan-capable). */
@@ -333,6 +333,26 @@
  * gone: the shared `AgentAvatar` tile is the agent's identity, and
  * it reads `profile_picture` straight off the wire payload.
  *
+ * **No `width` / `height` here, on purpose.** The card's box is
+ * load-bearing in four places — the painted card, the overlay's
+ * `translate3d`, the `g.node` rect `useMermaidRender` grows, and the
+ * border `edgeGeometry` walks each arrow tip onto — and three of them
+ * read `NODE_CARD_WIDTH` / `NODE_CARD_HEIGHT`. So the fourth states it
+ * inline from the same constants (`AgentNodeCard.vue → cardStyle`) and
+ * this file carries no footprint literal. Every earlier regression on
+ * this card came through exactly that seam: a resize that reached the
+ * CSS but not the constants left the arrowheads describing a box that
+ * no longer existed. `tests/style.spec.ts` fails the build if a literal
+ * creeps back in.
+ *
+ * **`align-items: flex-start`, not `center`.** The tile and the
+ * headline row are the same height (`--tg-avatar-size`), so with
+ * `center` the tile would be centred on the *body* — which is taller,
+ * because it also holds the status row — and would sit a third of the
+ * card down, next to the pill instead of the name. Pinning both to the
+ * top padding edge is what puts the name's line box on the tile's
+ * centre line.
+ *
  * The card element is a real `<button type="button">` (see
  * `AgentNodeCard.vue`), so this rule also has to undo what the UA
  * stylesheet does to every button: drop the native chrome with
@@ -351,10 +371,8 @@
     top: 0;
     left: 0;
     box-sizing: border-box;
-    width: 240px;
-    height: 76px;
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     gap: 10px;
     margin: 0;
     padding: 9px 13px;
@@ -404,32 +422,48 @@
 .tg-node-card.is-dimmed > * { opacity: 0.35; }
 
 /**
- * `.avatar--sm` from `@spora-ai/components` is already 32 × 32 px,
- * which is exactly the prototype's tile; the rule only pins the
- * flex behaviour so the tile never shrinks in a narrow card and
- * keeps the prototype's own shadow.
+ * The tile's edge, in px, from the same constant the card's height is
+ * derived from.
+ *
+ * `size="md"` is the package's documented 44 px step, but it states it
+ * in `2.75rem` — and `rem` resolves against the **root** font size, not
+ * against the plugin. A host that set `html { font-size: 18px }` would
+ * paint a 49.5 px tile inside a box computed from 44 px, and the tile
+ * would spill out of the row it is supposed to sit on. So the card
+ * names the edge itself (`--tg-avatar-size`, set inline from
+ * `NODE_CARD_AVATAR_SIZE`) and this rule states it in px. The
+ * remaining `flex-shrink` and the shadow are the prototype's own.
  */
-.tg-node-card-avatar { flex-shrink: 0; box-shadow: 0 1px 2px rgba(15, 23, 41, 0.18); }
+.tg-node-card-avatar {
+    inline-size: var(--tg-avatar-size);
+    block-size: var(--tg-avatar-size);
+    flex-shrink: 0;
+    box-shadow: 0 1px 2px rgba(15, 23, 41, 0.18);
+}
 
 /**
- * The tile's shape, in one place.
+ * The tile's shape, in one place — and now, for *every* branch.
  *
  * `AgentNodeCard` and `AgentDetailPanel` must both paint the same
- * silhouette, and the archetype branch already does the right thing:
- * `.avatar--sm { border-radius: .5rem }`. The **initials** branch does
- * not — the package forces `border-radius: 9999px` on
- * `.avatar--initials[data-v-0a52efe6]`, so the same card showed a
- * rounded square for an agent with an archetype and a circle for one
- * without. `AgentNodeCard` now sets `--spora-avatar-bg` / `--fg` on
- * the card (so the fallback tile keeps the agent's palette) and this
- * rule forces its *radius* back to the prototype's 8 px square.
+ * silhouette, and the package does not give them one: the archetype
+ * branch rounds to `.5rem` at `size="sm"` but to **`.75rem` at
+ * `size="md"`**, while the **initials** branch is forced to `9999px`
+ * on `.avatar--initials[data-v-0a52efe6]` regardless of size. So the
+ * moment the card moved up a size step the same agent would have drawn
+ * a 12 px-rounded square with an archetype and a circle without one —
+ * exactly the branch-dependent silhouette this rule exists to prevent,
+ * and it would have done it in *both* directions at once. Forcing the
+ * radius on the tile element itself (rather than only on
+ * `.avatar--initials`) covers archetype, image and initials alike.
  *
  * These rules are **unlayered**, which is the whole mechanism: the
- * package ships `.avatar--initials` inside `@layer components`, and
- * unlayered author rules beat layered ones regardless of specificity.
- * That is why the override needs no `!important` and cannot be beaten
- * by the package bumping its own selector.
+ * package ships `.avatar--md` / `.avatar--initials` inside
+ * `@layer components`, and unlayered author rules beat layered ones
+ * regardless of specificity. That is why the override needs no
+ * `!important` and cannot be beaten by the package bumping its own
+ * selector.
  */
+.tg-node-card-avatar,
 .tg-node-card-avatar.avatar--initials,
 .tg-agent-tile .avatar--initials,
 .tg-agent-tile { border-radius: 0.5rem; }
@@ -439,14 +473,25 @@
  * therefore load-bearing here, not cosmetic: an inline body would
  * split the rows across lines instead of stacking them. */
 .tg-node-card-body { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; }
-.tg-node-card-row1 { display: flex; align-items: center; gap: 6px; }
+/**
+ * Row 1 is exactly the tile's edge, and the name is centred inside it.
+ *
+ * This single line is the "avatar aligned with the headline". The tile
+ * sits at the top padding edge (`.tg-node-card { align-items: flex-start }`)
+ * and so does row 1; giving row 1 the tile's own height and centring
+ * the name within it puts the two centres on the same line by
+ * construction, at any headline font size, rather than by a magic
+ * offset. Measured in the browser: the delta between the name's line-box
+ * centre and the tile's centre is 0.000 px, in both themes.
+ */
+.tg-node-card-row1 { display: flex; align-items: center; gap: 6px; block-size: var(--tg-avatar-size); }
 .tg-node-card-row2 {
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 6px;
     margin-top: 4px;
-    min-height: 34px;
+    min-height: 46px;
 }
 .tg-node-card-name {
     font-size: 13px;
@@ -486,7 +531,12 @@
     background: color-mix(in srgb, var(--tg-status-color) 14%, white);
     color: color-mix(in srgb, var(--tg-status-color) 45%, #0f172a);
     /* Long status labels ("awaiting final approval") wrap inside the
-     * fixed-width card instead of pushing the badges off it. */
+     * fixed-width card instead of pushing the badges off it. At 92 px
+     * the longest label the shared `STATUS_PALETTE` can produce is
+     * three lines (measured 45.563 px), which is the height
+     * `NODE_CARD_ROW2_MIN_HEIGHT` reserves in `lib/nodeLayout.ts` —
+     * so a wrapped pill can never grow past the row, and the row can
+     * never grow past the card. */
     max-width: 92px;
     white-space: normal;
     text-align: center;

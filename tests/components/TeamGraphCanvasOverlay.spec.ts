@@ -189,8 +189,13 @@ describe('TeamGraphCanvas — overlay placement', () => {
         const after = cards(w).map((c) => c.attributes('style'))
         expect(after).toHaveLength(2)
         expect(after).not.toEqual(before)
-        // Node 1 moved to the bottom of the diagram: 500 - (-20) - 38.
-        expect(after[0]).toContain('translate3d(600px, 482px, 0)')
+        // Node 1 moved to the bottom of the diagram: 500 - (-20) - half the
+        // card. Spelled through the constant so a resize of the card cannot
+        // leave this expectation describing a box that no longer exists.
+        expect(after[0]).toContain(
+            `translate3d(${700 - (BBOX.x - SVG_PADDING) - NODE_CARD_WIDTH / 2}px, ` +
+            `${500 - (BBOX.y - SVG_PADDING) - NODE_CARD_HEIGHT / 2}px, 0)`,
+        )
     })
 
     it('drops the stale cards while a new principal is still rendering', async () => {

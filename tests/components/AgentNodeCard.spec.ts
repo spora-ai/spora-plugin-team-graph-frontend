@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { mount } from '@vue/test-utils'
 import AgentNodeCard from '../../src/components/AgentNodeCard.vue'
+import { NODE_CARD_AVATAR_SIZE, NODE_CARD_HEIGHT, NODE_CARD_WIDTH } from '../../src/lib/nodeLayout'
 import type { GraphNode } from '../../src/types'
 
 /**
@@ -68,12 +69,37 @@ describe('AgentNodeCard — structure', () => {
         // The package's Avatar root class, not a plugin-invented one.
         const tile = wrapper.find('.avatar')
         expect(tile.exists()).toBe(true)
-        // 32 px tile — `.avatar--sm` in the package's stylesheet.
-        expect(tile.classes()).toContain('avatar--sm')
+        // 44 px tile — `.avatar--md`, the package's documented step up
+        // from the 32 px `.avatar--sm` the card used to sit at.
+        expect(tile.classes()).toContain('avatar--md')
         // Wire snake_case coerced through lib/agentAvatar.ts.
         const img = wrapper.find('[data-testid="avatar-archetype"]')
         expect(img.exists()).toBe(true)
         expect(img.attributes('style')).toContain('#0F766E')
+    })
+
+    it('takes its own box from the layout constants, not from the stylesheet', () => {
+        /*
+         * The single-source-of-truth guard. `style.css` has no `width` /
+         * `height` on `.tg-node-card` any more; the four consumers of the
+         * footprint (the painted box, the overlay's `translate3d`, the
+         * grown `g.node` rect, the edge border walk) all read
+         * `NODE_CARD_WIDTH` / `NODE_CARD_HEIGHT`, and this is the fourth
+         * one. Asserted through the rendered inline style, so a
+         * regression in either the constant or the component fails here.
+         */
+        const style = mountCard().find('.tg-node-card').attributes('style') ?? ''
+        expect(style).toContain(`width: ${NODE_CARD_WIDTH}px`)
+        expect(style).toContain(`height: ${NODE_CARD_HEIGHT}px`)
+    })
+
+    it('publishes the tile edge so the tile and the headline row cannot drift', () => {
+        // `--tg-avatar-size` is read by both `.tg-node-card-avatar`
+        // (the tile's own edge, in px) and `.tg-node-card-row1` (the row
+        // the name is centred in). One number for both is what makes the
+        // headline land on the tile's centre line at any font size.
+        const style = mountCard().find('.tg-node-card').attributes('style') ?? ''
+        expect(style).toContain(`--tg-avatar-size: ${NODE_CARD_AVATAR_SIZE}px`)
     })
 
     it('falls back to the initials tile when the node has no usable picture', () => {

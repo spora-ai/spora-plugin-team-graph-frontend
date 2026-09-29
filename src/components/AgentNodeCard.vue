@@ -13,17 +13,33 @@
  *
  *   - avatar tile **left**, name **top-right**,
  *   - status pill **bottom-left**, edge-count badges **bottom-right**,
- *   - fixed **240 px** width, ellipsised name,
+ *   - fixed **240 × 115 px** box, ellipsised name,
  *   - `↑ N` inbound green / `↓ N` outbound violet, and a distinct
  *     slate `.zero` style **per badge** when that badge's own count
  *     is 0 — a 0-inbound node is an entry-point agent, and that
  *     distinction is signal, not noise.
  *
+ * **The tile is `size="md"` (44 px) and the headline sits on it.** The
+ * 240 px width is the Variant M prototype's; the 115 px height is
+ * *derived* from the box's own parts in `lib/nodeLayout.ts`
+ * (`border + block padding + tile + row gap + status row`), so the
+ * headline row can be exactly as tall as the tile and the name's line
+ * box ends up centred on the tile's centre. That is the whole reason
+ * the card grew: a 44 px tile cannot be centre-aligned with a 15.6 px
+ * headline inside a box whose padding is uniform — aligning the two
+ * centres needs the tile to overhang the top padding by half the
+ * difference — so the alignment is bought with a taller first row
+ * rather than with a negative margin. Measured in the browser, the
+ * delta between the two centres is 0.000 px in both themes.
+ *
  * **Everything visual lives in `style.css`** (`.tg-node-card` and
  * friends) so the card markup stays a pure structure and the CSS
  * file remains the single place the prototype's geometry is
- * expressed. `NODE_CARD_WIDTH` / `NODE_CARD_HEIGHT` are shared with
- * the layout maths in `lib/nodeLayout.ts` and must match the CSS.
+ * expressed — with one deliberate exception: the box's own
+ * `width` / `height` and the tile's edge are **inline**, built from
+ * `NODE_CARD_WIDTH` / `NODE_CARD_HEIGHT` / `NODE_CARD_AVATAR_SIZE`,
+ * because the footprint is load-bearing in four places and only the
+ * constants can keep all four in step.
  *
  * **The card is a real `<button>`.** Selecting an agent is an
  * activation, so the card is a native toggle button
@@ -52,6 +68,7 @@ import { AgentAvatar } from '@spora-ai/components/avatar'
 import { Icon } from '@spora-ai/components/icons'
 import { avatarPaletteStyle, avatarSubject } from '../lib/agentAvatar'
 import { statusLabel, statusPillClass } from '../lib/nodeStatus'
+import { NODE_CARD_AVATAR_SIZE, NODE_CARD_HEIGHT, NODE_CARD_WIDTH } from '../lib/nodeLayout'
 import type { GraphNode } from '../types'
 
 /**
@@ -101,16 +118,35 @@ const cardClass = computed(() => ({
 }))
 
 /**
- * Placement plus the agent's palette. The two `--spora-avatar-*`
- * custom properties are the package's own theming hook for the
- * initials tile, so an agent with no archetype keeps the colour the
- * backend resolved for it instead of dropping to the hard-coded slate
- * default. Set on the card (the avatar inherits custom properties),
- * which keeps one palette source for the whole card. See
- * `lib/agentAvatar.ts → avatarPaletteStyle`.
+ * Placement, the card's own box, and the agent's palette.
+ *
+ * **`width` / `height` are inline, not in `style.css`.** The footprint
+ * is load-bearing in four places — this box, `nodeLayout`'s
+ * `translate3d`, `useMermaidRender`'s grown `g.node rect`, and
+ * `edgeGeometry`'s border walk — and the last three all read
+ * `NODE_CARD_WIDTH` / `NODE_CARD_HEIGHT`. Stating the box from the same
+ * constants here is what makes it a single source of truth rather than
+ * a fourth copy: resize the card and every consumer of the box moves
+ * with it, so the arrowheads cannot detach from the cards again.
+ *
+ * `--tg-avatar-size` is the same move one level down: the package sizes
+ * its tile in `rem` (which tracks the *root* font size) while the card
+ * is a fixed px box, so the tile's edge is stated in px here and
+ * `style.css` uses the same variable for the tile *and* for the
+ * headline row it is centred in.
+ *
+ * The two `--spora-avatar-*` custom properties are the package's own
+ * theming hook for the initials tile, so an agent with no archetype
+ * keeps the colour the backend resolved for it instead of dropping to
+ * the hard-coded slate default. Set on the card (the avatar inherits
+ * custom properties), which keeps one palette source for the whole
+ * card. See `lib/agentAvatar.ts → avatarPaletteStyle`.
  */
 const cardStyle = computed(() => ({
     transform: `translate3d(${props.x}px, ${props.y}px, 0)`,
+    width: `${NODE_CARD_WIDTH}px`,
+    height: `${NODE_CARD_HEIGHT}px`,
+    '--tg-avatar-size': `${NODE_CARD_AVATAR_SIZE}px`,
     ...avatarPaletteStyle(props.node),
 }))
 
@@ -150,7 +186,7 @@ function onActivate(): void {
     >
         <AgentAvatar
             :agent="avatar"
-            size="sm"
+            size="md"
             class="tg-node-card-avatar"
         />
         <span class="tg-node-card-body">
