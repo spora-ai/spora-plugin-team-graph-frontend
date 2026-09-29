@@ -149,6 +149,26 @@ const stats = computed<GraphStats>(() => {
     return { nodes: g.nodes.length, edges: g.edges.length, bidirectional: countBidirectional(g.edges) }
 })
 
+/**
+ * A payload that arrived with zero agents — the graph is
+ * legitimately empty, which is a different thing from "no payload
+ * yet". `useTeamGraph` hands back `graph === null` while the first
+ * fetch is in flight, so the null check alone would flash this state
+ * on every load; requiring a non-null payload with no nodes is what
+ * keeps "still loading" and "nothing to show" apart.
+ *
+ * The note itself is rendered by `TeamGraphCanvas` (see
+ * `hasGraph` there), not here — the canvas owns the pan/zoom
+ * surface, the zoom stack and the footer hint that the empty state
+ * has to suppress, and unmounting the canvas to swap in a card was
+ * measured to strand the *next* graph: a canvas that mounts with a
+ * non-null `graph` prop never runs Mermaid, because
+ * `useMermaidRender`'s immediate watcher fires during `setup()` when
+ * `hostRef` is still null. This flag is only here to drive the
+ * selection clear below.
+ */
+const graphIsEmpty = computed<boolean>(() => graph.value !== null && graph.value.nodes.length === 0)
+
 async function refresh(): Promise<void> {
     await refetch()
     shouldFit.value = true
@@ -166,6 +186,21 @@ function isOwn(principal: PrincipalSummary): boolean {
 watch(() => principalList.selectedPrincipalId.value, () => {
     selection.clear()
     shouldFit.value = true
+})
+
+/*
+ * Clear the selection when the graph empties under the operator's
+ * feet. The principal-switch watcher above covers the pill click, but
+ * a poll is a different path: a 30 s tick that drops the last agent
+ * leaves `selectedId` pointing at an id that is no longer in
+ * `graph.nodes`, and `AgentDetailPanel` would keep the previous
+ * agent's header on screen over an empty canvas. Keying the watcher
+ * on the node *count* (null while loading, 0 when empty) means it
+ * fires on the non-empty → empty transition the same way a switch
+ * does, and is a no-op for every other tick.
+ */
+watch(graphIsEmpty, (empty) => {
+    if (empty) selection.clear()
 })
 
 /* No `watch(refreshTick, () => selection.clear())` here:

@@ -74,6 +74,15 @@ const MAX_CHATS_DISPLAYED = 4
 
 const selection = useSelectionStore()
 
+/**
+ * Whether the payload has anything to select at all. The empty state
+ * below is the same card in both cases — nothing is selected either
+ * way — but the *body* cannot be the same: "Click any node in the
+ * diagram" is false when the graph rendered zero nodes, and it is
+ * the one line on this card that tells the operator what to do next.
+ */
+const hasNodes = computed<boolean>(() => props.graph.nodes.length > 0)
+
 const selectedNode = computed<GraphNode | null>(() => {
     const id = selection.selectedId
     if (id === null) return null
@@ -322,7 +331,20 @@ function openChat(row: ChatRow): void {
             </div>
             <p class="text-sm font-medium text-foreground">No agent selected</p>
             <p class="text-xs text-muted-foreground mt-1 max-w-[220px]">
-                Click any node in the diagram to see its inbound and outbound relations, plus recent chats.
+                <!--
+                    Two bodies, one card. `selectedNode` is null in
+                    both cases, so the headline is right either way —
+                    but sending the operator to click a node is only
+                    true when the diagram has nodes, and an empty
+                    graph would leave this card telling them to do
+                    the one thing the canvas no longer offers.
+                -->
+                <template v-if="hasNodes">
+                    Click any node in the diagram to see its inbound and outbound relations, plus recent chats.
+                </template>
+                <template v-else>
+                    This team has no agents to select from.
+                </template>
             </p>
         </div>
         <template v-else>

@@ -243,3 +243,126 @@ describe('TeamGraphCanvas — view reset on principal change', () => {
         expect(transform).toMatch(/scale\(/)
     })
 })
+
+/**
+ * A principal with no agents.
+ *
+ * The payload is well-formed and simply has no `nodes`. The canvas
+ * paints a note in the card instead of a diagram, and drops the
+ * footer hint and the zoom stack — instructions for a diagram that
+ * is not there.
+ *
+ * These are unit-level because that is where the decision is made:
+ * `graphIsEmpty` lives in the canvas template, and the
+ * "do not hand Mermaid an empty `flowchart TB`" guard lives in
+ * `useMermaidRender.reRender()`. `TeamGraphPageEmptyGraph.spec.ts`
+ * covers the same state from the page, where the precedence against
+ * the error fallback lives.
+ */
+describe('TeamGraphCanvas — a principal with no agents', () => {
+    function emptyGraph(principalId: number): GraphPayload {
+        return { ...makeGraph(principalId, []), nodes: [], edges: [] }
+    }
+
+    it('shows the note and never asks Mermaid to lay out an empty diagram', async () => {
+        const wrapper = mount(TeamGraphCanvas, { props: { graph: emptyGraph(1) } })
+        await flushPromises()
+
+        const note = wrapper.find('[data-testid="tg-graph-empty"]')
+        expect(note.exists()).toBe(true)
+        expect(note.text()).toContain('No agents yet')
+        expect(note.text()).toContain('This team has no agents. The view updates when one is added.')
+
+        // The guard. A bare `flowchart TB` is either wasted work or a
+        // thrown error, and a throw lands in `renderInto`'s catch,
+        // which writes a red "Mermaid render error: …" div into the
+        // host — directly under the note.
+        expect(renderFn).not.toHaveBeenCalled()
+        expect(renderFn.mock.calls.at(-1)?.[1]).not.toBe('flowchart TB\n')
+        const host = wrapper.find('[data-testid="tg-mermaid-host"]').element
+        expect(host.innerHTML).toBe('')
+        expect(wrapper.find('.tg-node-card').exists()).toBe(false)
+    })
+
+    it('drops the footer hint and the zoom stack', async () => {
+        // Control: a real graph has all three.
+        const populated = mount(TeamGraphCanvas, { props: { graph: makeGraph(1, [1, 2, 3], [[1, 2]]) } })
+        await flushPromises()
+        expect(populated.text()).toContain('Drag empty canvas to pan')
+        expect(populated.find('[data-testid="tg-zoom-in"]').exists()).toBe(true)
+        expect(populated.find('[data-testid="tg-zoom-fit"]').exists()).toBe(true)
+        populated.unmount()
+
+        const wrapper = mount(TeamGraphCanvas, { props: { graph: emptyGraph(1) } })
+        await flushPromises()
+        expect(wrapper.text()).not.toContain('Drag empty canvas to pan')
+        expect(wrapper.find('[data-testid="tg-zoom-in"]').exists()).toBe(false)
+        expect(wrapper.find('[data-testid="tg-zoom-out"]').exists()).toBe(false)
+        expect(wrapper.find('[data-testid="tg-zoom-fit"]').exists()).toBe(false)
+        // The card drops `cursor: grab` / `touch-action: none` too —
+        // both are promises about a diagram. See style.css.
+        expect(wrapper.find('[data-testid="tg-canvas-wrap"]').classes()).toContain('tg-canvas-wrap--idle')
+    })
+
+    it('does not show the note while there is no payload at all', async () => {
+        // `null` is the first fetch in flight, not an empty graph.
+        // The note is keyed on the pair, and the loading window keeps
+        // the bare canvas and its footer exactly as before.
+        const wrapper = mount(TeamGraphCanvas, { props: { graph: null } })
+        await flushPromises()
+
+        expect(wrapper.find('[data-testid="tg-graph-empty"]').exists()).toBe(false)
+        expect(wrapper.text()).toContain('Drag empty canvas to pan')
+        expect(wrapper.find('[data-testid="tg-canvas-wrap"]').classes()).not.toContain('tg-canvas-wrap--idle')
+    })
+
+    it('survives an empty spell without remounting or losing the transform', async () => {
+        /*
+         * The defect that decided the empty state lives *here* and not
+         * in `TeamGraphPage.vue`. A page-level `v-if` that swaps the
+         * canvas for a card unmounts it, and the next graph
+         * remounts a canvas whose `graph` prop is already non-null —
+         * at which point nothing renders it: `useMermaidRender`'s
+         * immediate watcher runs during `setup()` while `hostRef` is
+         * still null, and no prop change follows to fire it again.
+         * Measured in a headless browser: 0 `<svg>`, 0 cards, no
+         * transform, 4 s after switching back.
+         *
+         * So both the wrap and the content layer must be the *same
+         * elements* across the transition, and the transform the
+         * operator had must still be on the content layer.
+         */
+        const wrapper = mount(TeamGraphCanvas, { props: { graph: makeGraph(1, [1, 2, 3], [[1, 2]]) } })
+        await flushPromises()
+        await flushRafs()
+
+        const wrap = wrapper.find('[data-testid="tg-canvas-wrap"]').element
+        const content = wrapper.find('.tg-canvas-content').element as HTMLElement
+        content.style.transform = 'translate(40px, 25px) scale(1.8)'
+        await nextTick()
+
+        // The team empties.
+        await wrapper.setProps({ graph: emptyGraph(1) })
+        await flushPromises()
+        expect(wrapper.find('[data-testid="tg-graph-empty"]').exists()).toBe(true)
+        expect(wrapper.find('[data-testid="tg-canvas-wrap"]').element).toBe(wrap)
+        expect(wrapper.find('.tg-canvas-content').element).toBe(content)
+        // The renderer cleared the host rather than leaving the old
+        // SVG measurable underneath the note.
+        expect((wrapper.find('[data-testid="tg-mermaid-host"]').element as HTMLElement).innerHTML).toBe('')
+
+        // …and refills.
+        await wrapper.setProps({ graph: makeGraph(1, [1, 2, 3], [[1, 2]]) })
+        await flushPromises()
+        await flushRafs()
+
+        expect(wrapper.find('[data-testid="tg-graph-empty"]').exists()).toBe(false)
+        expect(wrapper.find('[data-testid="tg-canvas-wrap"]').element).toBe(wrap)
+        expect(wrapper.find('.tg-canvas-content').element).toBe(content)
+        expect(renderFn).toHaveBeenCalled()
+        expect(wrapper.find('[data-testid="tg-mermaid-host"]').html()).toContain('<svg')
+        // A poll does not fit (that is the view-preservation
+        // contract), so the operator's transform is intact.
+        expect(content.style.transform).toBe('translate(40px, 25px) scale(1.8)')
+    })
+})

@@ -145,10 +145,18 @@ const DEV_EDGES: GraphEdge[] = [
     { id: '13->14', source: 13, target: 14, op: 'handover', configured: true, count_24h: 2, last_invoked_at: '2026-09-24T18:40:00Z' },
 ]
 
+/**
+ * A group with no agents at all. Without it the empty state is
+ * unreachable in a browser: every principal in the stub above
+ * returns `DEV_NODES`, so a dev session can only ever see a
+ * populated diagram and a bug in the empty branch would look
+ * identical to a bug in the populated one.
+ */
 const DEV_PRINCIPALS = [
     { id: 1, type: 'user', name: 'local-dev@spora.local', is_current_user_owned: true },
     { id: 2, type: 'group', name: 'Marketing', is_current_user_owned: false },
     { id: 3, type: 'group', name: 'Engineering', is_current_user_owned: false },
+    { id: 4, type: 'group', name: 'Research (no agents yet)', is_current_user_owned: false },
 ]
 
 /**
@@ -243,7 +251,17 @@ function devGraph(principalId: number): GraphPayload {
         1: 'local-dev@spora.local',
         2: 'Marketing',
         3: 'Engineering',
+        4: 'Research (no agents yet)',
     }
+    /*
+     * Principal 4 answers with a real envelope that happens to carry
+     * no nodes — the shape the endpoint returns for a team nobody has
+     * added an agent to. Deliberately *not* a throw or a 404: an
+     * error payload exercises `GraphErrorFallback`, a different
+     * branch of the same slot, and conflating the two in the stub is
+     * what made the empty state untestable by hand.
+     */
+    const empty = principalId === 4
     return {
         principal: {
             id: principalId,
@@ -251,8 +269,8 @@ function devGraph(principalId: number): GraphPayload {
             name: names[principalId] ?? 'Unknown',
             is_current_user_owned: principalId === 1,
         },
-        nodes: DEV_NODES,
-        edges: DEV_EDGES,
+        nodes: empty ? [] : DEV_NODES,
+        edges: empty ? [] : DEV_EDGES,
         generated_at: '2026-09-25T08:14:00Z',
     }
 }

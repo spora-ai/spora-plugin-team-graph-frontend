@@ -333,6 +333,25 @@ export function useMermaidRender({ hostRef, graph, onRender }: UseMermaidRenderO
         const host = hostRef.value
         const payload = graph.value
         if (host === null || payload === null) return
+        /*
+         * A payload with no nodes is not a diagram. `buildMermaidSource`
+         * would emit a bare `flowchart TB`, and what Mermaid does with
+         * that is not something to leave to chance: an empty `<svg>` is
+         * merely wasted work, and a thrown one lands in the `catch`
+         * below, which writes a red "Mermaid render error: …" div into
+         * the host. `TeamGraphCanvas` shows its own empty-state note in
+         * that card, so the error text would render *underneath* it.
+         *
+         * Clearing the host and the positions is the same thing
+         * `renderInto` does on its first line, and it is what keeps a
+         * previous principal's cards from being measured out of a
+         * stale SVG.
+         */
+        if (payload.nodes.length === 0) {
+            host.innerHTML = ''
+            positions.value = {}
+            return
+        }
         await renderInto(host, payload)
     }
 
