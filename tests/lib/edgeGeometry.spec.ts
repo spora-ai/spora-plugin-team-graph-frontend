@@ -65,18 +65,60 @@ describe('parsePathPoints', () => {
     })
 
     it('rejects a path whose command arity it cannot verify', () => {
-        // Single-coordinate commands carry an ambiguous "point", and
-        // guessing would move half the path.
+        // Single-axis commands carry one coordinate, and `A` carries two
+        // radii, an angle and two flags between its endpoint's pair.
+        // Neither is an x/y pair, so a pair-based arity table cannot split
+        // them without guessing — and a guess here moves half the path.
         expect(parsePathPoints('M0,0H10')).toBeNull()
+        expect(parsePathPoints('M0,0V10')).toBeNull()
         expect(parsePathPoints('M0,0A1 1 0 0 1 10 10')).toBeNull()
         // An odd coordinate count is a malformed path.
         expect(parsePathPoints('M0,0L1')).toBeNull()
         // A C needs 3 points per repetition.
         expect(parsePathPoints('M0,0C1,1 2,2')).toBeNull()
+        // A S or a Q needs 2.
+        expect(parsePathPoints('M0,0S1,1')).toBeNull()
         // Numbers before any command.
         expect(parsePathPoints('1,2L3,4')).toBeNull()
         // Nothing usable at all.
         expect(parsePathPoints('')).toBeNull()
+    })
+
+    it('reads the commands whose arity is a whole number of x/y pairs', () => {
+        // The table this module's anchoring is built on, one case each.
+        // `S` and `Q` are the two-point curve commands the dagre router
+        // does not emit but which share `C`'s "handles then vertex"
+        // shape; `T` is a vertex whose control point is implicit, so it
+        // has nothing to move; `Z` carries no coordinates at all.
+        expect(parsePathPoints('M0,0S10,10 20,20')).toEqual([
+            { command: 'M', points: [{ x: 0, y: 0 }] },
+            { command: 'S', points: [{ x: 10, y: 10 }, { x: 20, y: 20 }] },
+        ])
+        expect(parsePathPoints('M0,0Q10,10 20,20')).toEqual([
+            { command: 'M', points: [{ x: 0, y: 0 }] },
+            { command: 'Q', points: [{ x: 10, y: 10 }, { x: 20, y: 20 }] },
+        ])
+        expect(parsePathPoints('M0,0T20,20')).toEqual([
+            { command: 'M', points: [{ x: 0, y: 0 }] },
+            { command: 'T', points: [{ x: 20, y: 20 }] },
+        ])
+        // `Z` with coordinates after it is malformed; on its own it is a
+        // no-op the re-anchorer steps over.
+        expect(parsePathPoints('M0,0L10,10Z')).toEqual([
+            { command: 'M', points: [{ x: 0, y: 0 }] },
+            { command: 'L', points: [{ x: 10, y: 10 }] },
+            { command: 'Z', points: [] },
+        ])
+        expect(parsePathPoints('M0,0Z5,5')).toBeNull()
+    })
+
+    it('rejects a relative command, whose coordinates are deltas rather than positions', () => {
+        // A lowercase letter means every coordinate after it is relative
+        // to the current point, so "move the first curve's head handle by
+        // this delta" stops meaning anything.
+        expect(parsePathPoints('m0,0l10,10')).toBeNull()
+        expect(parsePathPoints('M0,0c1,1 2,2 3,3')).toBeNull()
+        expect(parsePathPoints('M0,0L10,10z')).toBeNull()
     })
 })
 
@@ -127,6 +169,69 @@ describe('reanchorEdgePath', () => {
         if (segments === null) throw new Error('unparseable')
         const points = segments.flatMap((s) => s.points)
         return { first: points[0]!, last: points[points.length - 1]! }
+    }
+
+    function dist(a: { x: number; y: number }, b: { x: number; y: number }): number {
+        return Math.hypot(a.x - b.x, a.y - b.y)
+    }
+
+    /** Shortest distance from a point to a card's outline, at the shipped footprint. */
+    function distanceToBorderLocal(p: { x: number; y: number }, centre: { x: number; y: number }): number {
+        const dx = Math.abs(p.x - centre.x)
+        const dy = Math.abs(p.y - centre.y)
+        if (dx <= halfW && dy <= halfH) return Math.min(halfW - dx, halfH - dy)
+        return Math.hypot(Math.max(dx - halfW, 0), Math.max(dy - halfH, 0))
+    }
+
+    /**
+     * Where Mermaid's `pointEnd` marker paints its tip, given a flat point
+     * list: `overshoot` units past the end, along the path's own direction
+     * of travel there.
+     */
+    function tipOfLocal(points: Array<{ x: number; y: number }>, overshoot: number): { x: number; y: number } {
+        const last = points[points.length - 1] as { x: number; y: number }
+        const previous = points[points.length - 2] as { x: number; y: number }
+        const length = Math.hypot(last.x - previous.x, last.y - previous.y)
+        if (length === 0) return { ...last }
+        return {
+            x: last.x + (overshoot * (last.x - previous.x)) / length,
+            y: last.y + (overshoot * (last.y - previous.y)) / length,
+        }
+    }
+
+    /**
+     * The node centre dagre would have placed so that `edge` leaves the
+     * box at `exit` heading for `next` — i.e. `intersectRect()` walked
+     * back along that direction by the label box's half-extent, nearer
+     * side first. Building the synthetic fixtures' centres this way is
+     * what makes the premise of the whole module true for them: the ray
+     * the endpoint is walked out along *is* the path's own direction.
+     */
+    function dagreCentre(edge: { x: number; y: number }, next: { x: number; y: number }): { x: number; y: number } {
+        const length = dist(edge, next)
+        const dx = (next.x - edge.x) / length
+        const dy = (next.y - edge.y) / length
+        const t = Math.min(67.9 / Math.abs(dx), 21 / Math.abs(dy))
+        return { x: edge.x - dx * t, y: edge.y - dy * t }
+    }
+
+    /**
+     * Sine of the angle between two rays, `p0 → p1` and `q0 → q1`. 0 when
+     * they are parallel. Normalised, so the 3-decimal precision the
+     * serialiser writes at shows up as an angle rather than as an
+     * area-scaled number.
+     */
+    function cross(
+        p0: { x: number; y: number },
+        p1: { x: number; y: number },
+        q0: { x: number; y: number },
+        q1: { x: number; y: number },
+    ): number {
+        const a = { x: p1.x - p0.x, y: p1.y - p0.y }
+        const b = { x: q1.x - q0.x, y: q1.y - q0.y }
+        const length = Math.hypot(a.x, a.y) * Math.hypot(b.x, b.y)
+        if (length === 0) return 0
+        return (a.x * b.y - a.y * b.x) / length
     }
 
     it('puts the start endpoint exactly on the card border', () => {
@@ -284,46 +389,183 @@ describe('reanchorEdgePath', () => {
         expect(points[0]!.x).toBeLessThanOrEqual(100 + halfW)
     })
 
-    it('leaves the middle of the curve untouched', () => {
+    it('translates the two runs rigidly, rescales the two straddling handles, and leaves the vertex between them alone', () => {
+        /*
+         * The exact edit, stated on this one path. `MERMAID_D` is
+         * `M exit L lead-in C … C … L entry`, so its nine points are
+         * `[exit, lead-in, c1, c2, v1, c1', c2', v2, entry]`, and the
+         * re-anchoring does four things and no more:
+         *
+         *   - `0‥2` — the start endpoint, the lead-in vertex and the
+         *     first cubic's head control point — translate **rigidly** by
+         *     the source border walk-out. All three lie at or before the
+         *     new start point along the path's departure direction, so
+         *     they slide along the line they were already on.
+         *   - `3` — the first cubic's *tail* control point — is rescaled
+         *     about its own vertex `4`, because the run moved that
+         *     vertex's neighbour and the segment is now shorter. Its
+         *     direction from the vertex is unchanged.
+         *   - `5` — the last cubic's *head* control point — is rescaled
+         *     about its anchor `4` for the same reason at the other end.
+         *   - `6‥8` — the last cubic's tail control point, its vertex and
+         *     the end point — translate **rigidly** by the target border
+         *     walk-out.
+         *
+         * `4` is dagre's, and comes out byte-identical. Its two joins are
+         * tangent-continuous because each side's *adjacent* handle kept
+         * its direction, which is the whole point.
+         *
+         * The old version of this test looped `2 … n - 3` and would have
+         * caught *nothing* on a real path: it assumed the point at index
+         * 2 was already past the reach of the endpoint's move, which on
+         * this shape it is not.
+         */
         const out = reanchorEdgePath(MERMAID_D, source, target, halfW, halfH)!
+        const firstAfter = endpoint(out).first
         const before = parsePathPoints(MERMAID_D)!.flatMap((s) => s.points)
         const after = parsePathPoints(out)!.flatMap((s) => s.points)
         expect(after).toHaveLength(before.length)
-        for (let i = 2; i < after.length - 2; i++) {
-            expect(after[i]).toEqual(before[i])
-        }
+        const at = (points: Array<{ x: number; y: number }>, i: number): { x: number; y: number } =>
+            points[i] as { x: number; y: number }
+        // The one point dagre owns outright.
+        expect(after[4]).toEqual(before[4])
+        // Each run translates as a unit.
+        const delta = (i: number): { x: number; y: number } => ({
+            x: at(after, i).x - at(before, i).x,
+            y: at(after, i).y - at(before, i).y,
+        })
+        expect(delta(1).x).toBeCloseTo(delta(0).x, 3)
+        expect(delta(1).y).toBeCloseTo(delta(0).y, 3)
+        expect(delta(7).x).toBeCloseTo(delta(8).x, 3)
+        expect(delta(7).y).toBeCloseTo(delta(8).y, 3)
+        // The two rescaled handles stay on the ray they were drawn on, so
+        // the tangents at the untouched vertex are exactly dagre's.
+        expect(Math.abs(cross(at(after, 3), at(after, 4), at(before, 3), at(before, 4))), 'c2 ray').toBeLessThan(1e-3)
+        expect(Math.abs(cross(at(after, 5), at(after, 4), at(before, 5), at(before, 4))), "c1' ray").toBeLessThan(1e-3)
+        // …and they got shorter, not longer, because the segment did.
+        expect(dist(at(after, 3), at(after, 4))).toBeLessThan(dist(at(before, 3), at(before, 4)))
+        expect(dist(at(after, 5), at(after, 4))).toBeLessThan(dist(at(before, 5), at(before, 4)))
+        // The start delta is the source border walk-out, and the endpoint
+        // ends up exactly one arrowhead short of the target border: this
+        // edge is vertical, so the tangent and the border's normal are the
+        // same line.
+        expect(delta(0).x).toBeCloseTo(firstAfter.x - 203.725, 3)
+        expect(delta(0).y).toBeCloseTo(firstAfter.y - 42, 3)
+        expect(endpoint(out).last.y).toBeCloseTo(target.y - halfH - ARROWHEAD_OVERSHOOT, 3)
     })
 
-    it('clamps a start handle that would overshoot the next on-curve point', () => {
+    it('clamps a start handle that would overshoot its own vertex', () => {
         /*
-         * A path that doubles back: the start handle is 262 px long, but
-         * the next on-curve point sits 11 px from the new endpoint.
-         * Without the clamp the control point would land far past that
-         * point and the segment would loop.
+         * A path whose label box is far smaller than the card, so the
+         * start endpoint travels 52.5 units and drags the first cubic's
+         * head control point with it. The handle was 30 units long; the
+         * room left between its (moved) anchor and the segment's own
+         * vertex is 7.5, so the clamp has to bite or the segment loops.
+         *
+         * The handle is found through the command table — index 2 is the
+         * first `C`'s *head control point*, not "the point after the
+         * endpoint" — and it is measured from the lead-in vertex it hangs
+         * off, not from the endpoint. Its direction is preserved, so the
+         * tangent the card is met at is still the tangent dagre drew.
+         *
+         * `tests/lib/edgeGeometryCorpus.spec.ts` proves the same clamp on
+         * ten real Mermaid paths, from the `short-names` graph.
          */
-        // Two cubics, so there is a middle *on-curve* point to clamp
-        // against: the path doubles straight back past the new endpoint.
-        const doubling = 'M10,20L200,200C210,210 20,30 30,40C40,50 50,60 60,70'
-        const out = reanchorEdgePath(doubling, { x: 0, y: 0 }, { x: 0, y: 300 }, halfW, halfH)
+        const narrowLabelBox = 'M0,5L0,10C0,40 0,55 0,70L0,600'
+        const out = reanchorEdgePath(narrowLabelBox, { x: 0, y: 0 }, { x: 0, y: 700 }, halfW, halfH)
         expect(out).not.toBeNull()
         const points = parsePathPoints(out!)!.flatMap((s) => s.points)
-        const start = points[0] as { x: number; y: number }
-        const handle = points[1] as { x: number; y: number }
-        const nextOnCurve = points[4] as { x: number; y: number }
-        // The handle now stops exactly at the next on-curve point…
-        const handleLen = Math.hypot(handle.x - start.x, handle.y - start.y)
-        const room = Math.hypot(nextOnCurve.x - start.x, nextOnCurve.y - start.y)
+        const anchor = points[1] as { x: number; y: number }
+        const handle = points[2] as { x: number; y: number }
+        const vertex = points[4] as { x: number; y: number }
+        // The handle now stops exactly at its own repetition's vertex…
+        const handleLen = Math.hypot(handle.x - anchor.x, handle.y - anchor.y)
+        const room = Math.hypot(vertex.x - anchor.x, vertex.y - anchor.y)
         expect(handleLen).toBeCloseTo(room, 3)
-        // …where the unclamped handle was 262 px long.
-        expect(handleLen).toBeLessThan(262)
-        // The tangent is still the original one, just shorter.
-        expect(handle.x - start.x).toBeCloseTo(190 * (room / Math.hypot(190, 180)), 2)
-        expect(handle.y - start.y).toBeCloseTo(180 * (room / Math.hypot(190, 180)), 2)
+        // …where it was 30 units long to begin with.
+        expect(handleLen).toBeLessThan(30)
+        // The tangent is still the original one, just shorter: the handle
+        // still points from the lead-in vertex straight down.
+        expect(handle.x - anchor.x).toBeCloseTo(0, 3)
+        expect(handle.y - anchor.y).toBeCloseTo(handleLen, 3)
+        // The endpoint is where the card border is, not where the run
+        // stopped: the run reached the card, the clamp only kept the
+        // segment from folding.
+        expect(points[0]).toEqual({ x: 0, y: 57.5 })
     })
 
     it('returns null for a path it cannot parse, so the attribute is left alone', () => {
         expect(reanchorEdgePath('', source, target, halfW, halfH)).toBeNull()
         expect(reanchorEdgePath('M0,0H10', source, target, halfW, halfH)).toBeNull()
+        // A relative path: every coordinate is a delta, so there is no
+        // vertex to walk a ray out from.
+        expect(reanchorEdgePath('m0,0l10,10', source, target, halfW, halfH)).toBeNull()
+        // A path that does not open with `M` has no endpoint for the ray
+        // to start from, even though it parses.
+        expect(reanchorEdgePath('L10,10L20,20', source, target, halfW, halfH)).toBeNull()
+    })
+
+    it('anchors a lone S segment, whose one control point governs both of its ends', () => {
+        /*
+         * `M … S c e` is the degenerate case the run logic has to reason
+         * about: there is a single control point, so it hangs off the
+         * path's own start *and* leads into its own end. Deltas are
+         * accumulated per point before any of them is applied, so when
+         * both runs reach that one point it receives both — which is what
+         * preserving both tangents requires.
+         *
+         * On a path long enough for the geometry to be sane that cannot
+         * happen: the two border walks are 36.5 and 62.3 units here, and
+         * a single interior point is only in *both* runs if the whole
+         * path is shorter than their sum — at which point the segment is
+         * crushed and the clamp does its job instead. So what is asserted
+         * is the invariant that actually has to hold either way: the
+         * handle never ends up past the vertex it leads into.
+         *
+         * The centres are built the way dagre builds them, so the two
+         * border walks are along the path and the tangents are the ones
+         * Mermaid drew. Mermaid's router only ever emits `L` and `C`, so
+         * this is a table-completeness case rather than one it can
+         * produce — but the table has to be right for the commands it
+         * claims, and `S` is one of them.
+         */
+        const p0 = { x: 600, y: 20 }
+        const control = { x: 700, y: 120 }
+        const p2 = { x: 800, y: 220 }
+        const d = `M${p0.x},${p0.y}S${control.x},${control.y} ${p2.x},${p2.y}`
+        const from = dagreCentre(p0, control)
+        const to = dagreCentre(p2, control)
+        const out = reanchorEdgePath(d, from, to, halfW, halfH)
+        expect(out).not.toBeNull()
+        const points = parsePathPoints(out!)!.flatMap((s) => s.points)
+        expect(parsePathPoints(out!)!.map((s) => s.command)).toEqual(['M', 'S'])
+        expect(points).toHaveLength(3)
+        // The start is on the source card's border and the arrowhead tip
+        // is on the target's.
+        expect(distanceToBorderLocal(points[0]!, from)).toBeCloseTo(0, 3)
+        expect(distanceToBorderLocal(tipOfLocal(points, ARROWHEAD_OVERSHOOT), to)).toBeCloseTo(0, 3)
+        // The handle does not overshoot the vertex it leads into.
+        expect(dist(points[1]!, points[2]!)).toBeLessThan(dist(points[0]!, points[2]!) + 1e-6)
+    })
+    it('steps over a trailing Z, which carries no coordinate to move', () => {
+        // `Z` closes the path with a straight line back to the start, so
+        // its own start vertex is not the path's end and nothing about it
+        // may be re-aimed at a card.
+        const p0 = { x: 600, y: 20 }
+        const middle = { x: 700, y: 80 }
+        const p2 = { x: 800, y: 140 }
+        const d = `M${p0.x},${p0.y}L${middle.x},${middle.y}L${p2.x},${p2.y}Z`
+        const from = dagreCentre(p0, middle)
+        const to = dagreCentre(p2, middle)
+        const out = reanchorEdgePath(d, from, to, halfW, halfH)
+        expect(out).not.toBeNull()
+        expect(parsePathPoints(out!)!.map((s) => s.command)).toEqual(['M', 'L', 'L', 'Z'])
+        const points = parsePathPoints(out!)!.flatMap((s) => s.points)
+        // `Z` contributes no point, so the flat list is still the three
+        // on-curve vertices.
+        expect(points).toHaveLength(3)
+        expect(distanceToBorderLocal(points[0]!, from)).toBeCloseTo(0, 3)
+        expect(distanceToBorderLocal(tipOfLocal(points, ARROWHEAD_OVERSHOOT), to)).toBeCloseTo(0, 3)
     })
 })
 

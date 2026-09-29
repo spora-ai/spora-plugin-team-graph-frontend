@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <title>Team Graph — real Mermaid edge `d` corpus</title>
+    </head>
+    <body>
+        <!--
+            Corpus generator for `tests/fixtures/edgePathCorpus.ts`.
+
+            **Why this exists.** `lib/edgeGeometry.ts` rewrites the `d`
+            of paths Mermaid's dagre router generated. Every unit test
+            in this repo used to run against hand-written `d` strings,
+            and the whole suite stayed green while the canvas shipped a
+            visibly broken arrowhead — so the fixtures were the bug, not
+            the tests. This page renders real `flowchart TB` graphs with
+            the *shipped* Mermaid configuration (see
+            `composables/useMermaidRender.ts → ensureMermaidInit`, whose
+            values are mirrored verbatim in the companion `.ts`) in a
+            real browser, with a real layout engine, and reads the
+            emitted `path.flowchart-link` `d` attributes straight out of
+            the DOM.
+
+            **How to re-run it.** Start a dev server
+            (`npx vite --port 5199`; this project is normally on 5180)
+            and load this page in any Chromium-based browser:
+
+                http://localhost:5199/plugins/team-graph/tests/fixtures/captureEdgeCorpus.html
+
+            The rendered JSON is both `window.__CORPUS__` and the text
+            of the `<pre>` below. Headless, without a display:
+
+                chrome-headless-shell --headless --disable-gpu \
+                    --virtual-time-budget=60000 --dump-dom \
+                    "http://localhost:5199/plugins/team-graph/tests/fixtures/captureEdgeCorpus.html"
+
+            It is a development tool, not part of the build or the test
+            run: nothing in `src/` imports it, `vite build` only ever
+            sees `src/main.ts`, and `vite.config.ts`'s
+            `test.include` only collects `*.{test,spec}.{js,ts}`.
+
+            **Old vs new.** The page carries a verbatim copy of the
+            pre-fix index-based `anchorEnds` (`reanchorEdgePathOLD`) next
+            to the shipped `reanchorEdgePath`, so the same real paths can
+            be measured both ways in one pass.
+        -->
+        <pre id="out">rendering…</pre>
+        <script type="module" src="./captureEdgeCorpus.ts"></script>
+    </body>
+</html>
