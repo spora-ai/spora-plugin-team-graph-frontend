@@ -31,13 +31,22 @@
  * `selection.setSelected(otherId)` so the canvas highlights the
  * target and the panel re-renders for the new agent.
  *
+ * **The header and the body are fetched separately, so they can
+ * disagree.** The name comes from the graph payload (synchronous) and
+ * the description + chat lists come from three per-agent requests.
+ * A response is therefore only trustworthy for the selection that
+ * asked for it: click agent A, then agent B, and A's slower response
+ * arrives last. Without a guard the panel then shows B's name over
+ * A's description and chats. `requestToken` below is the same
+ * monotonic token `useTeamGraph` uses for the same reason.
+ *
  * **Chat rows navigate to the host's task chat.** Each row is a
  * real `<button type="button">` that calls
  * `hostContext.router.push(taskChatPath(id))` — see
  * `lib/hostNavigation.ts` for the route string and the null-router
  * policy.
  */
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { AgentAvatar } from '@spora-ai/components/avatar'
 import { Icon } from '@spora-ai/components/icons'
 import { formatRelativeTime } from '@spora-ai/components/composables'
@@ -204,37 +213,70 @@ const recentChats = ref<ChatSummary[]>([])
 const agentMeta = ref<AgentMeta | null>(null)
 const metaLoading = ref(false)
 
-async function loadAgentMeta(agentId: number): Promise<AgentMeta | null> {
+/* Monotonic request token — a response for a selection the operator
+ * has already left must not commit, otherwise clicking through agents
+ * faster than the API answers leaves the panel showing the previous
+ * agent's description and chats under the new agent's name. Same
+ * guard as `useTeamGraph`'s `requestToken`. */
+let requestToken = 0
+
+/**
+ * `fetchAgentMeta`, plus the `metaLoading` flag that marks it in
+ * flight.
+ *
+ * `token` is threaded in rather than read from a ref because the
+ * `finally` has to know whether *this* call is still the current one:
+ * a stale response clearing `metaLoading` would drop the spinner for
+ * the request that is actually in flight. Only the owning request
+ * may turn it back off.
+ */
+async function loadAgentMeta(agentId: number, token: number): Promise<AgentMeta | null> {
     metaLoading.value = true
     try {
         return await fetchAgentMeta(agentId)
     } finally {
-        metaLoading.value = false
+        if (token === requestToken) metaLoading.value = false
     }
 }
 
 watch(
     () => selectedNode.value?.id,
     async (id) => {
+        /* Claim the token before anything else, so a deselect also
+         * retires the in-flight request for the agent being left. */
+        const token = ++requestToken
         activeChats.value = []
         recentChats.value = []
         agentMeta.value = null
-        if (id === undefined || id === null) return
+        if (id === undefined || id === null) {
+            /* Nothing selected: no request owns `metaLoading` any
+             * more, so clear it rather than leaving it stuck on. */
+            metaLoading.value = false
+            return
+        }
         /* Three independent fetches — meta + active + recent — all
          * scoped to the freshly-clicked agent. They run in parallel;
          * any individual failure (network, 404) degrades gracefully
          * to empty arrays. */
         const [metaResult, activeResult, recentResult] = await Promise.allSettled([
-            loadAgentMeta(id),
+            loadAgentMeta(id, token),
             fetchActiveChats(id),
             fetchRecentChats(id),
         ])
+        if (token !== requestToken) return
         agentMeta.value = metaResult.status === 'fulfilled' ? metaResult.value : null
         activeChats.value = activeResult.status === 'fulfilled' ? activeResult.value : []
         recentChats.value = recentResult.status === 'fulfilled' ? recentResult.value : []
     },
     { immediate: true },
 )
+
+/* Bumping the token on teardown retires every request still in
+ * flight, so a response that lands after the panel is gone cannot
+ * write into a torn-down component. */
+onBeforeUnmount(() => {
+    requestToken++
+})
 
 /**
  * Three states for a configured sub-agent edge:

@@ -330,6 +330,20 @@ export function useMermaidRender({ hostRef, graph, onRender }: UseMermaidRenderO
             onRender?.()
             return svgEl
         } catch (e) {
+            /*
+             * The supersession check the success path runs, and for the
+             * same reason: a render a newer one has already committed
+             * over has no standing to touch the shared state, and here
+             * that state is the *live* diagram. The failure this guard
+             * exists to stop is the loud one — a stale rejection
+             * replaced the good SVG the newer render had just put on
+             * screen with a red error div and emptied `positions`, so
+             * one slow-then-failing poll could blank a working graph
+             * while the poll that superseded it sat there healthy. A
+             * superseded render now writes nothing at all, on either
+             * path.
+             */
+            if (myRenderId !== renderCounter) return null
             error.value = e instanceof Error ? e.message : String(e)
             positions.value = {}
             host.innerHTML = `<div class="p-4 text-sm text-red-500">Mermaid render error: <pre class="mt-2 text-xs whitespace-pre-wrap">${String(e instanceof Error ? e.message : e)}</pre></div>`
@@ -372,6 +386,28 @@ export function useMermaidRender({ hostRef, graph, onRender }: UseMermaidRenderO
         },
         { immediate: true },
     )
+
+    /*
+     * The payload is not the only thing a render needs — it needs
+     * somewhere to put the result — and the watcher above only hears
+     * about the first. A canvas that mounts with its `graph` prop
+     * already populated gets an `immediate` pass during `setup()`,
+     * when `hostRef` is still null, so `reRender()` returns early and
+     * the pass is a permanent no-op: nothing else fires it, because the
+     * prop never changes again. `useTeamGraph`'s dedup closes the
+     * escape hatch too — the polls that follow return the identical
+     * payload, so the graph watcher stays quiet and the canvas sits
+     * there blank, holding a graph it will not draw.
+     *
+     * The host binding is the event that actually makes a render
+     * possible, so it is the thing to watch. `TeamGraphPage` unmounts
+     * the canvas whenever a fetch errors, which makes a successful
+     * Retry exactly that remount-with-a-payload case.
+     */
+    watch(hostRef, (el) => {
+        if (el === null) return
+        void reRender()
+    })
 
     // Re-apply edge styling when the store changes (e.g. clicking
     // a node in the canvas, or an "edge row" in the panel that jumps

@@ -243,6 +243,46 @@ describe('useMermaidRender — render lifecycle', () => {
         expect(el.querySelector('svg')?.id).not.toBe('stale')
     })
 
+    it('does not let a superseded render\'s failure clobber the diagram that replaced it', async () => {
+        /*
+         * The staleness guard used to exist on the success path only, so
+         * a *stale rejection* took the other branch entirely: it set
+         * `error`, emptied `positions` and overwrote the host with the
+         * red "Mermaid render error" div. A poll that superseded an
+         * in-flight render and committed a healthy diagram, whose
+         * predecessor then failed, blanked the graph the operator was
+         * looking at and replaced it with a failure they never caused.
+         *
+         * Ordering is the whole test, so it is built from promises
+         * rather than timers: the stale render is still unresolved when
+         * the newer one lands, and only then does it reject.
+         */
+        const first: { reject: ((reason: Error) => void) | null } = { reject: null }
+        renderFn.mockImplementationOnce(() => new Promise<{ svg: string }>((_resolve, reject) => {
+            first.reject = reject
+        }))
+        renderFn.mockResolvedValueOnce({ svg: makeSvgFixture() })
+        const el = host()
+        const graph = ref<GraphPayload | null>(tinyStartup)
+        const { error, positions } = useMermaidRender({ hostRef: ref<HTMLElement | null>(el), graph })
+
+        await vi.waitFor(() => expect(renderFn).toHaveBeenCalledTimes(1))
+        graph.value = { ...tinyStartup, generated_at: '2026-09-26T08:14:00Z' }
+        await vi.waitFor(() => expect(renderFn).toHaveBeenCalledTimes(2))
+        // The newer render has committed; this is the state the stale
+        // rejection must not be able to touch.
+        await vi.waitFor(() => expect(el.querySelectorAll('g.node')).toHaveLength(2))
+        const committed = el.querySelector('svg')
+
+        first.reject?.(new Error('the render that lost the race'))
+
+        await new Promise((r) => setTimeout(r, 5))
+        expect(el.querySelector('svg')).toBe(committed)
+        expect(el.innerHTML).not.toContain('Mermaid render error')
+        expect(error.value).toBeNull()
+        expect(positions.value[1]).toBeDefined()
+    })
+
     it('clears the host and the positions on unmount', async () => {
         renderFn.mockResolvedValue({ svg: makeSvgFixture() })
         const el = host()

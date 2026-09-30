@@ -71,7 +71,7 @@
  * re-fetches the currently-selected principal's graph on demand
  * (the 30-second polling is independent).
  */
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { Icon } from '@spora-ai/components/icons'
 import { useSelectionStore } from '../stores/selection'
 import { usePrincipalList } from '../composables/usePrincipalList'
@@ -164,13 +164,40 @@ const stats = computed<GraphStats>(() => {
  * measured to strand the *next* graph: a canvas that mounts with a
  * non-null `graph` prop never runs Mermaid, because
  * `useMermaidRender`'s immediate watcher fires during `setup()` when
- * `hostRef` is still null. This flag is only here to drive the
- * selection clear below.
+ * `hostRef` is still null.
+ *
+ * That trap is closed at the source now — the composable re-renders
+ * when its host binds, so *any* remount paints, which is what the
+ * error card below relies on when a retry brings the canvas back. The
+ * canvas still stays mounted for the empty state, though: the pan/zoom
+ * view, the zoom stack and the host ref the renderer measures are
+ * worth keeping alive across the transition, and the note can gate
+ * them itself. This flag is only here to drive the selection clear
+ * below.
  */
 const graphIsEmpty = computed<boolean>(() => graph.value !== null && graph.value.nodes.length === 0)
 
 async function refresh(): Promise<void> {
     await refetch()
+    /*
+     * Re-assert `shouldFit` instead of just raising it, because the
+     * canvas consumes it in a `watch` that is not `immediate`. A
+     * canvas that *mounts* on the commit which clears `error` and
+     * brings the graph back — the Retry path — is therefore already
+     * holding `shouldFit === true` and never observes a change, so its
+     * principal watcher (which cannot fire either: nothing about the
+     * principal changed) never asks for a fit. The diagram would land
+     * at the untransformed default — origin, scale 1 — jammed into the
+     * top-left corner of the canvas rather than framed in it. Dropping
+     * the flag and raising it again after the commit turns that mount
+     * into a transition the canvas can see.
+     *
+     * The `false` is inert for a canvas that stayed mounted: the
+     * watcher only acts on `true`, so the ordinary Refresh path is
+     * unchanged.
+     */
+    shouldFit.value = false
+    await nextTick()
     shouldFit.value = true
 }
 
