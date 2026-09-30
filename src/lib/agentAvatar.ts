@@ -1,24 +1,16 @@
 /**
- * Map the team-graph wire shape onto the shared
- * `@spora-ai/components` avatar primitives.
+ * Map the team-graph wire shape onto the shared `@spora-ai/components`
+ * avatar primitives.
  *
  * **Why the mapping lives here and not in the package.** The shared
- * `AgentAvatar` is deliberately domain-agnostic: it takes a
- * `{ name, profile_picture }` object. The team-graph wire shape is
- * snake_case and carries only the fields the canvas needs, so the
- * two shapes are not structurally assignable. Keeping the coercion
- * in the plugin means the package stays free of any single backend's
- * field naming, and the panel call sites read as
- * `:agent="avatarSubject(row.node)"` rather than a wall of
- * `?? null` fallbacks.
+ * `AgentAvatar` is domain-agnostic: it takes `{ name, profile_picture }`,
+ * and the wire shape is snake_case, so the two are not structurally
+ * assignable. Keeping the coercion in the plugin leaves the package free of
+ * any one backend's field naming.
  *
- * **Status lives on a wrapper, not on the avatar.** `AgentAvatar`
- * has no `status` prop — it forwards `agent.name` /
- * `agent.profile_picture` to `Avatar` and stops there, so the tile
- * has no status channel of its own. The status is therefore painted
- * as a ring on the wrapping element by the panel, using the colour
- * this module resolves. See `statusRingColor` for the coverage
- * rules.
+ * **Status lives on a wrapper, not on the avatar.** `AgentAvatar` has no
+ * `status` prop — it forwards name / picture to `Avatar` and stops — so the
+ * panel paints the status ring using the colour this module resolves.
  */
 import { STATUS_PALETTE, statusDisplay } from '@spora-ai/components/avatar'
 import type { ProfilePicture } from '@spora-ai/components/types'
@@ -26,10 +18,9 @@ import { statusColor } from './nodeStatus'
 import type { GraphNode, WireStatus } from '../types'
 
 /**
- * The `agent` prop shape `AgentAvatar` expects. Re-declared here
- * (rather than imported from the package's `.vue` types) because the
- * published `AgentAvatar.vue.d.ts` only exposes the props through
- * `DefineComponent`, not as a named interface.
+ * The `agent` prop shape `AgentAvatar` expects. Re-declared rather than
+ * imported from the package's `.vue` types because the published
+ * `AgentAvatar.vue.d.ts` exposes the props only through `DefineComponent`.
  */
 export interface AgentAvatarSubject {
     name: string | null
@@ -39,12 +30,17 @@ export interface AgentAvatarSubject {
 /**
  * Coerce a wire `profile_picture` into the package's `ProfilePicture`.
  *
- * Returns `null` when the node carries no picture at all, or when the
- * `kind` discriminant is missing. That second case matters: `Avatar`
- * picks its branch from `kind`, so handing it an object without one
- * would silently drop the agent to the initials branch while looking
- * like a picture was configured. Returning `null` makes the fallback
- * explicit at the call site instead of implicit in the component.
+ * Returns `null` when there is no picture, and when the `kind`
+ * discriminant is missing. That second case matters: `Avatar` branches on
+ * `kind`, so an object without one would silently drop to the initials
+ * branch while looking as though a picture was configured.
+ *
+ * **`variant_key` must be forwarded, never derived here.** On the `avatar`
+ * branch the endpoint already runs the host's FNV-1a derivation rather
+ * than forwarding null, and `Avatar` takes its archetype branch only when
+ * `variant_key` is a string. Re-deriving it client-side would make the
+ * canvas glyph disagree with the dashboard's — the one thing the
+ * shared derivation exists to prevent.
  */
 export function toProfilePicture(node: GraphNode | undefined): ProfilePicture | null {
     const picture = node?.profile_picture
@@ -63,12 +59,9 @@ export function toProfilePicture(node: GraphNode | undefined): ProfilePicture | 
 }
 
 /**
- * The `agent` object for `<AgentAvatar>`.
- *
- * A node that isn't in the payload (a dangling edge) maps to
- * `name: null` rather than a placeholder string, so `useInitials`
- * returns `'?'` — the same fallback the panel's previous
- * `initialsFor()` helper produced for a missing node.
+ * The `agent` object for `<AgentAvatar>`. A node that isn't in the payload
+ * (a dangling edge) maps to `name: null` so `useInitials` returns `'?'` —
+ * the fallback the panel's own helper produced for a missing node.
  */
 export function avatarSubject(node: GraphNode | undefined): AgentAvatarSubject {
     return {
@@ -78,30 +71,20 @@ export function avatarSubject(node: GraphNode | undefined): AgentAvatarSubject {
 }
 
 /**
- * Inline custom properties that carry the agent's server-resolved
- * palette onto the tile, for the **initials fallback** branch.
+ * Inline custom properties carrying the agent's server-resolved palette
+ * onto the tile, for the **initials fallback** branch.
  *
- * **The gap this closes.** The package's `Avatar` only paints the
- * initials tile with `var(--spora-avatar-bg, #475569)` /
- * `var(--spora-avatar-fg, #f8fafc)` — the two documented theming
- * hooks. Its archetype branch ignores them (it derives its own inline
- * gradient from `bg_color` / `fg_color`), so an agent with no
- * archetype silently fell back to the hard-coded *slate* defaults and
- * lost its palette entirely: the operator saw a grey "SC" tile on an
- * agent the dashboard paints green. Feeding the same two resolved hex
- * values through the hook the package already reads restores the
- * colour without reimplementing the tile.
+ * **The gap this closes.** `Avatar` paints the initials tile only with
+ * `var(--spora-avatar-bg, #475569)` / `var(--spora-avatar-fg, #f8fafc)`,
+ * and its archetype branch ignores them. So an agent with no archetype fell
+ * back to hard-coded *slate* and lost its palette — a grey tile on an agent
+ * the dashboard paints green. Feeding the two resolved hex values through
+ * the hook the package already reads restores the colour without
+ * reimplementing the tile.
  *
- * **One source of truth.** The values are read straight off the wire
- * node — the same `bg_color` / `fg_color` pair
- * `Spora\Services\AgentPictures\Palette` resolved and the same pair
- * the detail panel's avatar preview shows. No palette table is
- * duplicated here.
- *
- * Returns an empty object when either colour is missing or is not a
- * string (an older envelope, or a hand-written fixture), so the
- * package's own fallbacks apply rather than an `undefined` leaking
- * into a custom property.
+ * Returns `{}` when either colour is missing or not a string, so the
+ * package's own fallbacks apply rather than `undefined` leaking into a
+ * custom property.
  */
 export function avatarPaletteStyle(node: GraphNode | undefined): Record<string, string> {
     const picture = node?.profile_picture
@@ -112,54 +95,36 @@ export function avatarPaletteStyle(node: GraphNode | undefined): Record<string, 
 }
 
 /**
- * Tint strength (percent white) mixed into `statusColor()` for the
- * five wire statuses the shared `STATUS_PALETTE` does not cover:
- * `APPROVED`, `AWAITING_INPUT`, `AWAITING_FINAL_APPROVAL`,
- * `CANCELLED` and `QUEUED`.
+ * Tint strength (percent white) mixed into `statusColor()` for the five
+ * wire statuses the shared `STATUS_PALETTE` does not cover: `APPROVED`,
+ * `AWAITING_INPUT`, `AWAITING_FINAL_APPROVAL`, `CANCELLED`, `QUEUED`.
  *
- * `APPROVED` / `AWAITING_INPUT` / `AWAITING_FINAL_APPROVAL` are
- * siblings of the covered `AWAITING_SUB_AGENTS`; `CANCELLED` and
- * `QUEUED` are siblings of the covered `COMPLETED`.
- * `statusDisplay()` would collapse all five onto the neutral
- * `COMPLETED` entry, repainting them as idle — so this module checks
- * palette membership *before* asking the package, and derives a tint
- * from the plugin's own `statusColor()` when the answer is no.
- *
- * Note that the team-graph endpoint today only ever emits
- * `RUNNING` / `AWAITING_SUB_AGENTS` / `PENDING_APPROVAL` /
- * `COMPLETED` (see `NodeResolver::resolveNodes`'s `status IN (…)`
- * sub-select), so all four are covered by the package and the
- * fallback is defensive against schema drift — which is exactly what
- * `WireStatus` was widened to tolerate.
+ * `statusDisplay()` would collapse all five onto the neutral `COMPLETED`
+ * entry and repaint them as idle, so palette membership is checked *before*
+ * asking the package.
  */
 const UNPACKAGED_TINT_MIX = 60
 
 /**
- * The neutral status a nullish wire value resolves to, named so the
- * default parameter and the `null` fold in `statusRingColor` cannot
- * drift apart.
+ * The neutral status a nullish wire value resolves to, named so the default
+ * parameter and the `null` fold in `statusRingColor` cannot drift apart.
  */
 const NEUTRAL_STATUS = 'COMPLETED'
 
 /**
- * Ring colour for an avatar tile, painted by the panel's
- * `.tg-agent-tile` wrapper (see `AgentDetailPanel.vue`).
+ * Ring colour for an avatar tile, painted by the panel's `.tg-agent-tile`
+ * wrapper (see `AgentDetailPanel.vue`).
  *
- * Package-covered statuses return the package's own `ringColor`
- * verbatim, so the sidebar's swatches cannot drift from the
- * dashboard's avatar status dots. Everything else falls back to a
- * 60 %-white tint of the plugin's `statusColor()` — the same
- * `color-mix` idiom `Avatar` uses for its archetype gradient, and the
- * same lightness band the package's own `ringColor` values occupy
- * (e.g. emerald-100 `#d1fae5` against emerald-500 `#10b981`).
+ * Package-covered statuses return the package's own `ringColor` verbatim, so
+ * the sidebar's swatches cannot drift from the dashboard's status dots.
+ * Everything else falls back to a 60 %-white tint of the plugin's
+ * `statusColor()` — the `color-mix` idiom `Avatar` uses for its archetype
+ * gradient, and the same lightness band the packaged values occupy.
  *
- * **A nullish status resolves to the packaged `COMPLETED` swatch**
- * rather than to `statusColor(null)`'s `default` arm, so the packaged
- * and unpackaged paths agree on the same neutral swatch. The two
- * halves of that are deliberately separate: the default parameter
- * covers a *missing* / `undefined` argument, and the `??` in the body
- * covers the wire's own `null`, which a default parameter does not
- * catch (it only fires for `undefined`).
+ * **A nullish status resolves to the packaged `COMPLETED` swatch** rather
+ * than `statusColor(null)`'s `default` arm, so both halves agree on one
+ * neutral. The two guards are deliberately separate: a default parameter
+ * only fires for `undefined`, not for the wire's own `null`.
  */
 export function statusRingColor(status: WireStatus = NEUTRAL_STATUS): string {
     const key: Exclude<WireStatus, null | undefined> = status ?? NEUTRAL_STATUS

@@ -1,14 +1,12 @@
 /**
  * Wire call to `GET /api/v1/plugins/team-graph/graph?principal_id=N`.
  *
- * The host's typed REST client (`hostContext.api`) already unwraps
- * the `{ data: T }` envelope, so the result is a `GraphPayload`
- * directly.
+ * The host's typed REST client already unwraps the `{ data: T }` envelope,
+ * so the result is a `GraphPayload` directly.
  *
- * The principal list lives in `api/principals.ts`; this file only
- * ships the graph fetch because the two halves never share state —
- * one is per-mounted-call (the `useTeamGraph` composable) and the other
- * is per-mount-once (the `usePrincipalList` composable's load).
+ * The principal list lives in `api/principals.ts`; the two never share
+ * state — one is per-mount (`useTeamGraph`), the other per-mount-once
+ * (`usePrincipalList`'s load).
  */
 import { getApi } from './client'
 import type { GraphPayload } from '../types'
