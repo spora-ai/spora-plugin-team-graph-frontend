@@ -59,14 +59,13 @@ export const HOST_DOC_LEAK_BODIES = [
  * The superseded single patterns, kept only so the test can compare
  * against them.
  *
- * NOSONAR on the first entry: the leading `(^|[};])\s*` is exactly the
- * S8786 backtracking the `RULE_START` split removed, and it has to stay
- * verbatim for the same reason as `ORIGINAL_IS_FUNCTION_ARGUMENT` — it
- * is the oracle, not a guard. The other two are not themselves
- * super-linear, so they are left analysable. Never used by `smoke.js`.
+ * NOSONAR on this entry: the leading `(^|[};])\s*` is exactly the shape
+ * the `RULE_START` split removed, and it has to stay verbatim for the
+ * same reason as `ORIGINAL_IS_FUNCTION_ARGUMENT` — these are oracles for
+ * the differential test, not guards. Never used by `smoke.js`.
  */
-export const ORIGINAL_HOST_DOC_LEAKS = [ // NOSONAR
-    /(^|[};])\s*html\s*,\s*body\s*,\s*#app\s*\{/m,
+export const ORIGINAL_HOST_DOC_LEAKS = [
+    /(^|[};])\s*html\s*,\s*body\s*,\s*#app\s*\{/m, // NOSONAR
     /(^|[};])\s*body\s*\{[^}]*\b(background|color)\s*:\s*#[0-9a-f]{3,8}\b/i,
     /(^|[};])\s*:root\s*\{[^}]*\bcolor-scheme\b/i,
 ]
