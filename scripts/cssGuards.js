@@ -25,8 +25,16 @@
  */
 export const IS_FUNCTION_ARGUMENT = /[a-z-]\(\s*$/i
 
-/** The superseded pattern, kept only so the test can compare against it. */
-export const ORIGINAL_IS_FUNCTION_ARGUMENT = /[a-z-]+\(\s*$/i
+/**
+ * The superseded pattern, kept only so the test can compare against it.
+ *
+ * NOSONAR: the unbounded `[a-z-]+` *is* the S8786 backtracking this
+ * rewrite set out to remove, and simplifying it would delete the
+ * property the differential test depends on — it exists to be the
+ * slow, wrong-side-of-the-substitution oracle that
+ * `IS_FUNCTION_ARGUMENT` is proven against. Never used by `smoke.js`.
+ */
+export const ORIGINAL_IS_FUNCTION_ARGUMENT = /[a-z-]+\(\s*$/i // NOSONAR
 
 /**
  * Does `selector` open a rule — the start of the sheet, or straight after
@@ -47,8 +55,17 @@ export const HOST_DOC_LEAK_BODIES = [
     { body: /:root\s*\{[^}]*\bcolor-scheme\b/i, what: 'a `:root` rule setting `color-scheme` (belongs on the plugin root)' },
 ]
 
-/** The superseded single patterns, kept only so the test can compare against them. */
-export const ORIGINAL_HOST_DOC_LEAKS = [
+/**
+ * The superseded single patterns, kept only so the test can compare
+ * against them.
+ *
+ * NOSONAR on the first entry: the leading `(^|[};])\s*` is exactly the
+ * S8786 backtracking the `RULE_START` split removed, and it has to stay
+ * verbatim for the same reason as `ORIGINAL_IS_FUNCTION_ARGUMENT` — it
+ * is the oracle, not a guard. The other two are not themselves
+ * super-linear, so they are left analysable. Never used by `smoke.js`.
+ */
+export const ORIGINAL_HOST_DOC_LEAKS = [ // NOSONAR
     /(^|[};])\s*html\s*,\s*body\s*,\s*#app\s*\{/m,
     /(^|[};])\s*body\s*\{[^}]*\b(background|color)\s*:\s*#[0-9a-f]{3,8}\b/i,
     /(^|[};])\s*:root\s*\{[^}]*\bcolor-scheme\b/i,
@@ -60,10 +77,10 @@ export const ORIGINAL_HOST_DOC_LEAKS = [
  * what the leading `(^|[};])` in the original pattern did.
  */
 export function firstHostDocLeak(css) {
-    for (let i = 0; i < HOST_DOC_LEAK_BODIES.length; i++) {
-        const found = HOST_DOC_LEAK_BODIES[i].body.exec(css)
+    for (const { body, what } of HOST_DOC_LEAK_BODIES) {
+        const found = body.exec(css)
         if (found !== null && RULE_START.test(css.slice(0, found.index))) {
-            return HOST_DOC_LEAK_BODIES[i].what
+            return what
         }
     }
     return null
