@@ -4,23 +4,17 @@
  * **Why this exists.** Mermaid sizes a node box from its *label* and
  * `intersectRect()` routes every edge endpoint to that same box. The card
  * is a fixed `NODE_CARD_WIDTH` × `NODE_CARD_HEIGHT` box that
- * `useMermaidRender` grows the SVG's `g.node rect` to *after* the render,
- * because the layout maths and the viewBox need the bigger box. Growing
- * the rect fixes the box the card covers and the box `getBBox()`
- * measures, but it cannot move an endpoint already computed against the
- * smaller label box: on the 4-node dev fixture, node 11's label box is
- * 147 × 42, so its edge left 17 px *inside* the card and arrived 11.7 px
- * *inside* the target — the arrows visibly floated in the gap.
+ * `useMermaidRender` grows the SVG's `g.node rect` to *after* the render.
+ * Growing the rect fixes the box the card covers, but it cannot move an
+ * endpoint already computed against the smaller label box — the arrows
+ * visibly float in the gap. The fix is geometric, not a re-layout: each
+ * endpoint is walked out along the ray from its node's centre through the
+ * endpoint Mermaid chose, onto the card's border, and *nothing else about
+ * the curve may change*.
  *
- * **The fix is geometric, not a re-layout.** Each endpoint is walked out
- * along the ray from its node's centre through the endpoint Mermaid
- * chose (that ray and the path's initial tangent agree to 0.1 % on that
- * fixture), onto the card's border — and *nothing else about the curve
- * may change*.
- *
- * **What this module does instead: re-run d3's own emission.** A `d` is
- * the *output* of a function of a handful of routing points, and it
- * inverts exactly. d3's `curveBundle` is a straight line at each end
+ * **How: re-run d3's own emission.** A `d` is the *output* of a function of
+ * a handful of routing points, and it inverts exactly. d3's `curveBundle`
+ * is a straight line at each end
  * with a `Basis` spline between, which for spline points `q₀ … q_{n-1}`
  * emits
  *
@@ -39,26 +33,24 @@
  * `curveBasis` emits `M <exit> L <lead-in> C … C … L <entry>`, so on a
  * two-cubic path index `1` is the lead-in **vertex** and index `n - 2`
  * is the last cubic's on-curve **endpoint**. Moving either folds the
- * path back on itself (0.00° → 180.00° on all 33 real paths); moving
- * the whole *run* instead puts an S in the curve.
+ * path back on itself; moving the whole *run* instead puts an S in the
+ * curve.
  *
- * Every interior join tangent comes out **unchanged**: the lead-in and
- * the first cubic's controls are all affine in `q₀`, and `q₁` is
- * unchanged and collinear with `q₀` and the source centre. Measured on
- * the captured corpus: no `curveBasis` path has a single tangent
- * reversal after re-anchoring, against 0 in Mermaid's own output.
+ * Every interior join tangent comes out **unchanged**: the lead-in and the
+ * first cubic's controls are all affine in `q₀`, and `q₁` is unchanged and
+ * collinear with `q₀` and the source centre.
  *
  * **The border is not where the arrow is.** Mermaid's `pointEnd` marker
  * is drawn with the path's end vertex at the marker's `refX`, so the
  * visible tip is `ARROWHEAD_OVERSHOOT` units further along the path —
- * *inside* the opaque `button.tg-node-card`, which then clips it and
- * reads as a cut-off arrowhead. The endpoint is therefore stopped short
- * by exactly that overshoot, along the direction the marker is drawn,
- * so the **tip** lands on the border.
+ * *inside* the opaque `button.tg-node-card`, which then clips it and reads
+ * as a cut-off arrowhead. The endpoint is therefore stopped short by
+ * exactly that overshoot, along the direction the marker is drawn, so the
+ * **tip** lands on the border.
  *
  * Everything here is a pure function over the path's `d`, so it is
- * unit-testable without a layout engine and cannot half-apply: a path
- * that cannot be read is reported as `null`.
+ * unit-testable without a layout engine and cannot half-apply: a path that
+ * cannot be read is reported as `null`.
  */
 
 export interface Point {
@@ -67,46 +59,38 @@ export interface Point {
 }
 
 /**
- * How far Mermaid's end-of-line arrowhead paints **past** the path's
- * end point, in SVG user units — the default value of
- * `reanchorEdgePath`'s `endOvershoot`.
+ * How far Mermaid's end-of-line arrowhead paints **past** the path's end
+ * point, in SVG user units — the default value of `reanchorEdgePath`'s
+ * `endOvershoot`.
  *
- * Derived, not guessed, from the rendered `<marker>`: `viewBox="0 0 10 10"`
- * with `markerUnits="userSpaceOnUse"` and `markerWidth="12"` scales the
- * marker's own box into user units by 1.2, and `refX="6"` pins the
- * marker-local `x = 6` to the path's end vertex while the tip is the
- * marker path's rightmost point at local `x = 10` — so 4 local units sit
- * beyond the vertex, and 4 × 1.2 = **4.8**.
+ * Derived from the rendered `<marker>`, not guessed: `viewBox="0 0 10 10"`
+ * with `markerWidth="12"` scales the marker's box into user units by 1.2,
+ * and `refX="6"` pins marker-local `x = 6` to the path's end vertex while
+ * the tip is the marker's rightmost point at local `x = 10` — so 4 local
+ * units sit beyond the vertex, and 4 × 1.2 = **4.8**. Without the inset, a
+ * path ending exactly on the border still reads as cut off, the tip hidden
+ * behind the card's own background.
  *
- * Without the inset a path ending *exactly* on the border still looks cut
- * off: the tip sits 4.800 inside the card (1.613 on a diagonal edge),
- * hidden behind the card's own background. Stopping the endpoint 4.8
- * short puts the tip on the border to 0.000, measured on all 33
- * `curveBasis` corpus paths.
- *
- * `orient="auto"` rotates the marker to the path's own direction of
- * travel, so the overshoot is 4.8 on every edge — but it is applied
- * *along that direction* (`endTangent`), not along the ray from the
- * node's centre.
+ * `orient="auto"` rotates the marker to the path's own direction of travel,
+ * so the overshoot is 4.8 on every edge — but it is applied *along that
+ * direction* (`endTangent`), not along the ray from the node's centre.
  *
  * **Nothing is compensated at the start.** `lib/mermaidSource.ts` emits
  * `n<a> --> n<b>` for every edge, so Mermaid only ever writes
- * `marker-end`; the `pointStart` marker it also defines (`refX=4.5`, a
- * 5.4-unit *backward* reach) is never referenced, and the start point
- * therefore stays exactly on the source border. Every edge in the
- * captured corpus confirms it.
+ * `marker-end`; the `pointStart` marker it also defines is never
+ * referenced, and the start point stays exactly on the source border.
  */
 export const ARROWHEAD_OVERSHOOT = 4.8
 
 /**
  * A parsed path point plus whether it lies *on* the curve.
  *
- * The distinction is load-bearing: a cubic's end tangent is the vector
- * to its nearest *control* point, but a handle may only be shortened to
- * the distance to its own on-curve point — shortened to a neighbouring
- * control point instead, it clamps far too hard and changes the tangent
- * it was supposed to preserve. It is also what lets a *vertex* be
- * dragged along a straight run without being mistaken for a handle.
+ * The distinction is load-bearing: a cubic's end tangent is the vector to
+ * its nearest *control* point, but a handle may only be shortened to the
+ * distance to its own on-curve point — shortened against a neighbouring
+ * control point it clamps far too hard and changes the tangent it was
+ * meant to preserve. It is also what lets a *vertex* be dragged along a
+ * straight run without being mistaken for a handle.
  */
 interface PathPoint extends Point {
     onCurve: boolean
@@ -120,10 +104,7 @@ interface Segment {
 interface Shape {
     /** Coordinate *pairs* one repetition of the command carries. */
     points: number
-    /**
-     * Control points at the *head* of one repetition. `C` carries two
-     * (`c1`, `c2`), `S`/`Q` one, and everything else none.
-     */
+    /** Control points at the *head* of one repetition: `C` two, `S`/`Q` one, else none. */
     handles: number
     /** Which of those points is the on-curve one. Always the last. */
     vertex: number
@@ -133,16 +114,13 @@ interface Shape {
  * Every path command the parser accepts, with its arity and the split
  * between control points and its on-curve point.
  *
- * **`Z` is the odd one out:** it carries no coordinates, so `points` is
- * 0 and its `vertex` is meaningless.
+ * **`Z` is the odd one out:** it carries no coordinates, so `points` is 0
+ * and its `vertex` is meaningless.
  *
- * **`H`, `V` and `A` are deliberately absent** — the one place this
- * table is not exhaustive. `points` counts x/y **pairs** and those three
- * do not speak in pairs (`H x`, `V y`, `rx ry rot largeArc sweep x y`),
- * so reading them with a pair-based arity would mis-split them silently.
- * `L`, `T` and `Z` carry nothing movable: `L` has no handle, and `T`'s
- * single point is a vertex whose control point is *implicit* (the
- * reflection of the previous `Q`/`C`).
+ * **`H`, `V` and `A` are deliberately absent** — the one place this table
+ * is not exhaustive. `points` counts x/y **pairs** and those three do not
+ * speak in pairs, so reading them with a pair-based arity would mis-split
+ * them silently.
  */
 const SHAPE: Record<string, Shape> = {
     M: { points: 1, handles: 0, vertex: 0 },
@@ -180,18 +158,12 @@ interface Group {
  * A command letter and an SVG path number, each matched **where the
  * scanner stands** rather than at the next match anywhere in the string.
  *
- * Sticky (`y`) matching anchors a match at `lastIndex` and reports
- * failure rather than searching on; `nextToken` offers both at the same
- * index and takes the first that fits. They are disjoint — a command
- * letter is never `-`, a digit or a `.` — so this selects the same
- * tokens in the same order as a single alternation would, and it is
- * cheaper: nesting the number under an alternation pushes every
- * quantifier in it one level deeper.
- *
- * The number is what the SVG grammar allows and `Number()` reads: an
- * optional sign, a mantissa of digits with at most one dot (which may
- * lead or trail), and an optional exponent. It can never match empty,
- * so the scanner always advances.
+ * Sticky (`y`) matching anchors a match at `lastIndex` and reports failure
+ * rather than searching on; `nextToken` offers both at the same index and
+ * takes the first that fits. They are disjoint, so this selects the same
+ * tokens in the same order a single alternation would. The number is what
+ * the SVG grammar allows and `Number()` reads, and it can never match
+ * empty, so the scanner always advances.
  */
 const LETTER = /[A-Za-z]/y
 const NUMBER = /-?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?/y
@@ -200,15 +172,12 @@ const NUMBER = /-?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?/y
  * Turn one command's accumulated coordinates into a `Segment`.
  *
  * Three-valued, because "carries nothing" and "cannot be read" are
- * different answers:
- *
- *   - a `Segment` — read it, and keep it;
- *   - `undefined` — a letter immediately followed by another carries no
- *     coordinates and contributes no segment. Not an error;
- *   - `null` — the path cannot be read with certainty, and declining is
- *     always right rather than a guess: a mis-split moves half the path.
- *     `Z` is the one command that legitimately has no coordinates, and
- *     it still has to survive so the rewritten `d` keeps it.
+ * different answers: a `Segment` to keep, `undefined` for a letter
+ * immediately followed by another (no coordinates, not an error), and
+ * `null` when the path cannot be read with certainty — declining is always
+ * right rather than a guess, because a mis-split moves half the path. `Z`
+ * is the one command that legitimately has no coordinates, and it still has
+ * to survive so the rewritten `d` keeps it.
  */
 function readSegment(command: string, numbers: number[]): Segment | null | undefined {
     const shape = SHAPE[command]
@@ -249,7 +218,6 @@ interface Scan {
     /** The command the pending numbers belong to, or `null` before the first one. */
     command: string | null
     numbers: number[]
-    /** The segments read so far. */
     segments: Segment[]
     /** `false` once the path has been found unreadable. */
     ok: boolean
@@ -260,8 +228,8 @@ function flushScan(scan: Scan): void {
     if (scan.command === null) return
     const segment = readSegment(scan.command, scan.numbers)
     scan.numbers = []
-    // `undefined` is a command with no coordinates, which contributes
-    // nothing and is not an error; only a `null` makes the path unreadable.
+    // Only a `null` makes the path unreadable; `undefined` is a command with
+    // no coordinates, which contributes nothing.
     if (segment === null) {
         scan.ok = false
         return
@@ -287,9 +255,9 @@ function readNumber(scan: Scan, text: string): void {
     }
     scan.numbers.push(Number(text))
     /*
-     * Per SVG, coordinate pairs after an `M` are implicit `L`s.
-     * dagre never emits that, but honouring it keeps the group
-     * arithmetic below correct if a future Mermaid does.
+     * Per SVG, coordinate pairs after an `M` are implicit `L`s. dagre never
+     * emits that, but honouring it keeps the group arithmetic below correct
+     * if a future Mermaid does.
      */
     if (scan.command === 'M' && scan.numbers.length === 2) {
         flushScan(scan)
@@ -381,19 +349,17 @@ export function cardBorderPoint(centre: Point, toward: Point, halfWidth: number,
  * Round a coordinate before it goes into a `d`.
  *
  * **Six decimals, not Mermaid's three, and the reason is the arrowhead.**
- * Three decimals is a step of 0.001 user units and the arrow-tip contract
- * is a tolerance of 0.0005. An `orient="auto"` marker is rotated to the
+ * Three decimals is a step of 0.001 user units and the arrow-tip contract is
+ * a tolerance of 0.0005. An `orient="auto"` marker is rotated to the
  * direction of the last *two points of the `d`*, and a re-anchored
- * `curveBasis` path's last leg is d3's trailing `L` — a sixth of the
- * last leg, 8–24 units on the captured corpus. Aiming the tip 4.8 units
- * short and then rounding both ends of that chord to 0.001 moves the
- * rendered tip by up to `4.8 × 0.0014 / 8` = 0.0008, the whole
- * tolerance; at six decimals the error is 0.0000008 and the tip lands on
- * the border to 0.000, measured on all 33 corpus `basis` paths.
+ * `curveBasis` path's last leg is d3's trailing `L` — a sixth of the last
+ * leg, 8–24 units on the captured corpus. Aiming the tip 4.8 units short and
+ * then rounding both ends of that chord to 0.001 moves the rendered tip by up
+ * to `4.8 × 0.0014 / 8` = 0.0008, the whole tolerance; at six decimals the
+ * error is 0.0000008.
  *
- * The extra digits only appear where a point moved: `String()` drops
- * trailing zeros, so untouched parts of a path stay byte-identical to
- * Mermaid's output.
+ * The extra digits only appear where a point moved: `String()` drops trailing
+ * zeros, so untouched parts of a path stay byte-identical to Mermaid's output.
  */
 function round(value: number): number {
     return Math.round(value * 1e6) / 1e6
@@ -435,34 +401,32 @@ function reflect(a: Point, b: Point): Point {
 }
 
 // Everything below is the d3 `curveBundle.basis` codec — the shape
-// `useMermaidRender` ships, and the whole point of this module. See the
-// file header for why re-running d3's emission is the only way to
-// relocate an endpoint without changing the curve's shape.
+// `useMermaidRender` ships, and the whole point of this module. See the file
+// header for why re-running d3's emission is the only way to relocate an
+// endpoint without changing the curve's shape.
 
 /**
- * How far a decoded `q` and a re-emitted path may disagree before the
- * decode is rejected as "this is not a bundle basis after all".
+ * How far a decoded `q` and a re-emitted path may disagree before the decode
+ * is rejected as "this is not a bundle basis after all".
  *
- * The check is exact-arithmetic self-consistency: decode, re-emit,
- * compare against what was handed in. A `d` Mermaid wrote carries three
- * decimals, so a correct decode cannot do better than a few thousandths
- * — measured 0.0009 over the whole captured corpus, from the codec
- * *inverting a difference* (`2c₁ − c₂`) of two already-rounded numbers.
- * 0.01 is nearly three orders of magnitude below the shortest leg on any
- * path in the corpus (4.9 units), and the same comparison rejects every
- * non-`curveBasis` shape in the corpus by three orders of magnitude, so
- * it separates the two cases in both directions.
+ * The check is exact-arithmetic self-consistency: decode, re-emit, compare
+ * against what was handed in. A `d` Mermaid wrote carries three decimals, so
+ * a correct decode cannot do better than a few thousandths — measured 0.0009
+ * over the whole captured corpus, from the codec *inverting a difference*
+ * (`2c₁ − c₂`) of two already-rounded numbers. 0.01 is nearly three orders of
+ * magnitude below the shortest leg on any path in the corpus (4.9 units), and
+ * the same comparison rejects every non-`curveBasis` shape in the corpus by
+ * three orders of magnitude, so it separates the two cases in both directions.
  */
 const BUNDLE_BASIS_TOLERANCE = 0.01
 
 /**
  * Is this flattened path the one d3's `curveBundle.basis` emits?
  *
- * That curve is a straight `L` at each end with a spline between, so
- * the command sequence is `M L C…C L` with at least two cubics, and its
- * flat point list is exactly `3n` long for `n` spline points
- * (`1 + 1 + 3(n − 1) + 1`). Both are asserted, because the codec below
- * indexes off them.
+ * That curve is a straight `L` at each end with a spline between, so the
+ * command sequence is `M L C…C L` with at least two cubics, and its flat point
+ * list is exactly `3n` long for `n` spline points (`1 + 1 + 3(n − 1) + 1`).
+ * Both are asserted, because the codec below indexes off them.
  */
 function isBundleBasis(groups: Group[], points: Point[]): boolean {
     if (groups.length < 5) return false
