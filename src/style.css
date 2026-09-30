@@ -1,20 +1,185 @@
-@tailwind components;
-@tailwind utilities;
+/**
+ * Tailwind v4 entry point for the Team Graph plugin.
+ *
+ * Mirrors `spora-frontend/src/style.css` in shape (CSS-first config,
+ * no `content` glob, no `preflight` key) but deliberately deviates in
+ * two places, both because this bundle is injected into a host
+ * document rather than owning one:
+ *
+ * 1. **No preflight.** `@import "tailwindcss"` would pull in Tailwind's
+ *    CSS reset. The host SPA already applies its own reset, and
+ *    preflight's unlayered `*, ::before, ::after { margin: 0; padding: 0;
+ *    border: 0 solid }` would cascade straight into the host document
+ *    and wreck every surface outside the plugin slot. So we import only
+ *    the two halves we need — the theme variables and the utility
+ *    generator — and never `tailwindcss/preflight.css`. This is the
+ *    v4 equivalent of the v3 `@tailwind components; @tailwind
+ *    utilities;` pair, and `scripts/smoke.js` asserts the reset never
+ *    reaches `frontend/style.css`.
+ *
+ * 2. **Utilities are imported UNLAYERED (no `layer(utilities)`).**
+ *    `@spora-ai/components` ships its rules inside `@layer components`
+ *    and documents that consumer utilities should be able to override
+ *    them. Unlayered rules always beat layered ones, so leaving the
+ *    utilities unlayered keeps that contract with zero coupling to
+ *    Tailwind's layer ordering — and it reproduces v3's cascade exactly
+ *    (v3 also emitted its utilities unlayered, which is why the old
+ *    `vendor-components` rename still ranked below them). The
+ *    `layer(theme)` on the theme import is harmless and kept: theme
+ *    variables are `:root` custom properties with no competing rules.
+ *
+ * The plugin's own `.tg-*` rules below stay unlayered too, so the
+ * cascade is unchanged from v3: package `@layer components` loses to
+ * everything here, and `#spora-plugin-team-graph .<utility>`
+ * (1,1,0) outranks a bare `.tg-*` class (0,1,0) on the same element.
+ *
+ * Every generated utility is scoped under the plugin's mount slot by
+ * `tailwind.config.ts → important: '#spora-plugin-team-graph'`, wired
+ * in through the `@config` directive below (v4's supported way to keep
+ * a JS option that has no CSS equivalent).
+ */
+
+/**
+ * The two halves of Tailwind this plugin needs, imported separately.
+ * This is deliberately NOT `@import "tailwindcss"`, which is
+ * `theme + preflight + utilities` — see note 1 at the top of this file
+ * for why preflight must stay out.
+ *
+ * The theme half carries the `layer(theme)` wrapper; the utility half
+ * is imported bare, for the layer-ordering reason in note 2 above.
+ *
+ * They sit above every other at-rule on purpose. CSS requires all
+ * `@import` to precede any rule that isn't a `@charset` or a `@layer`
+ * statement, so trailing them after `@config` / `@source` produced an
+ * invalid stylesheet (Sonar `css:S8778`) that only happened to work
+ * because Tailwind's build step re-orders the at-rules itself.
+ */
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/utilities.css";
+
+/**
+ * `important` is the one v3 option with no CSS-native v4 equivalent, so
+ * it stays in `tailwind.config.ts` and is pulled in here. Everything
+ * else this file configures lives in CSS.
+ */
+@config "../tailwind.config.ts";
+
+/**
+ * Content sources. v4 auto-detects, but auto-detection is *additive*
+ * and walks the whole git-tracked tree, which is wrong for a library
+ * build in two ways:
+ *
+ *  - It picks up prose. `.github/workflows/ci.yml` contains the
+ *    ordinary English words "contents" and "invisible", so the build
+ *    was emitting `.contents { display: contents }` and
+ *    `.invisible { visibility: hidden }` for a plugin that uses
+ *    neither. v3's explicit `content` glob never did this.
+ *  - `source(none)` — the flag that would switch auto-detection off
+ *    cleanly — is **incompatible** with the selector-scoped
+ *    `important` set in `tailwind.config.ts`. Verified on
+ *    tailwindcss 4.3.3: with `source(none)` the emitted rules silently
+ *    lose the `#spora-plugin-team-graph` prefix and ship as bare
+ *    `.flex { … }`, which would leak straight into the host SPA. So we
+ *    must keep auto-detection on and subtract from it instead.
+ *
+ * `@source not` below re-establishes the v3 `content` glob. The paths
+ * are relative to this file. Note `frontend/` is excluded: it holds the
+ * previous build's `main.js`/`style.css`, and scanning those would make
+ * the build feed on its own output.
+ *
+ * Pinning this matters at runtime: `useMermaidRender.ts` builds utility
+ * classes into an `innerHTML` string (`.p-4 .text-sm .text-red-500
+ * .mt-2 .text-xs .whitespace-pre-wrap`), so a missed glob would
+ * silently drop those rules.
+ */
+@source "../index.html";
+@source "../src/**/*.{vue,js,ts,jsx,tsx}";
+@source not "../.github";
+@source not "../coverage";
+@source not "../frontend";
+@source not "../scripts";
+@source not "../tests";
+
+/**
+ * `dark:` must follow the host's `<html class="dark">` toggle, not the
+ * OS `prefers-color-scheme` — v4's default is the media query, which
+ * would fire dark utilities even after the operator switched the host
+ * SPA to light. Mirrors `spora-frontend/src/style.css`.
+ */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/**
+ * Design tokens, ported from the v3 `tailwind.config.ts` `theme.extend`
+ * block. They resolve to the *host* SPA's CSS variables so the plugin
+ * renders in the same design language as the gallery, memories and
+ * typst surfaces without a per-plugin palette to keep in sync.
+ *
+ * v4 `@theme` merges with (rather than replaces) the default theme, so
+ * the stock palette from `tailwindcss/theme.css` — `--color-red-500`
+ * and friends — stays available. That matters: `useMermaidRender.ts`
+ * paints its error fallback with `text-red-500`.
+ *
+ * **`--color-card` is the host's own mapping, copied verbatim.** There
+ * is no `--card` token: `spora-frontend/src/style.css` line 117 maps
+ * `--color-card: hsl(var(--background))`, i.e. in this design system a
+ * card *is* the page background, separated by `border-border` and a
+ * radius — which is why every card in the SPA (`AccountPage`,
+ * `ProfileSettingsPage`, `PluginAppPage`) is
+ * `rounded-xl border border-border bg-card` with no shadow and no fill
+ * of its own. Mirroring the host's line rather than inventing a card
+ * colour is what keeps the plugin on the same page as the rest of the
+ * app in both themes.
+ *
+ * `--color-card-foreground` is the one value with no host counterpart:
+ * the SPA never uses a `text-card-foreground` utility, so it never
+ * needed the token. The SFCs do use it (shadcn's card/foreground
+ * pairing), and leaving it undefined meant the class resolved to
+ * nothing at computed-value time — the same silent failure as a bare
+ * `var()`. `hsl(var(--foreground))` is the only value that invents
+ * nothing: it is the host's own foreground token, i.e. exactly what
+ * the panel's text already inherited before the class existed.
+ */
+@theme {
+    --font-sans: 'Barlow', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', 'Noto Sans', Arial, sans-serif;
+    --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
+
+    --color-border: hsl(var(--border));
+    --color-input: hsl(var(--input));
+    --color-ring: hsl(var(--ring));
+    --color-background: hsl(var(--background));
+    --color-foreground: hsl(var(--foreground));
+    --color-primary: hsl(var(--primary));
+    --color-primary-foreground: hsl(var(--primary-foreground));
+    --color-secondary: hsl(var(--secondary));
+    --color-secondary-foreground: hsl(var(--secondary-foreground));
+    --color-destructive: hsl(var(--destructive));
+    --color-destructive-foreground: hsl(var(--destructive-foreground));
+    --color-muted: hsl(var(--muted));
+    --color-muted-foreground: hsl(var(--muted-foreground));
+    --color-accent: hsl(var(--accent));
+    --color-accent-foreground: hsl(var(--accent-foreground));
+    --color-card: hsl(var(--background));
+    --color-card-foreground: hsl(var(--foreground));
+
+    --radius-lg: var(--radius);
+    --radius-md: calc(var(--radius) - 2px);
+    --radius-sm: calc(var(--radius) - 4px);
+}
 
 /**
  * Global plugin chrome. Scoped to the plugin's mount slot — the
  * host SPA's styles are not affected because Tailwind's preflight
- * uses CSS resets that scope themselves to the cascade. The plugin
- * itself sits inside the `<div id="spora-plugin-team-graph">`
- * wrapper mounted by `App.vue`, so every `important: '#spora-plugin-team-graph'`
- * utility is auto-scoped.
+ * is not imported at all, and every generated utility is scoped by
+ * `important: '#spora-plugin-team-graph'`. The plugin itself sits
+ * inside the `<div id="spora-plugin-team-graph">` wrapper mounted by
+ * `App.vue`.
  *
  * The CSS below paints:
  *  - the Mermaid canvas (viewport + transformable content + zoom
  *    button stack) — the same composition Prototype E uses;
  *  - the per-node content template (`.m-node`, `.m-node-name`, etc.);
- *  - the selection-driven SVG styling (`g.node.selected`, `g.edgePath.out`,
- *    `g.edgePath.in`, `g.node.dimmed`, etc.);
+ *  - the selection-driven SVG styling (`g.node.selected`, `path.flowchart-link.out`,
+ *    `path.flowchart-link.in`, `g.node.dimmed`, etc.);
  *  - the modal + sidebar containers shared with the other plugin
  *    prototypes.
  *
@@ -22,21 +187,60 @@
  * are intentional — Mermaid emits inline `style="…"` on every node
  * shape, and `class` selectors lose specificity without `!important`.
  */
-:root {
+/* The `:root` block is gone. It used to carry `color-scheme: light`
+ * together with the `html, body, #app` block below, and both were
+ * unscoped — see the note there. */
+#spora-plugin-team-graph {
     color-scheme: light;
-}
-
-html,
-body,
-#app {
-    height: 100%;
-    margin: 0;
     font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     font-size: 14px;
     line-height: 1.5;
-    color: #1f2937;
-    background: #f9fafb;
+    /*
+     * No `color` / `background` here, and that is still the point:
+     * the plugin root spans the full page, so painting a fill on it
+     * would repaint the host's `body`. Every *card* inside it carries
+     * its own surface instead — `surface-card` below, which is the same
+     * `hsl(var(--background))` the host paints `body` with, so a card
+     * is the page plus a hairline `border-border` and a radius. That
+     * is the host's own card idiom (`PluginAppPage.vue:165`), and it
+     * is what makes the detail panel's text legible in both themes
+     * without this root pinning a light-theme colour of its own.
+     */
 }
+
+/**
+ * **Scoped to the plugin slot — the `html, body, #app` rule that was
+ * here is not, and that was a real bug.**
+ *
+ * The host loads this stylesheet with a plain
+ * `<link rel="stylesheet" href="/plugins/team-graph/style.css">`
+ * injected into `document.head` (`spora-frontend/src/apps/registry.ts
+ * → injectPluginStylesheet`), so it is a normal document-level sheet
+ * with no scoping of its own. The old
+ *
+ *     html, body, #app { color: #1f2937; background: #f9fafb; … }
+ *
+ * therefore applied to the **host SPA's own `body`**, not to the
+ * plugin. The host declares `body { background-color:
+ * hsl(var(--background)) }` inside `@layer base`, and an *unlayered*
+ * rule beats a layered one regardless of order — so for as long as
+ * the plugin was mounted, the whole host application was forced to a
+ * light background with dark text, and the host's `.dark` toggle had
+ * no effect on it at all.
+ *
+ * Verified in the built asset rather than inferred: `frontend/style.css`
+ * contained `html,body,#app{color:#1f2937;background:#f9fafb;…}` and
+ * nothing else unscoped targets a host element.
+ *
+ * This file's own header already claimed "the host SPA's styles are
+ * not affected"; that claim was false for exactly this one rule, and
+ * is now true. Scoping to `#spora-plugin-team-graph` — the wrapper
+ * `App.vue` renders as its own root — is the same selector
+ * `tailwind.config.ts → important:` uses, so the hand-written chrome
+ * and the generated utilities now share one boundary. The dev entry
+ * mounts into that same id (see `index.html`), so `npm run dev` and
+ * production are structurally identical.
+ */
 
 /**
  * Mermaid canvas — viewport + transformable content. Pan/zoom is
@@ -55,119 +259,1071 @@ body,
 .tg-canvas-content { transform-origin: 0 0; will-change: transform; }
 
 /**
- * Per-node content template — rendered by Mermaid's `htmlLabels: true`
- * path inside a `<foreignObject>`. Sized so text stays readable on
- * first render; with `useMaxWidth:false` the SVG renders at its
- * natural size, so these sizes land directly on screen.
+ * The empty state — a team with no agents, where
+ * `TeamGraphCanvas.vue` paints a note instead of a diagram.
+ *
+ * The two declarations undone are both *promises about a diagram*:
+ * `cursor: grab` says there is something here to drag, and
+ * `touch-action: none` stops the browser turning a touch-drag on this
+ * 620 px card into a page scroll. With no nodes under the cursor both
+ * are small lies, and the second one costs the operator their scroll
+ * on a card that occupies most of a phone screen. `usePanZoom`'s
+ * pointer handlers stay attached either way — they live on the wrap
+ * and a no-op drag over a note is harmless.
  */
-.tg-node {
-    padding: 14px 16px;
-    min-width: 240px;
+.tg-canvas-wrap--idle { cursor: default; touch-action: auto; }
+
+/**
+ * Mermaid node boxes — geometry only, never seen.
+ *
+ * `useMermaidRender.ts` renders the diagram with `htmlLabels: false`
+ * and then grows every `g.node` rect to the Variant M card footprint
+ * (`NODE_CARD_WIDTH` × `NODE_CARD_HEIGHT` in `lib/nodeLayout.ts`)
+ * so the SVG's own bounding box — and therefore the `viewBox` /
+ * `fit()` calculation — encloses the cards the HTML overlay is about
+ * to paint.
+ *
+ * The visible card is `AgentNodeCard.vue`, a sibling of the SVG
+ * inside the same transformed `.tg-canvas-content` element, so pan /
+ * zoom / fit / resize move both layers together with no JavaScript.
+ *
+ * These boxes and their `<text>` labels are therefore painted fully
+ * transparent, in **every** state: these selectors are keyed on
+ * `g.node`, not on `g.node.selected` / `g.node.dimmed`, so nothing the
+ * selection store does can re-expose a fill. `!important` is required
+ * because Mermaid ships an inline `style="fill:…"` on each shape and a
+ * `#m-N .node rect` rule inside the SVG's own `<style>`.
+ *
+ * `useMermaidRender` additionally writes the same `fill: none;
+ * stroke: none` as an **inline style** on each shape it resizes. That
+ * is the belt to this braces: an inline declaration outranks the
+ * SVG's own stylesheet, so the boxes stay unpainted even in the one
+ * scenario this file cannot cover — `style.css` failing to load at
+ * all, which is exactly when the host would otherwise show Mermaid's
+ * raw node boxes (its default theme paints them `#ECECFF` with a
+ * `#9370DB` stroke: a light-lavender box with a purple border) on top
+ * of a card with no surface of its own.
+ */
+#spora-plugin-team-graph .tg-canvas-content svg g.node rect,
+#spora-plugin-team-graph .tg-canvas-content svg g.node polygon,
+#spora-plugin-team-graph .tg-canvas-content svg g.node circle,
+#spora-plugin-team-graph .tg-canvas-content svg g.node ellipse {
+    fill: transparent !important;
+    stroke: transparent !important;
+}
+#spora-plugin-team-graph .tg-canvas-content svg g.node text,
+#spora-plugin-team-graph .tg-canvas-content svg g.node tspan {
+    fill: transparent !important;
+}
+/* The card-sized boxes are exactly under the cards, which are a
+ * separate HTML layer above the SVG, so nothing needs to hit-test
+ * them. Switching them off keeps every pointerdown outside a card on
+ * the SVG background (and therefore pan-capable). */
+.tg-canvas-content svg g.node { pointer-events: none; }
+
+/**
+ * Node-card overlay layer.
+ *
+ * A zero-size anchor: every card inside it is absolutely positioned
+ * against the content layer's origin, so adding or removing cards
+ * never reflows anything. `pointer-events: none` keeps the gaps
+ * between cards clickable (the wrap below needs them to pan); the
+ * cards opt back in individually.
+ */
+.tg-node-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 0;
+    height: 0;
+    pointer-events: none;
+}
+
+/**
+ * Variant M card — `prototype-m-edge-counts.html`.
+ *
+ * Avatar tile left, name top-right, status pill bottom-left,
+ * edge-count badges bottom-right; fixed 240 px width, name
+ * ellipsised. The accent bar of the previous compact variant is
+ * gone: the shared `AgentAvatar` tile is the agent's identity, and
+ * it reads `profile_picture` straight off the wire payload.
+ *
+ * The height is 63 px and is derived from the parts below rather than
+ * authored here: 1.5 × 2 border + 8 × 2 block padding + a 44 px
+ * content box, which is the 44 px tile. See `NODE_CARD_HEIGHT` in
+ * `lib/nodeLayout.ts`.
+ *
+ * **No `width` / `height` here, on purpose.** The card's box is
+ * load-bearing in four places — the painted card, the overlay's
+ * `translate3d`, the `g.node` rect `useMermaidRender` grows, and the
+ * border `edgeGeometry` walks each arrow tip onto — and three of them
+ * read `NODE_CARD_WIDTH` / `NODE_CARD_HEIGHT`. So the fourth states it
+ * inline from the same constants (`AgentNodeCard.vue → cardStyle`) and
+ * this file carries no footprint literal. Every earlier regression on
+ * this card came through exactly that seam: a resize that reached the
+ * CSS but not the constants left the arrowheads describing a box that
+ * no longer existed. `tests/style.spec.ts` fails the build if a literal
+ * creeps back in.
+ *
+ * **`align-items: flex-start`, not `center`.** The card is a 44 px tile
+ * beside a 37.8 px body column, and the body is the *shorter* of the
+ * two — so they are not interchangeable and the tile has nothing to be
+ * centred against. Pinning both to the top padding edge is what puts the
+ * name's line box on the tile's top edge, which is where the operator
+ * asked for it: row 1 used to be forced to the tile's whole 44 px with
+ * the name centred inside it, and a 15.6 px line box centred in a 44 px
+ * band sits 14.2 px lower than it does now. The centre-alignment is
+ * deliberately gone — see `NODE_CARD_HEADLINE_HEIGHT` in
+ * `lib/nodeLayout.ts` for the reversal, in full.
+ *
+ * The card element is a real `<button type="button">` (see
+ * `AgentNodeCard.vue`), so this rule also has to undo what the UA
+ * stylesheet does to every button: drop the native chrome with
+ * `appearance: none` (otherwise Safari/WebKit keeps `buttonface` and
+ * Firefox its inner focus ring), and opt back in to the inherited
+ * font, because `font` is one of the properties a `<button>` does
+ * *not* inherit. The `font:` shorthand comes before `font-family` so
+ * the prototype's own stack still wins.
+ *
+ * `translate3d(x, y, 0)` is written inline by `AgentNodeCard.vue`
+ * from the measured node centre; `position: absolute` keeps every
+ * card out of flow.
+ *
+ * **`padding: 8px 13px` is the prototype's inline padding and one
+ * pixel less than its block padding, and the reason is the tile.** The
+ * prototype sized `9px 13px` for a **32 px** tile; this card carries the
+ * 44 px one the operator asked for, and at 9 px of block padding the
+ * card still measured 65 px — 23.2 px of the old height gone, but 2 px
+ * of it still padding nobody asked for. The inline padding is untouched
+ * at 13 px: the status row's arithmetic is measured against it (the row
+ * is 158 px wide and the two badges take 67.5 of it), and that did not
+ * change. Measured in a headless browser in both themes, the four insets
+ * render at 9 / 10 / 14 / 14 px, top / bottom / left / right — the extra
+ * pixel at the bottom is the 1.5 px border rounded to a whole one, and
+ * it was there before this change too. Those are the *tile's* insets,
+ * which is the one thing whose meaning moved: the tile used to float in
+ * the top 44 px of a 67.2 px content column and now fills the whole of
+ * a 44 px one, so the body column's own bottom inset reads 16.2 px.
+ * That asymmetry is what top-aligning the headline costs, and it is the
+ * only one this change introduces.
+ */
+.tg-node-card {
+    position: absolute;
+    top: 0;
+    left: 0;
+    box-sizing: border-box;
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    margin: 0;
+    padding: 8px 13px;
+    appearance: none;
+    -webkit-appearance: none;
+    background: #fff;
+    color: #0f172a;
+    border: 1.5px solid #7c3aed;
+    border-radius: 10px;
+    box-shadow: 0 2px 6px -2px rgba(15, 23, 41, 0.08);
+    font: inherit;
+    font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    cursor: pointer;
+    pointer-events: auto;
     text-align: left;
-    line-height: 1.35;
-    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    transition: box-shadow 150ms, border-color 150ms;
 }
-.tg-node-name  { font-size: 16px; font-weight: 600; color: #0f172a; margin: 0; letter-spacing: -0.01em; }
-.tg-node-role  { font-size: 13px; color: #64748b; margin: 4px 0 10px; }
-.tg-node-stats { font-size: 13px; color: #475569; margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(15, 23, 41, 0.08); display: flex; justify-content: space-between; gap: 12px; }
-.tg-node-stats strong { color: #0f172a; font-weight: 600; }
+.tg-node-card:hover { border-color: #4f46e5; }
+.tg-node-card:focus-visible { outline: 2px solid #4f46e5; outline-offset: 2px; }
+.tg-node-card.is-selected {
+    border-color: #4f46e5;
+    box-shadow: 0 0 0 2px rgba(79, 70, 229, 0.25);
+}
 
 /**
- * Status pills — same shape as the other plugin prototypes. The
- * `status-running` / `status-pending` / `status-awaiting` /
- * `status-failed` / `status-completed` / `status-aborted` classes
- * are applied inside the `m-node` HTML block by
- * `lib/mermaidSource.ts`.
+ * Selection states must not dissolve the card's own surface.
+ *
+ * The card is the only painted node box on the canvas — Mermaid's
+ * `g.node` shapes are forced transparent above, and the `<svg>` sits
+ * *below* the overlay — so anything that fades the button fades the
+ * prototype-M surface with it. `opacity: 0.28` on a dimmed card was
+ * measured rendering `#f9fafb` (the canvas showing through) where an
+ * un-dimmed card renders `#ffffff`, and a `rgba()` border on an
+ * adjacent card composites to a washed-out edge for the same reason.
+ * Both read as a pale, half-painted box rather than a card.
+ *
+ * So: every state keeps `background: #fff` at full opacity and
+ * recedes through *colours* only — an opaque muted border for the
+ * dimmed case, the selected/adjacent pair distinguished by hue and by
+ * the ring. The dimmed card's *contents* are what actually fade.
  */
-.tg-status-pill { display: inline-flex; align-items: center; gap: 4px; font-size: 10px; font-weight: 600; padding: 2px 7px; border-radius: 999px; letter-spacing: 0.02em; white-space: nowrap; }
-.tg-status-pill .dot { width: 6px; height: 6px; border-radius: 999px; flex-shrink: 0; }
-.tg-status-running  { background: rgba(16, 185, 129, 0.12); color: #047857; }
-.tg-status-running  .dot { background: #10b981; }
-.tg-status-pending  { background: rgba(99, 102, 241, 0.12); color: #4338ca; }
-.tg-status-pending  .dot { background: #6366f1; }
-.tg-status-awaiting { background: rgba(245, 158, 11, 0.12); color: #b45309; }
-.tg-status-awaiting .dot { background: #f59e0b; }
-.tg-status-failed   { background: rgba(239, 68, 68, 0.12); color: #b91c1c; }
-.tg-status-failed   .dot { background: #ef4444; }
-.tg-status-completed { background: rgba(148, 163, 184, 0.18); color: #475569; }
-.tg-status-completed .dot { background: #94a3b8; }
-.tg-status-aborted   { background: rgba(168, 85, 247, 0.12); color: #6b21a8; }
-.tg-status-aborted   .dot { background: #a855f7; }
+.tg-node-card.is-adjacent { border-color: #a5b4fc; }
+.tg-node-card.is-dimmed {
+    border-color: #e2e8f0;
+    box-shadow: none;
+}
+.tg-node-card.is-dimmed > * { opacity: 0.35; }
 
 /**
- * Selection-driven SVG styling. Mermaid paints the entire diagram
- * inside `<svg>`; nodes are `<g class="node" id="flowchart-nX-Y">`,
- * edges are `<g class="edgePath" id="flowchart-nX-nY-N">`. The
- * `selected` / `adjacent` / `dimmed` classes are toggled
- * imperatively by `useMermaidRender.ts` after every render and on
- * every selection change. `out` / `in` / `dim` do the same for
- * edges (emerald for outgoing, indigo for incoming, dim for the
- * rest). `!important` is required to win against Mermaid's
- * inline `style="stroke:…"` on each shape.
+ * The tile's edge, in px, from the same constant the card's height is
+ * derived from.
+ *
+ * `size="md"` is the package's documented 44 px step, but it states it
+ * in `2.75rem` — and `rem` resolves against the **root** font size, not
+ * against the plugin. A host that set `html { font-size: 18px }` would
+ * paint a 49.5 px tile inside a box computed from 44 px, and the tile
+ * would spill out of the content box it is supposed to fill. So the card
+ * names the edge itself (`--tg-avatar-size`, set inline from
+ * `NODE_CARD_AVATAR_SIZE`) and this rule states it in px. The remaining
+ * `flex-shrink` and the shadow are the prototype's own.
+ *
+ * It used to be read by `.tg-node-card-row1` as well, which is how the
+ * headline was centred on it. It is now read only here, because the
+ * headline is top-aligned against the tile rather than centred on it —
+ * the same reversal `NODE_CARD_HEADLINE_HEIGHT` documents.
  */
-.tg-canvas-content svg g.node { cursor: pointer; transition: opacity 150ms; }
-.tg-canvas-content svg g.node.selected rect,
-.tg-canvas-content svg g.node.selected polygon,
-.tg-canvas-content svg g.node.selected .basic.label-container {
-    stroke: #4f46e5 !important;
-    stroke-width: 3px !important;
-    filter: drop-shadow(0 0 0 2px rgba(79, 70, 229, 0.25));
+.tg-node-card-avatar {
+    inline-size: var(--tg-avatar-size);
+    block-size: var(--tg-avatar-size);
+    flex-shrink: 0;
+    box-shadow: 0 1px 2px rgba(15, 23, 41, 0.18);
 }
-.tg-canvas-content svg g.node.adjacent rect,
-.tg-canvas-content svg g.node.adjacent polygon,
-.tg-canvas-content svg g.node.adjacent .basic.label-container {
-    stroke: rgba(79, 70, 229, 0.55) !important;
-    stroke-width: 2.5px !important;
+
+/**
+ * The tile's shape, in one place — and now, for *every* branch.
+ *
+ * `AgentNodeCard` and `AgentDetailPanel` must both paint the same
+ * silhouette, and the package does not give them one: the archetype
+ * branch rounds to `.5rem` at `size="sm"` but to **`.75rem` at
+ * `size="md"`**, while the **initials** branch is forced to `9999px`
+ * on `.avatar--initials[data-v-0a52efe6]` regardless of size. So the
+ * moment the card moved up a size step the same agent would have drawn
+ * a 12 px-rounded square with an archetype and a circle without one —
+ * exactly the branch-dependent silhouette this rule exists to prevent,
+ * and it would have done it in *both* directions at once. Forcing the
+ * radius on the tile element itself (rather than only on
+ * `.avatar--initials`) covers archetype, image and initials alike.
+ *
+ * These rules are **unlayered**, which is the whole mechanism: the
+ * package ships `.avatar--md` / `.avatar--initials` inside
+ * `@layer components`, and unlayered author rules beat layered ones
+ * regardless of specificity. That is why the override needs no
+ * `!important` and cannot be beaten by the package bumping its own
+ * selector.
+ */
+.tg-node-card-avatar,
+.tg-node-card-avatar.avatar--initials,
+.tg-agent-tile .avatar--initials,
+.tg-agent-tile { border-radius: 0.5rem; }
+
+/* The body and the two rows are `<span>`s so the card can be a
+ * `<button>` (whose content model is phrasing content). `flex` is
+ * therefore load-bearing here, not cosmetic: an inline body would
+ * split the rows across lines instead of stacking them. */
+.tg-node-card-body { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; }
+/**
+ * Row 1 is the headline, at the headline's own height, top-aligned.
+ *
+ * **The `block-size` this rule used to carry is the change.** Row 1 was
+ * forced to `var(--tg-avatar-size)` with the name centred inside it, so
+ * the name's line-box centre and the tile's centre coincided at
+ * Δ = 0.000 px. That is a real alignment, and it is what the operator
+ * asked to give up: a 15.6 px line box centred in a 44 px band hangs
+ * 14.2 px below the tile's top edge, and the report was "the headline
+ * sits low". With the `block-size` gone the row is 13 px × 1.2 = 15.6 px
+ * — the same number as `NODE_CARD_HEADLINE_HEIGHT` in
+ * `lib/nodeLayout.ts`, which is what keeps the height equation honest
+ * — and `align-items: flex-start` (matching the card) puts the name's
+ * top edge on the tile's top edge. Measured after the change, in a
+ * headless browser in both themes: the name's line-box centre is
+ * 14.203 px *above* the tile's centre, which is exactly half of
+ * (44 − 15.6).
+ *
+ * Nothing else depended on the old alignment: the row gap below is the
+ * only thing that moved with it, and the card is shorter by 25.2 px.
+ */
+.tg-node-card-row1 { display: flex; align-items: flex-start; gap: 6px; }
+/**
+ * Row 2 is the pill and the edge-count badges, and its `min-height` is
+ * the status row's *content* height, not a reserve for a label that
+ * might wrap: `NODE_CARD_ROW2_HEIGHT` in `lib/nodeLayout.ts` derives it
+ * as the taller of the pill's own box (11 px × 1.2 + 2 × 3 = 19.2 px)
+ * and the badges' (10 px × 1.4 + 2 × 1 = 16 px), and
+ * `NODE_CARD_BODY_HEIGHT` adds it in. The numbers have to move together
+ * or the card either grows a hole or clips its own pill — asserted in
+ * `tests/lib/nodeLayout.spec.ts`. See `.tg-node-card-pill` below for why
+ * the label no longer wraps.
+ *
+ * `margin-top: 3px` is `NODE_CARD_ROW_GAP`, down from the prototype's
+ * 4 px. It is the headline↔badges gap the operator asked to be smaller,
+ * and it is now *the* gap: measured, the name's line-box bottom sits
+ * 3.0 px above the pill's top edge, where it used to sit 18.2 px above
+ * it. Reducing it does **not** make the card shorter — the 44 px tile is
+ * the height floor, not the body column — so the height came from the
+ * `block-size` on row 1 and from the block padding, and the gap is a
+ * pure spacing change.
+ */
+.tg-node-card-row2 {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+    margin-top: 3px;
+    min-height: 19.2px;
 }
-.tg-canvas-content svg g.node.dimmed { opacity: 0.28; }
-.tg-canvas-content svg g.edgePath.dim path { stroke-opacity: 0.15; }
-.tg-canvas-content svg g.edgePath.out path { stroke: #059669 !important; stroke-width: 2.6px !important; }
-.tg-canvas-content svg g.edgePath.in  path { stroke: #4f46e5 !important; stroke-width: 2.6px !important; }
-.tg-canvas-content svg g.edgeLabel.dim { opacity: 0.15; }
+.tg-node-card-name {
+    font-size: 13px;
+    font-weight: 600;
+    line-height: 1.2;
+    color: #0f172a;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.tg-node-card-badges { display: flex; gap: 4px; flex-shrink: 0; }
+
+/**
+ * Status pill — Variant M shape (a tinted capsule) on top of the colour
+ * map the plugin has always used. `--tg-status-color` is the single
+ * knob: the six `.tg-status-*` slugs below set it and everything else
+ * derives from it via `color-mix`, so there is exactly one
+ * status → colour table in the plugin (the one `lib/nodeStatus.ts →
+ * statusPillClass()` names) shared with `AgentStatusChip.vue`.
+ *
+ * `color-mix()` is the same idiom `Avatar` uses for its archetype
+ * gradient and `lib/agentAvatar.ts` for the status ring, so the
+ * tints sit in the same lightness band as the package's swatches.
+ *
+ * `max-width` / `white-space: normal` are the prototype's, and they are
+ * here for the **panel** pills (the detail header), not the card's: the
+ * card overrides both in `.tg-node-card-pill` below, because a label
+ * that wraps makes the card a different height for a different status
+ * and a fixed box cannot afford that.
+ */
+.tg-status-pill {
+    --tg-status-color: #94a3b8;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 1.2;
+    letter-spacing: 0.02em;
+    padding: 3px 9px;
+    border-radius: 10px;
+    background: color-mix(in srgb, var(--tg-status-color) 14%, white);
+    color: color-mix(in srgb, var(--tg-status-color) 45%, #0f172a);
+    max-width: 92px;
+    white-space: normal;
+    text-align: center;
+    flex-shrink: 1;
+}
+.tg-status-pill .dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 999px;
+    flex-shrink: 0;
+    /* Anchor the dot to the first text line when the label wraps. */
+    align-self: flex-start;
+    margin-top: 2px;
+    background: var(--tg-status-color);
+}
+
+/**
+ * The card's own pill: **one line, always**, so the card is one box for
+ * every status.
+ *
+ * This is what removed the 46 px worst-case status-row reserve. The
+ * shared pill above wraps a long label — measured, "awaiting approval"
+ * and "awaiting sub-agent" take two lines and "awaiting final approval"
+ * three — and a card whose height then depends on its status cannot be
+ * the fixed box `nodeLayout.ts` / `edgeGeometry.ts` /
+ * `useMermaidRender.ts` all agree on. So the label is taken on a single
+ * line and the overflow is ellipsised, which is what
+ * `.tg-chat-row-status` already did for the same reason: a truncated
+ * status is better than a card that changes size, and the full string
+ * is still on the card (`title`) and in the detail panel.
+ *
+ * `min-width: 0` is load-bearing, not tidy-up. A flex item's automatic
+ * minimum size is its **min-content** width, and a `nowrap` item's
+ * min-content width is the whole label — so without it the pill refuses
+ * to shrink, blows past its share of the row and pushes the edge-count
+ * badges off the right edge of the card. With it, `text-overflow` can
+ * engage and the row's `justify-content: space-between` still holds.
+ *
+ * `max-width: 92px` is inherited from the shared rule above and the
+ * arithmetic in the row is tighter than it anyway: the row is 158 px
+ * wide and the two badges take 67.5 of it, so the pill can never get
+ * more than 84.5 px (measured 84.469 for every one of the eleven
+ * labels). The declared cap is kept because it is the number that keeps
+ * the label column recognisable if the card is ever widened.
+ */
+.tg-node-card-pill {
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.tg-status-running  { --tg-status-color: #10b981; }
+.tg-status-pending  { --tg-status-color: #6366f1; }
+.tg-status-awaiting { --tg-status-color: #f59e0b; }
+.tg-status-failed   { --tg-status-color: #ef4444; }
+.tg-status-completed { --tg-status-color: #94a3b8; }
+.tg-status-aborted   { --tg-status-color: #d946ef; }
+
+/**
+ * Edge-degree badges. `--in` is emerald, `--out` violet, and
+ * `--zero` slate — the prototype's "don't shout" treatment, kept
+ * because a 0-inbound node is an entry-point agent and a 0-outbound
+ * node is a terminus, and that difference is the whole point of
+ * showing counts on the card. The variant is chosen per badge by
+ * `AgentNodeCard.vue`, not per pair.
+ *
+ * The badge text is 10 px at weight 700, which is *normal* text as
+ * far as WCAG is concerned (large text starts at 18.66 px bold), so
+ * every pair needs 4.5:1. `--zero` is slate-600 on slate-100
+ * (6.92:1), not the slate-400 `#94a3b8` it used to be (2.34:1, a
+ * clear fail) — "muted" is carried by the slate *background* and by
+ * the neighbouring emerald/violet badges, so darkening the text to
+ * meet AA costs the badge nothing visually. Do not "harmonise" it
+ * back to `#94a3b8` to match `--tg-status-color` for the completed
+ * status: that hue equality is worth less than the readability.
+ */
+.tg-edge-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    padding: 1px 6px;
+    border-radius: 4px;
+    font-size: 10px;
+    font-weight: 700;
+    line-height: 1.4;
+}
+.tg-edge-badge--in   { background: #d1fae5; color: #047857; }
+.tg-edge-badge--out  { background: #ede9fe; color: #6d28d9; }
+.tg-edge-badge--zero { background: #f1f5f9; color: #475569; }
+
+/**
+ * Selection-driven *edge* styling.
+ *
+ * Node highlighting is gone from the SVG: the node boxes are
+ * transparent and `AgentNodeCard` paints `is-selected` /
+ * `is-adjacent` / `is-dimmed` on itself from the same Pinia store.
+ * Edges are the one thing Mermaid still draws, so
+ * `useMermaidRender.ts` tags each `path.flowchart-link` with
+ * `out` / `in` / `dim` on every render and every selection change.
+ * `!important` is required to win against Mermaid's inline
+ * `style="stroke:…"` on each path.
+ */
+.tg-canvas-content svg path.flowchart-link.dim { stroke-opacity: 0.15; }
+.tg-canvas-content svg path.flowchart-link.out { stroke: #059669 !important; stroke-width: 2.6px !important; }
+.tg-canvas-content svg path.flowchart-link.in  { stroke: #4f46e5 !important; stroke-width: 2.6px !important; }
 .tg-canvas-content svg .edgeLabel { transition: opacity 150ms; }
 
 /**
- * Modal + sidebar. The sidebar is `lg:` only; below `lg` the
- * agent detail is rendered as a centred modal so it doesn't
- * collide with the host's right-side sheet.
+ * Modal chrome was dropped in v0.1.1 (per user feedback: "details
+ * open in an overlay instead of the sidebar"). The detail panel
+ * now renders as a right sidebar at every breakpoint — see
+ * `<AgentDetailPanel />`'s sticky positioning below. What remains
+ * here are the section + row primitives the sidebar is built from.
+ *
+ * Edge rows are deep-link buttons — clicking one jumps selection to
+ * the other agent on the edge. Chat rows are deep-link buttons that
+ * navigate to the host's task chat.
  */
-.tg-modal-backdrop { position: fixed; inset: 0; z-index: 50; display: flex; align-items: center; justify-content: center; }
-.tg-modal-backdrop .tg-backdrop-btn { position: absolute; inset: 0; background: rgba(0,0,0,0.5); border: none; padding: 0; cursor: pointer; }
-.tg-modal-panel {
-    position: relative; background: var(--background); border-radius: 12px;
-    border: 1px solid var(--border); box-shadow: 0 25px 50px -12px rgba(0,0,0,0.25);
-    width: 100%; max-width: 560px; max-height: 85vh; margin: 0 16px;
-    display: flex; flex-direction: column;
-}
-.tg-modal-header { display: flex; align-items: center; justify-content: space-between; padding: 14px 20px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
-.tg-modal-body   { flex: 1; overflow-y: auto; padding: 14px 20px; }
-.tg-modal-close  { display: flex; align-items: center; justify-content: center; width: 32px; height: 32px; border-radius: 8px;
-                   color: var(--muted-foreground); background: transparent; border: none; cursor: pointer; }
-.tg-modal-close:hover { color: var(--foreground); background: var(--muted); }
 
-.tg-task-row { padding: 10px 12px; border-radius: 8px; transition: background 150ms; }
-.tg-task-row:hover { background: var(--muted); }
-.tg-edge-row { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 8px; cursor: pointer; transition: background 150ms; }
-.tg-edge-row:hover { background: rgba(79, 70, 229, 0.06); }
+/**
+ * Panel section rhythm.
+ *
+ * The sidebar is a 340 px column of stacked sections that all used
+ * to sit on one `space-y-5`, so the only thing separating "Outbound"
+ * from "Inbound" was 20 px of whitespace — at a glance the column
+ * read as one undifferentiated run of small type. Each section now
+ * carries a hairline rule above it: the column reads as discrete
+ * blocks, and the eye can find a section's boundary without relying
+ * on a heading alone.
+ *
+ * The rule is `--border` at `border-top`, i.e. the host's own token,
+ * so it tracks light and dark automatically — there is no second
+ * divider colour to maintain. `.tg-panel-section + .tg-panel-section`
+ * rather than a border on every section, so the first section (the
+ * Activity row, which has no heading of its own) is not orphaned
+ * under a rule that refers to nothing above it.
+ *
+ * The negative margin pulls the hairline up to the midpoint of the
+ * `space-y-4` gap, so the 16 px of padding below the rule and the
+ * 16 px of space above it read as one 32 px break rather than a
+ * rule floating at the top of a wide gap.
+ *
+ * **`hsl(var(--border))`, not `var(--border)`.** Every rule in this
+ * block wraps the host token in `hsl()`. The host declares its tokens
+ * as bare HSL *channel* triples — `--border: 240 5.9% 90%` in
+ * `spora-frontend/src/style.css` — not as colours, so a bare
+ * `var(--border)` in a `border-color` is an invalid value and the
+ * whole declaration is dropped at computed-value time, silently
+ * falling back to the initial value. The sidebar rules that predate
+ * this change and used the bare form were fixed along with it; see
+ * `.tg-edge-row:hover`.
+ *
+ * Re-measured for this pass, because the earlier note in this comment
+ * described the failure imprecisely enough to mislead a debugger. It
+ * read: "computes to `rgb(31, 41, 55)` (inherited from the page)".
+ * The colour is real, but the inference from it was not: `rgb(31, 41,
+ * 55)` is the *initial* `border-top-color` inside a
+ * `color: #1f2937` container (the plugin's own old `html, body, #app`
+ * rule, now gone), not a sign that the declaration degraded to a
+ * colour fallback. `border-top` is a **shorthand**, so
+ * `1px solid var(--border)` invalidates all of it at once. Measured
+ * with the host's real tokens loaded:
+ *
+ *     light, bare            →  0px none rgb(9, 9, 11)
+ *     light, hsl()           →  1px solid rgb(228, 228, 231)
+ *     light, bare, inside a
+ *             #1f2937 parent →  0px none rgb(31, 41, 55)
+ *     dark,  bare            →  0px none rgb(250, 250, 250)
+ *     dark,  hsl()           →  1px solid rgb(39, 39, 42)
+ *
+ * The `border-top-style: none` is the load-bearing part: the width is
+ * 0, so *no rule is drawn at all* — the same end state a colour
+ * fallback produces, arrived at for a completely different reason.
+ */
+.tg-panel-section + .tg-panel-section {
+    margin-top: -4px;
+    padding-top: 16px;
+    border-top: 1px solid hsl(var(--border));
+}
+.tg-panel-section:first-child { margin-top: 0; }
+
+/**
+ * Section heading.
+ *
+ * Was `text-[10px] … text-muted-foreground` repeated inline on every
+ * `<h4>`. Two changes, both measured:
+ *
+ *  - **10 px → 11 px.** At 10 px the glyphs are below the size at
+ *    which a semibold uppercase label is comfortably legible, and the
+ *    `tracking-wider` (0.05 em) that helps at larger sizes visibly
+ *    breaks the word shapes apart at 10 px. 11 px keeps the
+ *    "small caps label" reading without the smearing. The cap is set
+ *    explicitly rather than left to the UA so the two themes cannot
+ *    disagree: `--muted-foreground` is `hsl(240 4% 38%)` on white in
+ *    light and `hsl(240 5% 64.9%)` on `hsl(240 10% 3.9%)` in dark,
+ *    which is 8.6:1 and 8.1:1 against their own surfaces — both well
+ *    past AA for normal text, so the label can stay quiet without
+ *    costing legibility.
+ *  - **`--panel-fg` instead of `hsl(var(--foreground))`.** The heading is
+ *    a label, not a value, so it wants the muted token; naming it
+ *    once here means the "label vs value" contrast in the panel is a
+ *    single decision rather than a per-heading one.
+ */
+.tg-panel-heading {
+    --panel-fg: hsl(var(--muted-foreground));
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px;
+    margin: 0 0 8px;
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 1.3;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--panel-fg);
+}
+
+/**
+ * The count in a section heading.
+ *
+ * Rendered as a trailing token so the heading's *words* stop being
+ * read as part of the count ("OUTBOUND — SPAWNED (4)" is one run of
+ * capitals; the number is the only thing in it that is not a word).
+ * `tabular-nums` so a live-updating count does not shift the
+ * heading's baseline sideways between polls.
+ */
+.tg-panel-count {
+    flex-shrink: 0;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.02em;
+    /* The host's foreground, not the muted one: the count is the
+     * payload of the heading, and at 11 px it needs the extra
+     * contrast to stay readable as a scannable number. */
+    color: hsl(var(--foreground));
+}
+
+/**
+ * The Activity row — a label/value pair rather than a heading over a
+ * line, because the counts *are* the content of that section.
+ * `.tg-panel-stats-num` is what makes it scannable: two numbers set
+ * in the foreground against a muted label, with a tabular figure so
+ * "0" and "1" occupy the same width and the row does not jitter
+ * when a poll flips a count.
+ */
+.tg-panel-stats {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px;
+    font-size: 12px;
+    line-height: 1.4;
+}
+.tg-panel-stats-label { color: hsl(var(--muted-foreground)); }
+.tg-panel-stats-value { color: hsl(var(--muted-foreground)); text-align: right; }
+.tg-panel-stats-num {
+    color: hsl(var(--foreground));
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+}
+.tg-panel-stats-sep { padding: 0 4px; }
+
+/**
+ * Body copy + empty states + the "+N more" overflow line.
+ *
+ * One definition each because the panel states the same three kinds
+ * of secondary text in five places, and the previous copy-pasted
+ * `text-xs text-muted-foreground` / `text-[11px] …` on each was both
+ * the source of drift and unreadable at 11 px in the dark theme,
+ * where the muted token drops to `hsl(240 5% 64.9%)` on a near-black
+ * surface and a 1 px-ish glyph starts to disappear.
+ */
+.tg-panel-prose {
+    margin: 0;
+    font-size: 12px;
+    line-height: 1.45;
+    color: hsl(var(--foreground));
+    opacity: 0.9;
+}
+.tg-panel-empty {
+    margin: 0;
+    font-size: 12px;
+    line-height: 1.4;
+    color: hsl(var(--muted-foreground));
+}
+/**
+ * The overflow line sits *inside* the list, under the last row, so
+ * it is indented to the text column rather than flush to the section
+ * edge — otherwise it reads as another row. 11 px → 12 px: at 11 px
+ * this line was the smallest text in the panel and carried the only
+ * information about truncation.
+ */
+.tg-panel-more {
+    margin: 2px 0 0;
+    padding: 2px 0 2px 10px;
+    font-size: 12px;
+    line-height: 1.4;
+    color: hsl(var(--muted-foreground));
+}
+
+/**
+ * The list wrapper. `gap: 2px` rather than the previous
+ * `space-y-1` (4 px): the rows carry their own 8 px vertical padding
+ * and a hover background, so a 4 px gap made adjacent hover targets
+ * read as two separate blocks with a seam between them.
+ */
+.tg-panel-list { display: flex; flex-direction: column; gap: 2px; }
+
+/**
+ * Row text. Shared by the edge rows and the chat rows so a sub-agent
+ * and a chat present the same two-line rhythm in the same column.
+ *
+ * `<span>`s with `display: block` rather than `<p>`s, so a row can
+ * stay a `<button>` (whose content model is phrasing content) —
+ * the same reason `AgentNodeCard.vue` uses spans.
+ */
+.tg-row-title {
+    display: block;
+    font-size: 13px;
+    font-weight: 500;
+    line-height: 1.3;
+    color: hsl(var(--foreground));
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.tg-row-sub {
+    display: block;
+    margin-top: 1px;
+    font-size: 12px;
+    line-height: 1.35;
+    color: hsl(var(--muted-foreground));
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/**
+ * Edge row — a deep-link button to the agent at the far end of the
+ * edge. Unchanged behaviour; the hover/focus treatment is now the
+ * shared one below rather than the violet `rgba(79, 70, 229, .06)`
+ * this rule used to carry, which was a hard-coded accent tint that
+ * ignored both themes (it was a violet wash on a near-black surface
+ * in dark mode, where the host's own `--muted` is what the rest of
+ * the SPA uses for row hover).
+ */
+.tg-edge-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    padding: 8px 10px;
+    border-radius: 8px;
+    cursor: pointer;
+    text-align: left;
+    background: transparent;
+    border: 0;
+    color: inherit;
+    font: inherit;
+    transition: background 150ms;
+}
+.tg-edge-row:hover { background: hsl(var(--muted)); }
+.tg-edge-row:focus-visible,
+.tg-chat-row:focus-visible,
+.tg-hierarchy-link:focus-visible {
+    outline: 2px solid hsl(var(--ring));
+    outline-offset: 1px;
+}
+
+/**
+ * The trailing chevron on an edge row. `aria-hidden` in the markup —
+ * the row's accessible name is the agent name, and a screen reader
+ * announcing "chevron right" on top of it is noise.
+ *
+ * It is also the row's *affordance*: it is what tells the operator
+ * the row goes somewhere. Held at reduced opacity so a column of
+ * eight rows is not a column of eight arrows, and brought up on
+ * hover/focus so the affordance appears exactly where the operator's
+ * attention is.
+ */
+.tg-row-chevron {
+    flex-shrink: 0;
+    color: hsl(var(--muted-foreground));
+    opacity: 0.45;
+    transition: opacity 150ms;
+}
+.tg-edge-row:hover .tg-row-chevron,
+.tg-edge-row:focus-visible .tg-row-chevron { opacity: 1; }
+
+/**
+ * Chat row — a deep-link button to the host's task chat
+ * (`router.push('/tasks/{id}')`, see `lib/hostNavigation.ts`).
+ *
+ * **Layout — two lines, and why not a right-hand meta column.** The
+ * obvious arrangement is a right-hand column holding the status pill
+ * beside the title. It does not survive a 340 px sidebar: the longest
+ * label `statusLabel()` can emit is "awaiting final approval" (22
+ * characters), which at 10 px semibold plus the capsule's own padding
+ * is ~137 px — 44 % of a 310 px row. Measured in a headless browser,
+ * the title collapsed to "Compare the three co…" on a merely
+ * *17*-character label. Status is the signal that has to survive
+ * truncation, so the row is stacked instead:
+ *
+ *     line 1   title ..............................  22h ago
+ *     line 2   [awaiting sub-agent]  preview …………
+ *
+ * The title gets the full row width (~38 characters) and the pill is
+ * never truncated at any label the enum produces. The time moved up
+ * beside the title because line 2 is now fully committed to the two
+ * pieces that carry meaning.
+ *
+ * **Hover / focus.** The same `hsl(var(--muted))` the edge rows use,
+ * so the two row types feel like one list. The left edge picks up a
+ * 2 px `hsl(var(--primary))` bar via `box-shadow` (not `border`, so
+ * the row's width does not change on hover and no text reflows).
+ * Measured: the bar is `rgb(24, 24, 27)` in light and
+ * `rgb(250, 250, 250)` in dark — the host's own `--primary` token
+ * under its own theme, not a new palette entry.
+ */
+.tg-chat-row {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    width: 100%;
+    padding: 8px 10px;
+    border: 0;
+    border-radius: 8px;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+    transition: background 150ms, box-shadow 150ms;
+}
+.tg-chat-row:hover:not(:disabled) {
+    background: hsl(var(--muted));
+    box-shadow: inset 2px 0 0 hsl(var(--primary));
+}
+
+/**
+ * The null-router fallback: the row keeps its element, its text and
+ * its layout, but stops pretending to be actionable. The native
+ * `disabled` attribute takes it out of the tab order and stops the
+ * click; `aria-disabled` announces the state; the hover background
+ * and the left bar are already gated on `:not(:disabled)`, and
+ * `cursor: default` (not `not-allowed`) because the row is not
+ * refusing an action the operator can otherwise take — there is
+ * simply no host SPA to navigate into.
+ *
+ * **Deliberately NOT dimmed.** The obvious way to mark a disabled
+ * row is `opacity: 0.6` on it, and it fails AA here. Measured in a
+ * headless browser: at `opacity: 0.75` on the status pill — which is
+ * the only text on the row that is *not* a token colour, because the
+ * pill paints its own opaque capsule — the label composites from
+ * `rgb(15, 96, 81)` toward the light page and lands at **3.73:1**
+ * against its own capsule, under the 4.5:1 AA floor for 10 px normal
+ * text. At full strength the same pill is 6.54:1. Dimming the whole
+ * row is worse still, because it also drags the title and the preview
+ * down.
+ *
+ * A fade is also the wrong signal here: the row is not *unavailable
+ * content*, it is available content with no destination, and the
+ * operator still has to be able to read it. The affordance is
+ * carried by what is absent (no hover fill, no left bar, no focus
+ * stop) plus the ARIA state, none of which costs contrast.
+ */
+.tg-chat-row.is-disabled {
+    cursor: default;
+}
+
+/**
+ * The two lines of a chat row. `min-width: 0` on both so the
+ * truncating child can actually shrink — without it a flex item's
+ * automatic minimum size is its content width and the ellipsis never
+ * engages. The title takes `flex: 1`, the time and the pill take
+ * `flex-shrink: 0`: those two must never be the thing that gets
+ * cut, which is the whole reason for the stacked layout.
+ */
+.tg-chat-row-head,
+.tg-chat-row-foot {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+}
+.tg-chat-row-head .tg-row-title { flex: 1 1 auto; min-width: 0; }
+.tg-chat-row-foot .tg-row-sub { flex: 1 1 auto; min-width: 0; margin-top: 0; }
+
+/**
+ * A compact instance of the shared `.tg-status-pill` — same class and
+ * the same `statusPillClass()` slug as the panel header and the node
+ * card, so this stays *one* status→colour table in the plugin. Only
+ * the metrics differ: the shared pill is sized for a 240 px node card
+ * and wraps to two lines on a long label, which would double the
+ * height of every chat row in a 340 px sidebar. `max-width` is
+ * dropped for the same reason — the pill now shares a full-width line
+ * with the preview, so there is no narrow column to bound it, and a
+ * wrapped status label is worse than a long one.
+ *
+ * The pill paints its own opaque capsule
+ * (`color-mix(… 14%, white)` over a `color-mix(… 45%, #0f172a)`
+ * label), so it is **theme-independent** by construction: measured in
+ * a headless browser, text-on-capsule is 6.54:1 for `running`, 6.14:1
+ * for `awaiting sub-agent` and 6.60:1 for `idle`, and identical
+ * under both the light and the dark host theme. All three clear AA
+ * for 10 px normal text (4.5:1) without a theme-specific override.
+ */
+.tg-chat-row-status {
+    max-width: none;
+    font-size: 10px;
+    padding: 2px 7px;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+.tg-row-time {
+    font-size: 11px;
+    line-height: 1.2;
+    color: hsl(var(--muted-foreground));
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+/**
+ * Edge-row avatar tile — a thin status ring around the shared
+ * `@spora-ai/components` `AgentAvatar`.
+ *
+ * The package's `AgentAvatar` has no `status` prop: it forwards
+ * `agent.name` / `agent.profile_picture` to `Avatar` and stops
+ * there, so the tile itself cannot carry a status swatch. The ring
+ * restores that signal without re-implementing the avatar — same
+ * inline-custom-property shape as `--palette-bg` on
+ * `.tg-node-accent` above, so the resolved colour stays in the
+ * markup and this rule owns only the geometry.
+ *
+ * `--tg-status-ring` is written by `statusRingColor()`
+ * (`lib/agentAvatar.ts`): the package's `ringColor` for a status it
+ * covers, a `color-mix` tint of the plugin's `statusColor()`
+ * otherwise. `box-shadow` rather than `border` so the ring adds no
+ * layout box and the row's 8 px gap stays 8 px.
+ *
+ * The `border-radius` lives in the tile-shape rule above, together
+ * with the card's — a `box-shadow` ring is clipped to the element's
+ * own radius, so a circle wrapper around a square tile would have
+ * drawn a circular ring around a square avatar.
+ */
+.tg-agent-tile { display: inline-flex; box-shadow: 0 0 0 2px var(--tg-status-ring, transparent); }
+
+/**
+ * Hierarchy chain (root → ... → this agent). The links are inline
+ * `tg-edge-row`s — clickable, deep-link to the ancestor's node so
+ * the operator can hop back up the spawn tree without leaving the
+ * sidebar.
+ */
+.tg-hierarchy-link {
+    background: transparent;
+    border: 1px solid hsl(var(--border));
+    color: hsl(var(--foreground));
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background 150ms, border-color 150ms;
+}
+.tg-hierarchy-link:hover {
+    background: hsl(var(--muted));
+    border-color: hsl(var(--primary) / 0.45);
+}
+
+/**
+ * (removed in v0.1.x — Tools section was dropped from the compact
+ *  detail-panel header. The host's AgentCard already carries the
+ *  tool list, so the plugin no longer duplicates it. The CSS
+ *  rules for `.tg-tool-tile` were deleted alongside the markup;
+ *  if a future variant needs them, restore from git history.) */
 
 .tg-agent-panel { position: sticky; top: 16px; max-height: calc(100vh - 32px); display: flex; flex-direction: column; }
 .tg-agent-panel-body { overflow-y: auto; }
-.tg-agent-panel-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 280px; text-align: center; color: var(--muted-foreground); }
+.tg-agent-panel-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 280px; text-align: center; color: hsl(var(--muted-foreground)); }
 
 /**
- * Group / principal selector. A native `<select>` styled to match
- * the host's chrome — the down-chevron is inlined as a data-URL
- * SVG so we don't pull in another asset.
+ * Principal pill row in the toolbar (replaces the dropped
+ * `<PrincipalListSidebar />`).
+ *
+ * Each pill is a button — pressing it tells the page to render the
+ * graph for that principal. The "MY" badge highlights the user's own
+ * user-principal so it's obvious which row is "you" without reading
+ * the label. Group rows get a quieter "G" badge.
+ *
+ * Picked pills over the prior list view because the toolbar is
+ * shared horizontal real-estate — pills read as a compact "tabs"
+ * affordance while the sidebar slot stays free for the agent-detail
+ * panel. Pills wrap when there are many principals so the toolbar
+ * never overflows horizontally.
+ *
+ * These three rules are the toolbar, not the sidebar, and are outside
+ * the sidebar pass's stated scope — but they had the same
+ * `var(--token)`-without-`hsl()` bug as the sidebar rows, so a
+ * pill's hover background and label colour were both silently
+ * dropped. They were fixed for consistency rather than left visibly
+ * broken next to a sidebar that now works; `.tg-zoom-btn` at the
+ * bottom of this file carried the identical defect and is now fixed
+ * too. `scripts/smoke.js` fails the build if either form comes back.
  */
-.tg-select {
-    height: 36px; padding: 0 32px 0 12px; border-radius: 8px; border: 1px solid var(--border);
-    background: var(--background) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E") no-repeat right 10px center;
-    color: var(--foreground); font-size: 13px; cursor: pointer; appearance: none; -webkit-appearance: none; min-width: 160px;
+.tg-pill {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 4px 10px 4px 6px; border-radius: 999px;
+    background: transparent; color: hsl(var(--muted-foreground));
+    border: 1px solid transparent; cursor: pointer;
+    font-size: 12px; font-weight: 500; line-height: 1;
+    max-width: 240px; transition: background 100ms, color 100ms, border-color 100ms;
 }
-.tg-select:hover { background-color: var(--muted); }
+.tg-pill:hover:not(.is-selected):not(:disabled) {
+    background: hsl(var(--muted)); color: hsl(var(--foreground));
+}
+.tg-pill.is-selected {
+    background: rgba(124, 58, 237, 0.10); /* violet-500 at 10% */
+    color: hsl(var(--foreground)); border-color: rgba(124, 58, 237, 0.45);
+}
+.tg-pill:disabled { cursor: not-allowed; opacity: 0.5; }
+.tg-pill__badge {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 20px; height: 20px; border-radius: 999px;
+    font-size: 9px; font-weight: 700; letter-spacing: 0.04em;
+    flex-shrink: 0;
+}
+.tg-pill__badge--my {
+    background: rgba(124, 58, 237, 0.18); color: hsl(var(--foreground));
+    border: 1px solid rgba(124, 58, 237, 0.45);
+}
+.tg-pill__badge--group {
+    background: hsl(var(--muted)); color: hsl(var(--muted-foreground));
+    border: 1px solid hsl(var(--border));
+}
 
+/**
+ * Zoom-button stack — the last of the `var(--token)`-without-`hsl()`
+ * bug class, and the one that was easiest to miss because the rule
+ * block sits at the very bottom of the file with no comment above it.
+ *
+ * All four declarations were the bare form and all four were
+ * invalid at computed-value time, which is silent: no build error, no
+ * failing test, and a control that still *looks* like a control.
+ * Measured in a headless browser with the host's real tokens loaded
+ * (`--muted-foreground: 240 4% 38%`, `--muted: 240 4.8% 95.9%`,
+ * `--border: 240 5.9% 90%`), light theme, before → after:
+ *
+ *   icon `color`      rgb(9, 9, 11)     → rgb(93, 93, 101)
+ *   icon `stroke`     rgb(9, 9, 11)     → rgb(93, 93, 101)
+ *   `:hover` fill     rgba(0, 0, 0, 0)  → rgb(244, 244, 245)
+ *   divider `border`  0px none          → 1px solid rgb(228, 228, 231)
+ *
+ * Dark, same four readings: `rgb(9, 9, 11)` → `rgb(161, 161, 170)`
+ * (`--muted-foreground` is `240 5% 64.9%`), `rgba(0, 0, 0, 0)` →
+ * `rgb(39, 39, 42)` (`--muted` is `240 3.7% 15.9%`), and `0px none` →
+ * `1px solid rgb(39, 39, 42)` (`--border`). Nothing about either set
+ * looks like an error on its own, which is the whole problem: a colour
+ * that resolves is indistinguishable from a colour that fell back to
+ * `inherit`.
+ *
+ * The icon colour was the one that did not look broken: `color` fell
+ * back to the *inherited* value, so the button rendered in the page's
+ * text colour — a valid colour, just not the quiet muted one, so the
+ * three glyphs shouted at the same weight as the panel's headings.
+ * The hover fill went to `transparent`, i.e. there was no hover
+ * affordance at all. The divider is the interesting one: because
+ * `border-top: 1px solid var(--border)` is a *shorthand*, the whole
+ * declaration was dropped rather than just its colour, so the stack
+ * read as three floating buttons with no separation and the muted
+ * fill on hover bleeding straight through the seam.
+ *
+ * `hsl(var(--token))`, matching every other rule in this file — and
+ * enforced now: `scripts/smoke.js` walks the built stylesheet and
+ * fails on any bare `var(--<host token>)`, because nothing about
+ * this bug announces itself anywhere else.
+ */
 .tg-zoom-btn { width: 28px; height: 28px; display: flex; align-items: center; justify-content: center;
-               color: var(--muted-foreground); background: transparent; border: none; cursor: pointer;
+               color: hsl(var(--muted-foreground)); background: transparent; border: none; cursor: pointer;
                transition: background 120ms, color 120ms; }
-.tg-zoom-btn:hover { background: var(--muted); color: var(--foreground); }
-.tg-zoom-btn + .tg-zoom-btn { border-top: 1px solid var(--border); }
+.tg-zoom-btn:hover { background: hsl(var(--muted)); color: hsl(var(--foreground)); }
+.tg-zoom-btn + .tg-zoom-btn { border-top: 1px solid hsl(var(--border)); }
+
+/**
+ * The card surface — the plugin's marker for "this element is a
+ * surface", and the reason `surface-card` was on five elements in the
+ * SFCs while being defined nowhere.
+ *
+ * **Why a class and not just `@theme`.** The `@theme` block already
+ * carries `--color-card`, so the `bg-card` utility in the templates
+ * is live and does the job on four of the five elements. This rule
+ * exists for the fifth: the zoom stack in `TeamGraphCanvas.vue:306`
+ * is the one `surface-card` with no `bg-card` beside it, and with
+ * both classes inert it was a border and a `shadow-sm` around
+ * nothing — the three buttons sat directly on the canvas card. Rather
+ * than patch that one template and leave a class named
+ * `surface-card` undefined (i.e. permanently free to be inert again),
+ * the name is given the meaning it always implied.
+ *
+ * **`hsl(var(--background))`, not `var(--color-card)`.** Same colour,
+ * one fewer indirection — and the indirection is load-bearing risk,
+ * not DRY: Tailwind v4 tree-shakes `@theme` variables that no utility
+ * consumes, so `--color-card` is emitted only while some template
+ * still says `bg-card`. A hand-written rule leaning on it would go
+ * transparent the moment the last one did, which is the same silent
+ * failure one step further away. (Verified in the built sheet: of the
+ * 15 `--color-*` declarations in this `@theme`, only the 6 whose
+ * utilities appear in a template are emitted.) `smoke.js` separately
+ * asserts that `--color-card` *is* emitted, so the utility path is
+ * covered too.
+ *
+ * No shadow and no border here: every call site already carries
+ * `border border-border` plus a radius, which is the host's own card
+ * recipe (`PluginAppPage.vue:165`). Adding elevation would be a
+ * design change the host does not make.
+ */
+.surface-card { background-color: hsl(var(--background)); }

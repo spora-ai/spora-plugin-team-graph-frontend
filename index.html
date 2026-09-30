@@ -6,7 +6,17 @@
         <title>Spora Team Graph Plugin</title>
     </head>
     <body>
-        <div id="app"></div>
+        <!--
+            The mount target is the plugin's own scope id, not `#app`.
+            Production mounts into whatever slot the host's
+            `PluginAppPage.vue` owns and the plugin's root wrapper
+            (`App.vue` → `<div id="spora-plugin-team-graph">`) is the
+            boundary every stylesheet rule is scoped to. Mounting dev
+            into a differently-named element meant `npm run dev` had a
+            different CSS scope from the hosted page, which is exactly
+            the class of difference a dev loop cannot catch.
+        -->
+        <div id="spora-plugin-team-graph"></div>
         <script type="module" src="/src/dev-main.ts"></script>
     </body>
 </html>

@@ -49,6 +49,20 @@ describe('statusLabel', () => {
             expect(statusLabel(s).length).toBeGreaterThan(0)
         }
     })
+
+    it('falls back to "idle" for null/undefined (defensive)', () => {
+        /* The wire used to carry a literal null when no in-flight task
+         * existed for an agent; the backend COALESCE'd it to COMPLETED
+         * in v0.1.2, but the defensive fallback in nodeStatus keeps
+         * the canvas renderable for older envelopes or future schema
+         * drift that re-introduces the gap. */
+        expect(statusLabel(null)).toBe('idle')
+        expect(statusLabel(undefined)).toBe('idle')
+    })
+
+    it('renders the raw value for unknown statuses', () => {
+        expect(statusLabel('BUSY')).toBe('BUSY')
+    })
 })
 
 describe('statusColor', () => {

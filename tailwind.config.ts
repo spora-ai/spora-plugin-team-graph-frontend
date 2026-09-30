@@ -1,69 +1,38 @@
-import type { Config } from 'tailwindcss'
-import { fontFamily } from 'tailwindcss/defaultTheme'
-
 /**
- * Tailwind config for the Team Graph plugin frontend.
+ * Tailwind v4 config shim — the *only* thing left in JS.
  *
- * Mirrors `spora-plugin-typst-frontend/tailwind.config.ts` so the
- * plugin boundary is identical to its sibling plugins:
- *  - `corePlugins.preflight: false` — the host owns document-level
- *    resets; the plugin bundle omits them.
- *  - `important: '#spora-plugin-team-graph'` — every generated utility
- *    gets scoped beneath this selector so plugin classes can't leak
- *    into the host SPA or another plugin slot. The host SPA's
- *    PluginAppPage wraps the slot in `<div id="spora-plugin-team-graph">`
- *    on mount (see `App.vue`).
+ * Everything else moved to CSS: the theme tokens now live in the
+ * `@theme` block in `src/style.css`, dark mode is a `@custom-variant`
+ * there, and source detection is driven by explicit `@source`
+ * directives there. That's the v4 direction, and it matches
+ * `spora-frontend/src/style.css`.
  *
- * Theme tokens reference the host SPA's CSS variables (border, input,
- * ring, background, foreground, primary, secondary, destructive, muted,
- * accent) so plugins render with the same design language as the
- * gallery, memories, typst, and other admin surfaces — no per-plugin
- * palette to keep in sync with the host.
+ * `important` has no CSS-native equivalent in v4, and it is the one
+ * option that MUST NOT be dropped, so it stays here (v4 reads it
+ * through the `@config` directive in `style.css`).
+ *
+ * **Why selector-scoped `important` matters.** v3's
+ * `important: '#spora-plugin-team-graph'` rewrote every generated
+ * selector to `#spora-plugin-team-graph .w-4` — prefixing the
+ * selector, *not* adding `!important` to the declarations (verified
+ * against a 3.4.19 build). v4 supports the exact same rewrite via
+ * `@config`, so the emitted CSS is byte-for-byte equivalent.
+ *
+ * The two obvious v4 alternatives are both wrong here:
+ *  - `@import "tailwindcss/utilities.css" layer(utilities) important`
+ *    marks every utility `!important` but emits it **unscoped**, so
+ *    `.flex` / `.w-4` / `.grid` would leak into the host SPA and any
+ *    sibling plugin slot.
+ *  - `prefix(tw)` renames the *class names* (`.tw-flex`), which the
+ *    plugin's markup doesn't use.
+ *
+ * The ID prefix also does real work beyond containment: `#spora-plugin-team-graph .w-4`
+ * is (1,1,0) and so outranks the host SPA's own unprefixed rules.
+ *
+ * The scope boundary is the `<div id="spora-plugin-team-graph">` that
+ * `App.vue` renders — the host's `PluginAppPage.vue` slot is a plain
+ * `<div ref>`, so the plugin owns the boundary itself.
  */
 export default {
-    content: ['./index.html', './src/**/*.{vue,js,ts,jsx,tsx}'],
-    corePlugins: { preflight: false },
     important: '#spora-plugin-team-graph',
-    darkMode: 'class',
-    theme: {
-        extend: {
-            fontFamily: {
-                sans: ['Barlow', ...fontFamily.sans],
-                mono: ['"JetBrains Mono"', 'ui-monospace', 'monospace'],
-            },
-            colors: {
-                border: 'hsl(var(--border))',
-                input: 'hsl(var(--input))',
-                ring: 'hsl(var(--ring))',
-                background: 'hsl(var(--background))',
-                foreground: 'hsl(var(--foreground))',
-                primary: {
-                    DEFAULT: 'hsl(var(--primary))',
-                    foreground: 'hsl(var(--primary-foreground))',
-                },
-                secondary: {
-                    DEFAULT: 'hsl(var(--secondary))',
-                    foreground: 'hsl(var(--secondary-foreground))',
-                },
-                destructive: {
-                    DEFAULT: 'hsl(var(--destructive))',
-                    foreground: 'hsl(var(--destructive-foreground))',
-                },
-                muted: {
-                    DEFAULT: 'hsl(var(--muted))',
-                    foreground: 'hsl(var(--muted-foreground))',
-                },
-                accent: {
-                    DEFAULT: 'hsl(var(--accent))',
-                    foreground: 'hsl(var(--accent-foreground))',
-                },
-            },
-            borderRadius: {
-                lg: 'var(--radius)',
-                md: 'calc(var(--radius) - 2px)',
-                sm: 'calc(var(--radius) - 4px)',
-            },
-        },
-    },
-    plugins: [],
-} satisfies Config
+}

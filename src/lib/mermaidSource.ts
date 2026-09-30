@@ -1,65 +1,54 @@
 /**
  * Build the Mermaid `flowchart TB` source for a `GraphPayload`.
  *
- * Mirrors `spora-workspace/prototypes/prototype-e-mermaid.html →
- * buildMermaidSyntax(fix)` (Prototype E) so the rendered diagram
- * is identical between the prototype and the production plugin.
+ * **Mermaid is a layout engine here, not a renderer.** It draws the edges
+ * and decides where every node sits; the visible node card is a Vue
+ * component in a sibling HTML overlay (see `lib/nodeLayout.ts`). So node
+ * lines are reduced to an id and a plain-text label:
  *
- * Output structure:
  *   flowchart TB
- *     classDef status-running  fill:...,stroke:...,color:...
- *     classDef status-pending  fill:...,stroke:...,color:...
- *     …
- *     n11["<div class='tg-node'>…</div>"]:::status-running
+ *     n11["Marketing Lead"]
  *     n11 --> n4
  *
- * HTML inside the `["…"]` label uses single quotes for attributes
- * — double quotes would terminate Mermaid's label string and
- * produce a parse error.
+ * **No `htmlLabels`** (`useMermaidRender.ts` sets it false): a Vue app
+ * cannot mount into an element nested inside `<svg>`, so a `<foreignObject>`
+ * label would be a dead end for the card component.
+ *
+ * **No `classDef`.** The node boxes are hidden by `style.css`, not by
+ * Mermaid's theme, so keeping Mermaid's defaults means the canvas degrades
+ * to a plain but readable diagram if that stylesheet ever fails to load.
+ *
+ * The residual artefact of Mermaid's own sanitiser is its `#word;` entity
+ * escape, which round-trips a name as `&word;` in the SVG text — cosmetic
+ * only, on an `aria-hidden` label painted transparent.
  */
 import type { GraphPayload } from '../types'
-import { statusSlug, statusPillClass, statusLabel } from './nodeStatus'
 
 /**
- * Escape a string for safe inclusion in an HTML attribute value
- * delimited by single quotes. We only need to replace `'` because
- * that's the only character that can break out of the attribute;
- * Mermaid's parser already handles `<`, `>`, and `&` inside
- * `["…"]` labels.
+ * Make an agent name safe to sit inside `["…"]`.
+ *
+ * A nullish / empty name still needs *something* in the label: Mermaid
+ * measures the text to size the node box, and an empty `<text>` measures
+ * 0 × 0, collapsing the node's contribution to the layout.
  */
-function escapeAttr(s: string): string {
-    return s.replace(/'/g, '&#39;')
+function nodeLabel(name: string): string {
+    const cleaned = name.replace(/["\r\n\t]+/g, ' ').trim()
+    return cleaned === '' ? 'agent' : cleaned
 }
 
 export function buildMermaidSource(graph: GraphPayload): string {
     const lines: string[] = ['flowchart TB']
 
-    lines.push('  classDef status-running fill:#dcfce7,stroke:#10b981,color:#065f46')
-    lines.push('  classDef status-pending fill:#e0e7ff,stroke:#6366f1,color:#3730a3')
-    lines.push('  classDef status-awaiting fill:#fef3c7,stroke:#f59e0b,color:#92400e')
-    lines.push('  classDef status-failed fill:#fee2e2,stroke:#ef4444,color:#991b1b')
-    lines.push('  classDef status-completed fill:#f1f5f9,stroke:#94a3b8,color:#475569')
-    lines.push('  classDef status-aborted fill:#f5f3ff,stroke:#a855f7,color:#6b21a8')
-
     for (const node of graph.nodes) {
-        const name = escapeAttr(node.name)
-        const role = escapeAttr(node.role ?? '')
-        const pillClass = statusPillClass(node.status)
-        const pillText = escapeAttr(statusLabel(node.status))
-        const slug = statusSlug(node.status)
-        const label =
-            `<div class='tg-node'>` +
-            `<div class='tg-node-name'>${name}</div>` +
-            `<div class='tg-node-role'>#${node.id} · ${role}</div>` +
-            `<span class='tg-status-pill ${pillClass}'><span class='dot'></span>${pillText}</span>` +
-            `<div class='tg-node-stats'>` +
-            `<span><strong>${node.active_chats}</strong> active · <strong>${node.recent_chats_24h}</strong>/24h</span>` +
-            `</div>` +
-            `</div>`
-        lines.push(`  n${node.id}["${label}"]:::status-${slug}`)
+        lines.push(`  n${node.id}["${nodeLabel(node.name)}"]`)
     }
 
     for (const edge of graph.edges) {
+        /*
+         * Every configured edge renders as a solid arrow. Configuration is
+         * the source of truth on the canvas; the "configured but never
+         * fired" distinction lives in the detail panel's secondary label.
+         */
         lines.push(`  n${edge.source} --> n${edge.target}`)
     }
 

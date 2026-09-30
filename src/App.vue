@@ -13,6 +13,7 @@
  * no id — so the plugin owns the scope boundary itself).
  */
 import TeamGraphPage from './components/TeamGraphPage.vue'
+import '@spora-ai/components/styles'
 import './style.css'
 
 defineProps<{
