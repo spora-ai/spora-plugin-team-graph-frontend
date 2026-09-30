@@ -3,9 +3,8 @@
  *
  * Owns the whole SVG lifecycle — render → commit → node-box resize
  * → viewBox reset → measure → click-free edge styling — and returns
- * the `positions` map the Vue node-card overlay consumes. `destroy`
- * is implicit: `onBeforeUnmount` empties the host and drops the
- * positions.
+ * the `positions` map the Vue node-card overlay consumes. Teardown is
+ * implicit: `onBeforeUnmount` empties the host and drops the positions.
  *
  * **Mermaid owns edges, Vue owns cards.** The diagram is rendered
  * with `htmlLabels: false` and the node boxes are left transparent
@@ -147,6 +146,16 @@ function ensureMermaidInit(): void {
     mermaidInitialised = true
 }
 
+/**
+ * Render the graph and expose the resulting geometry.
+ *
+ * The return is an **imperative handle**, not reactive state to watch:
+ * `renderId` is a monotonic counter whose only job is to let a caller
+ * (and the module's own error path) discard a render that a newer one
+ * has already superseded, so every write is guarded on it. `reRender`
+ * re-runs the pipeline on demand; `positions` and `error` are the
+ * outputs the overlay and the error card read.
+ */
 export function useMermaidRender({ hostRef, graph, onRender }: UseMermaidRenderOptions): UseMermaidRenderReturn {
     const renderId = ref(0)
     const error = ref<string | null>(null)

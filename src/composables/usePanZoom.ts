@@ -6,11 +6,14 @@
  * `<div ref="canvas-wrap">` catches wheel (zoom around cursor) and
  * pointer events (drag = pan, click = deselect).
  *
- * The trick to make `click` still fire on the underlying SVG node
- * is `setPointerCapture`: the pointer is re-routed to the wrap
- * element, so we have to handle all pointer semantics in
- * `pointerup`. A `moved` flag distinguishes a real drag from a
- * tap-on-empty-canvas (which clears the selection).
+ * Selection is *not* handled here: the Mermaid `g.node` boxes are grown
+ * transparent overlays and the SVG is `aria-hidden`, so every real click
+ * lands on an HTML `AgentNodeCard` button above it. What this composable
+ * owns is the empty-canvas tap, and `setPointerCapture` is what makes
+ * that reachable: the pointer is re-routed to the wrap element, so all
+ * pointer semantics have to be replayed in `pointerup`. A `moved` flag
+ * distinguishes a real drag from a tap-on-empty-canvas (which clears the
+ * selection).
  *
  * **`fit()` scales up as well as down.** The SVG is sized from its own
  * content (`viewBox` + matching `width`/`height`, see
@@ -96,6 +99,15 @@ const FIT_MARGIN = 16
  */
 const FIT_MAX_SCALE = 1.5
 
+/**
+ * Pan / zoom the diagram, and own the fit-vs-preserve policy.
+ *
+ * The return is an **imperative handle** the caller drives from its own
+ * lifecycle: `fit()` and `clampIntoViewport()` act immediately, and
+ * `userAdjusted` is the bit that records "the operator has taken over",
+ * which is what makes a later resize re-fit instead of yanking the view
+ * back to where they put it. Nothing here watches the diagram for you.
+ */
 export function usePanZoom({ wrapRef, contentRef, hostRef }: UsePanZoomOptions): UsePanZoomReturn {
     const view = ref<View>({ x: 0, y: 0, k: 1 })
     const panning = ref<{
@@ -225,9 +237,11 @@ export function usePanZoom({ wrapRef, contentRef, hostRef }: UsePanZoomOptions):
         const target = ev.target
         if (target instanceof Element) {
             /* Skip panning when the user is interacting with the chrome:
-             *  - `g.node` is a Mermaid card (its own click handler does
-             *    selection via stopPropagation),
-             *  - `button` is the zoom / fit toolbar,
+             *  - `g.node` is the transparent Mermaid box the card is
+             *    positioned over, so a drag that starts on it is a
+             *    gesture on the card, not on empty canvas,
+             *  - `button` is a card's own toggle (selection) or the
+             *    zoom / fit toolbar,
              *  - `[data-tg-no-pan]` is the opt-out marker for any future
              *    overlay.
              * Without this guard the wrap's `setPointerCapture` holds

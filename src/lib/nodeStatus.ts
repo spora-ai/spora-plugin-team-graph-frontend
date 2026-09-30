@@ -83,7 +83,8 @@ export function statusLabel(status: WireStatus): string {
         default:
             /* Unknown status — display the raw value so the operator
              * sees what the wire actually carries. The status slug
-             * falls back to 'completed' (the neutral bucket) below. */
+             * falls back to 'completed' (the neutral bucket) in
+             * `statusSlug`, above. */
             return typeof status === 'string' && status.length > 0 ? status : 'idle'
     }
 }

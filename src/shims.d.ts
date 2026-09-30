@@ -1,8 +1,10 @@
 /**
  * Plugin-host bridge contract.
  *
- * Mirrors `spora-plugin-typst-frontend/src/shims.d.ts` byte-for-byte
- * (minus the `SporaApp<Name>` window binding name). The host passes:
+ * Mirrors `spora-plugin-typst-frontend/src/shims.d.ts`, modulo the
+ * `SporaApp<Name>` window binding name and the `router` member, which is
+ * declared structurally here (see below) rather than imported from
+ * `vue-router`. The host passes:
  *
  *   - `api`     — typed REST client (CSRF tokens, `/api/v1` base,
  *                `{ data: T }` envelope unwrap) we route through
@@ -14,9 +16,14 @@
  *   - `theme`   — `'light' | 'dark'` snapshot at mount.
  *   - `route`   — current host route, used by back-links.
  *   - `router`  — the host's router instance, declared structurally.
- *                This plugin never navigates on its own and does not
- *                import `vue-router` (the dependency was dropped with
- *                the last router call site).
+ *                The plugin **does** navigate with it: the detail
+ *                panel's chat rows call `router.push()` to leave for a
+ *                task chat, so this member is load-bearing and must not
+ *                be dropped. What is absent is the `vue-router`
+ *                *dependency* — it is never imported, because the
+ *                structural type below is all the plugin needs. See
+ *                `lib/hostNavigation.ts` for the route string and the
+ *                null-router policy.
  */
 export interface PluginHostContext {
     api: {

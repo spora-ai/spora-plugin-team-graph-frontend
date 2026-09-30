@@ -38,7 +38,7 @@
  * Card footprint in content-layer pixels — the single source of truth
  * for every consumer of the box.
  *
- * **Three consumers, one number.** `measureNodePositions` turns a node
+ * **Four consumers, one number.** `measureNodePositions` turns a node
  * centre into a card top-left with it, `useMermaidRender` grows each
  * `g.node` rect to it so dagre's spacing accounts for the card, and
  * `reanchorEdges` walks each arrow tip onto its border with the same
@@ -268,8 +268,9 @@ export interface NodeCentre {
  * that change the id format.
  *
  * The regex already guarantees the capture is a non-empty run of
- * digits prefixed with `n`, so there is no second defensive check to
- * make — a mismatch between the two can only mean the format changed.
+ * digits prefixed with `n`, so the `Number.isFinite` guard below only
+ * exists to narrow the type — a mismatch between the two can only mean
+ * the format changed.
  */
 export function nodeIdFromMermaidId(domId: string): number | null {
     const m = /^flowchart-(n\d+)-\d+$/.exec(domId)

@@ -7,8 +7,8 @@
  *
  * The principal list lives in `api/principals.ts`; this file only
  * ships the graph fetch because the two halves never share state —
- * one is per-mounted-call (useTeamGraph composable) and the other is
- * per-mount-once (useTeamGraph's principals load).
+ * one is per-mounted-call (the `useTeamGraph` composable) and the other
+ * is per-mount-once (the `usePrincipalList` composable's load).
  */
 import { getApi } from './client'
 import type { GraphPayload } from '../types'

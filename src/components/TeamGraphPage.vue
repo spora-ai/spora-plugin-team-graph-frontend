@@ -69,7 +69,7 @@
  *
  * The toolbar's refresh button calls `useTeamGraph.refetch()` which
  * re-fetches the currently-selected principal's graph on demand
- * (the 5-second polling is independent).
+ * (the 30-second polling is independent).
  */
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { Icon } from '@spora-ai/components/icons'
@@ -158,7 +158,7 @@ const stats = computed<GraphStats>(() => {
  * keeps "still loading" and "nothing to show" apart.
  *
  * The note itself is rendered by `TeamGraphCanvas` (see
- * `hasGraph` there), not here — the canvas owns the pan/zoom
+ * `graphIsEmpty` there), not here — the canvas owns the pan/zoom
  * surface, the zoom stack and the footer hint that the empty state
  * has to suppress, and unmounting the canvas to swap in a card was
  * measured to strand the *next* graph: a canvas that mounts with a
@@ -204,12 +204,12 @@ watch(graphIsEmpty, (empty) => {
 })
 
 /* No `watch(refreshTick, () => selection.clear())` here:
- * the 5 s poll triggers re-renders, but a user-selected agent is
+ * the 30 s poll triggers re-renders, but a user-selected agent is
  * still valid across refreshes — clearing it on every poll makes
  * the right-side panel flicker back to empty. The selection is
  * cleared on principal switch (above), on empty-canvas tap
- * (below), and on a user clicking the same node twice (handled in
- * useMermaidRender's click listener). The watch has nothing to do
+ * (below), and on a user clicking the same node twice (the card's own
+ * toggle, `TeamGraphCanvas.onToggleNode`). The watch has nothing to do
  * for a poll-driven re-render. */
 
 function onTapEmptyCanvas(): void {

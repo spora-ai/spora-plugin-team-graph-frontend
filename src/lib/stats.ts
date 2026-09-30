@@ -1,6 +1,6 @@
 /**
  * Edge-degree helpers used by the agent-detail panel's
- * "Outbound" / "Inbound" lists, by `useGraphSelection.ts`, and by
+ * "Outbound" / "Inbound" lists, by `stores/selection.ts`, and by
  * the canvas cards' `↑ N` / `↓ N` badges.
  */
 import type { GraphEdge, GraphNode } from '../types'

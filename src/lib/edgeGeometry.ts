@@ -1,74 +1,41 @@
 /**
  * Re-anchor Mermaid's edge endpoints onto the node cards.
  *
- * **Why this exists.** Mermaid sizes a node box from its *label*
- * (`dagre-d3-es/src/dagre-js/create-nodes.js` takes the label's
- * `getBBox()`), and `intersectRect()` routes every edge endpoint to that
- * same box — the routing is baked into the path's `d` before anything
- * else runs. The card, on the other hand, is a fixed
- * `NODE_CARD_WIDTH` × `NODE_CARD_HEIGHT` box drawn by a Vue component
- * (`lib/nodeLayout.ts`), and `useMermaidRender` grows the SVG's
- * `g.node rect` to match *after* the render, because the layout maths and
- * the viewBox need the bigger box. Growing the rect therefore fixes the
- * box the card covers and the box `getBBox()` measures, but it cannot
- * move an edge endpoint that was already computed against the smaller
- * label box. Measured on the 4-node dev fixture: node 11's label box is
- * 147 × 42, so its outgoing edge left the endpoint 17 px *inside* the
- * card and arrived 11.7 px *inside* the target — the arrows visibly
- * floated in the gap between the boxes.
+ * **Why this exists.** Mermaid sizes a node box from its *label* and
+ * `intersectRect()` routes every edge endpoint to that same box. The card
+ * is a fixed `NODE_CARD_WIDTH` × `NODE_CARD_HEIGHT` box that
+ * `useMermaidRender` grows the SVG's `g.node rect` to *after* the render,
+ * because the layout maths and the viewBox need the bigger box. Growing
+ * the rect fixes the box the card covers and the box `getBBox()`
+ * measures, but it cannot move an endpoint already computed against the
+ * smaller label box: on the 4-node dev fixture, node 11's label box is
+ * 147 × 42, so its edge left 17 px *inside* the card and arrived 11.7 px
+ * *inside* the target — the arrows visibly floated in the gap.
  *
- * **The fix is geometric, not a re-layout.** For each edge we know the
- * two node centres, and Mermaid routed along the ray from a node's
- * centre through its own path endpoint (measured: the initial tangent
- * and that ray agree to 0.1 % on the same fixture). So the endpoint is
- * walked out along that ray to the card's border, and *nothing else
- * about the curve is allowed to change*. How that is done is the whole
- * content of this module, and the two obvious answers were both wrong.
+ * **The fix is geometric, not a re-layout.** Each endpoint is walked out
+ * along the ray from its node's centre through the endpoint Mermaid
+ * chose (that ray and the path's initial tangent agree to 0.1 % on that
+ * fixture), onto the card's border — and *nothing else about the curve
+ * may change*.
  *
- * **Wrong #1: translate a handle.** dagre + d3's `curveBasis` — what
- * `useMermaidRender` configures — emits
- *
- *     M <exit> L <lead-in> C … C … L <entry>
- *
- * so on a path with two cubics the flat point list is
- * `[exit, lead-in, c1, c2, v1, c1', c2', v2, entry]`, and
- *
- *   - index `1` is the **lead-in vertex**, not a control point, and
- *   - index `n - 2` is the last cubic's **on-curve endpoint**, not a
- *     control point either.
- *
- * An implementation that read `points[1]` and `points[n - 2]` as
- * control points translated two *vertices* by the endpoint delta. On
- * every real path in the captured corpus that folds the path back on
- * itself: the turn angle at the first interior vertex goes from dagre's
- * 0.00° to **180.00°**, and the interior vertex is displaced by
- * 36.5 – 82.7 user units.
- *
- * **Wrong #2: translate a *run*, then repair the handles it split.**
- * Moving the handle alone snaps the curve to a new direction where it
- * meets the card, so the endpoint drags the whole *run* of geometry it
- * is attached to — a straight stretch of the path — and the two
- * repetitions the run straddles are then re-fitted by scaling their
- * unmoved handle by the span ratio. That kept every join tangent, and
- * it is what `958084a` shipped. It also wobbles, and it wobbled the
- * moment the card shrank to its content (`5f24fcd`): 28 of the 33 real
- * `curveBasis` paths came out with **two reversals of the tangent
- * angle** each — an S — where Mermaid's own paths have none, because a
- * run boundary lands *between* the last cubic's two control points. The
- * run carries the tail control point and the vertex past the head
- * control point that stayed behind, the control polygon folds back on
- * itself, and neither the span-ratio rescale nor the clamp can undo it:
- * both hold a handle's *direction* and change only its *length*, and
- * what has gone wrong is a direction. Fixing it needs the head handle
- * to **rotate**, which no amount of rescaling can do.
+ * **Which means the curve may not be treated as a list of control
+ * points.** dagre + d3's `curveBasis` — what `useMermaidRender`
+ * configures — emits `M <exit> L <lead-in> C … C … L <entry>`, so on a
+ * two-cubic path index `1` is the lead-in **vertex** and index `n - 2`
+ * is the last cubic's on-curve **endpoint**: neither is a control point.
+ * Moving either folds the path back on itself (a 0.00° interior turn
+ * becomes 180.00° on all 33 real `curveBasis` paths). Translating the
+ * whole *run* instead keeps every join tangent but puts an S in the
+ * curve, because a run boundary lands *between* the last cubic's two
+ * control points, and the repairs available hold a handle's direction
+ * when what went wrong was a direction.
  *
  * **What this module does instead: re-run d3's own emission.** A `d` is
- * not a free list of control points; it is the *output* of a function of
- * a handful of routing points. `dagre-d3-es` hands dagre's edge points
- * to `d3.line().curve(curveBasis)` (`createEdgePaths.js` →
- * `createLine()`), and d3's `curveBundle` is a straight line at each
- * end with a `Basis` spline between, which for spline points
- * `q₀ … q_{n-1}` emits exactly
+ * the *output* of a function of a handful of routing points, and it
+ * inverts exactly. `dagre-d3-es` hands dagre's edge points to
+ * `d3.line().curve(curveBasis)`, and d3's `curveBundle` is a straight
+ * line at each end with a `Basis` spline between, which for spline
+ * points `q₀ … q_{n-1}` emits
  *
  *     M q₀
  *     L (5q₀ + q₁)/6
@@ -77,44 +44,35 @@
  *
  * (`d3-shape@3.2.0` `src/curve/{bundle,basis}.js`; the last cubic, which
  * `lineEnd` emits after the last point, ends at `(q_{n-2} + 5q_{n-1})/6`
- * — its own rule, reproduced below). The cubic's two controls sit a
- * third and two thirds of the way along `q_{k-1} → q_k`, so **they invert
- * it exactly**: `2·c₁ − c₂ = q_{k-1}` and `2·c₂ − c₁ = q_k`. That is
- * the codec below. It recovers dagre's routing, moves the two end
- * points onto the card borders, and re-runs the emission — so the
- * result is still d3's curve, still a function of the same routing, and
- * still guaranteed well formed because d3's own formulas built it.
+ * — reproduced below). The cubic's two controls sit a third and two
+ * thirds along `q_{k-1} → q_k`, so **they invert it exactly**:
+ * `2·c₁ − c₂ = q_{k-1}` and `2·c₂ − c₁ = q_k`. The codec below recovers
+ * dagre's routing, moves the two end points onto the cards, and re-runs
+ * the emission — so the result is still d3's curve, still a function of
+ * the same routing, and still well formed because d3's formulas built it.
  *
- * Every interior join tangent then comes out **unchanged**: the first
- * `L` and the first cubic's controls are all affine in `q₀`, and `q₁`
- * is unchanged and collinear with `q₀` and the source centre, so the
- * lead-in keeps its direction; the same argument runs backwards at the
- * tail. Measured on the captured corpus, no `curveBasis` path has a
- * single tangent reversal after re-anchoring, against 28 with two each
- * before, and 0 in Mermaid's own output.
+ * Every interior join tangent comes out **unchanged**: the lead-in and
+ * the first cubic's controls are all affine in `q₀`, and `q₁` is
+ * unchanged and collinear with `q₀` and the source centre, so the
+ * lead-in keeps its direction; the argument runs backwards at the tail.
+ * Measured on the captured corpus: no `curveBasis` path has a single
+ * tangent reversal after re-anchoring, against 0 in Mermaid's own output.
  *
- * **The other three `flowchart.curve` settings keep the run
- * machinery**, which is the right answer for each of them for a
- * different reason: `curveLinear` and `curveStep` draw the routing
- * polyline itself (a straight segment has no curvature to preserve, and
- * translating a run of its vertices changes no corner angle), and
- * `curveBumpX` is not a shape this plugin can ask for. It is also the
- * shape whose controls sit *on* the vertices, so it is a table-
- * completeness case rather than a rendered one.
+ * The other three `flowchart.curve` settings keep the run machinery —
+ * correctly, since `curveLinear` and `curveStep` draw the routing
+ * polyline itself and have no curvature to preserve.
  *
- * **The border is not where the arrow is.** Landing the *path end* on
- * the card border looks right in the geometry and is still wrong on
- * screen: Mermaid's `pointEnd` marker is drawn with the path's end
- * vertex at the marker's `refX`, so the visible tip is
- * `ARROWHEAD_OVERSHOOT` user units further along the path — i.e.
- * *inside* the opaque `button.tg-node-card`, which then clips the tip
- * and reads as a cut-off arrowhead. The endpoint is therefore stopped
- * short by exactly that overshoot, along the direction the marker is
- * actually drawn, so the **tip** lands on the border.
+ * **The border is not where the arrow is.** Mermaid's `pointEnd` marker
+ * is drawn with the path's end vertex at the marker's `refX`, so the
+ * visible tip is `ARROWHEAD_OVERSHOOT` units further along the path —
+ * *inside* the opaque `button.tg-node-card`, which then clips it and
+ * reads as a cut-off arrowhead. The endpoint is therefore stopped short
+ * by exactly that overshoot, along the direction the marker is actually
+ * drawn, so the **tip** lands on the border.
  *
- * Everything here is a pure function over the path's `d` string, so it
- * is unit-testable without a layout engine and cannot half-apply: a
- * path we cannot parse is reported as `null` and the caller leaves the
+ * Everything here is a pure function over the path's `d`, so it is
+ * unit-testable without a layout engine and cannot half-apply: a path
+ * that cannot be read is reported as `null` and the caller leaves the
  * attribute alone.
  */
 
@@ -128,10 +86,8 @@ export interface Point {
  * end point, in SVG user units — the default value of
  * `reanchorEdgePath`'s `endOvershoot`.
  *
- * This number is the whole reason a path that ends *exactly* on the
- * card border still looks cut off, so it is derived rather than
- * guessed. Read off the rendered `<marker>` in the plugin's own SVG
- * (and byte-identical in `mermaid/dist/edges-*.js → insertMarkers`):
+ * Derived, not guessed, from the rendered `<marker>` (byte-identical in
+ * `mermaid/dist/edges-*.js → insertMarkers`):
  *
  *     <marker id="m-1_flowchart-pointEnd" viewBox="0 0 10 10"
  *             refX="6" refY="5" markerUnits="userSpaceOnUse"
@@ -139,35 +95,30 @@ export interface Point {
  *       <path d="M 0 0 L 10 5 L 0 10 z"/>
  *     </marker>
  *
- *   - `markerUnits="userSpaceOnUse"` *together with* a `viewBox`
- *     means the marker's own 10-unit coordinate box is scaled into SVG
- *     user units by `markerWidth / viewBox.width` = 12 / 10 = **1.2**.
- *   - `refX="6"` is the marker-local point pinned to the path's end
- *     vertex; the tip is the marker path's rightmost point, local
- *     `x = 10`, so 4 local units sit beyond the vertex.
- *   - 4 × 1.2 = **4.8 user units**.
+ *   - `markerUnits="userSpaceOnUse"` *together with* a `viewBox` scales
+ *     the marker's own 10-unit box into user units by 12 / 10 = **1.2**.
+ *   - `refX="6"` is pinned to the path's end vertex; the tip is the
+ *     marker path's rightmost point, local `x = 10`, so 4 local units
+ *     sit beyond the vertex.
+ *   - 4 × 1.2 = **4.8**.
  *
- * Measured on the 4-node dev fixture with the previous, un-inset code:
- * every edge's path end sat 0.000 user units from the card border
- * while its arrow **tip** sat 4.800 inside the card (1.613 for the two
- * diagonal edges, whose tip approaches at an angle) — hidden under the
- * card's own background. With the endpoint stopped 4.8 short, the tip
- * lands on the border to within 0.000.
+ * Without the inset this is why a path ending *exactly* on the border
+ * still looks cut off: the tip sits 4.800 inside the card (1.613 on a
+ * diagonal edge), hidden behind the card's own background. Stopping the
+ * endpoint 4.8 short puts the tip on the border to 0.000, measured on
+ * all 33 `curveBasis` corpus paths.
  *
  * `orient="auto"` rotates the marker to the path's own direction of
- * travel, so the overshoot is the same 4.8 on every edge — but it is
- * applied *along that direction* (`endTangent`), not along the ray
- * from the node's centre, so a diagonal edge is compensated along the
- * direction the marker is actually drawn.
+ * travel, so the overshoot is 4.8 on every edge — but it is applied
+ * *along that direction* (`endTangent`), not along the ray from the
+ * node's centre.
  *
  * **Nothing is compensated at the start.** `lib/mermaidSource.ts` emits
  * `n<a> --> n<b>` for every edge, so Mermaid only ever writes
- * `marker-end`; the `pointStart` marker it also defines in `<defs>`
- * (`refX=4.5`, i.e. a 5.4-unit *backward* reach) is never referenced,
- * and the start point therefore stays exactly on the source border.
- * Every edge in the captured corpus confirms this: `marker-end` is
- * always `url(#…_flowchart-pointEnd)` and `marker-start` is always
- * absent.
+ * `marker-end`; the `pointStart` marker it also defines (`refX=4.5`, a
+ * 5.4-unit *backward* reach) is never referenced, and the start point
+ * therefore stays exactly on the source border. Every edge in the
+ * captured corpus confirms it.
  */
 export const ARROWHEAD_OVERSHOOT = 4.8
 
@@ -175,13 +126,11 @@ export const ARROWHEAD_OVERSHOOT = 4.8
  * A parsed path point plus whether it lies *on* the curve.
  *
  * The distinction is load-bearing: a cubic's end tangent is the vector
- * to its nearest *control* point, but a handle may only be shortened
- * to the distance to the segment's own on-curve point — shortening it
- * to a neighbouring control point clamps it far too hard and changes
- * the tangent it was supposed to preserve. It is also what lets a
- * *vertex* be dragged along a straight run without being mistaken for
- * a handle: only `offset < handles` points are ever candidates for the
- * handle bounds in `clampHandle`.
+ * to its nearest *control* point, but a handle may only be shortened to
+ * the distance to its own on-curve point — shortened to a neighbouring
+ * control point instead, it clamps far too hard and changes the tangent
+ * it was supposed to preserve. It is also what lets a *vertex* be
+ * dragged along a straight run without being mistaken for a handle.
  */
 interface PathPoint extends Point {
     onCurve: boolean
@@ -200,9 +149,7 @@ interface Shape {
      * (`c1`, `c2`), `S`/`Q` one, and everything else none.
      */
     handles: number
-    /**
-     * Which of those points is the on-curve one. It is always the last.
-     */
+    /** Which of those points is the on-curve one. Always the last. */
     vertex: number
 }
 
@@ -215,19 +162,16 @@ interface Shape {
  *
  * **`H`, `V` and `A` are deliberately absent**, and this is the one
  * place the table is *not* exhaustive. `points` counts x/y **pairs**,
- * and those three commands do not speak in pairs: `H x` and `V y` carry
- * a single coordinate, and `A` carries `rx ry rot largeArc sweep x y` —
- * two radii, an angle and two flags between the endpoint's coordinates.
- * Reading them with a pair-based arity would mis-split them silently,
- * which is exactly the failure mode this table exists to prevent, so
- * they stay rejected and the caller leaves the attribute alone.
+ * and those three do not speak in pairs: `H x` and `V y` carry a single
+ * coordinate, and `A` carries `rx ry rot largeArc sweep x y`. Reading
+ * them with a pair-based arity would mis-split them silently, which is
+ * the failure mode this table exists to prevent, so they stay rejected
+ * and the caller leaves the attribute alone.
  *
- * The commands with no handles (`L`, `T`, `Z`) are the ones an
- * index-based implementation gets wrong when it assumes "the point
- * after the start is a control point": for `L` there is no handle at
- * all, and for `T` the single point is a vertex whose control point is
- * *implicit* (the reflection of the previous `Q`/`C`), so nothing can
- * be moved without recomputing it.
+ * The commands with no handles (`L`, `T`, `Z`) carry nothing movable:
+ * `L` has no handle, and `T`'s single point is a vertex whose control
+ * point is *implicit* (the reflection of the previous `Q`/`C`), so it
+ * cannot be moved without recomputing that reflection.
  */
 const SHAPE: Record<string, Shape> = {
     M: { points: 1, handles: 0, vertex: 0 },
@@ -247,8 +191,7 @@ const SHAPE: Record<string, Shape> = {
  * granularity the anchoring works at: a handle belongs to a repetition
  * and is clamped against that repetition's own vertex, not against
  * "whatever happens to be at index + 1".
- */
-interface Group {
+ */interface Group {
     /** The command this repetition came from — `M`, `L`, `C`, … */
     command: string
     /** Flat index of the repetition's first point. */
@@ -527,19 +470,15 @@ function blend(a: Point, b: Point, c: Point, wa: number, wb: number, wc: number)
     }
 }
 
-/** `2·a − b`: the point that puts `a` a third of the way from `b` to `a`…'s reflection. */
+/** `2·a − b`: the reflection of `b` about `a`. */
 function reflect(a: Point, b: Point): Point {
     return { x: 2 * a.x - b.x, y: 2 * a.y - b.y }
 }
 
-/* ------------------------------------------------------------------ *
- * The d3 `curveBundle.basis` codec.
- *
- * This is the shape `useMermaidRender` ships, and the whole point of
- * this module. See the file header for why re-running d3's emission is
- * the only way to relocate an endpoint without changing the curve's
- * shape; everything below is that one idea, written out.
- * ------------------------------------------------------------------ */
+// Everything below is the d3 `curveBundle.basis` codec — the shape
+// `useMermaidRender` ships, and the whole point of this module. See the
+// file header for why re-running d3's emission is the only way to
+// relocate an endpoint without changing the curve's shape.
 
 /**
  * How far a decoded `q` and a re-emitted path may disagree before the
@@ -550,11 +489,10 @@ function reflect(a: Point, b: Point): Point {
  * decimals, so a correct decode cannot do better than a few thousandths
  * — measured 0.0009 over the whole captured corpus, from the codec
  * *inverting a difference* (`2c₁ − c₂`) of two already-rounded numbers.
- * 0.01 is four orders of magnitude below the shortest leg on any path in
- * the corpus (4.9 units) and far below anything a mis-decode of another
- * curve family could accidentally land on: the same comparison rejects
- * every non-`curveBasis` shape in the corpus by three orders of
- * magnitude.
+ * 0.01 is nearly three orders of magnitude below the shortest leg on any
+ * path in the corpus (4.9 units), and the same comparison rejects every
+ * non-`curveBasis` shape in the corpus by three orders of magnitude, so
+ * it separates the two cases in both directions.
  */
 const BUNDLE_BASIS_TOLERANCE = 0.01
 
@@ -620,11 +558,10 @@ function decodeBundleBasis(points: Point[]): Point[] | null {
     })
     const q: Point[] = []
     for (let i = 0; i < n; i++) {
+        // The two ends are read verbatim (see the docblock): d3 writes them
+        // out as the `M` and the trailing `L`, and they are the two points
+        // this function has to move.
         if (i === 0) {
-            // d3 writes q₀ as the `M` and q_{n-1} as the trailing `L`, so
-            // the `d` already carries the two ends exactly. Inverting them
-            // cannot beat the rounding they are fed, and they are the two
-            // points this function has to move.
             q.push(points[0] as Point)
             continue
         }
@@ -700,57 +637,41 @@ function emitBundleBasis(q: Point[]): Point[] {
  * `newEnd` by rigidly translating the **run** of geometry that each
  * endpoint is attached to.
  *
- * **This is the fallback, not the main path.** `reanchorEdgePath` only
- * comes here for a `d` that `decodeBundleBasis` declines — a
- * `curveLinear` or `curveStep` polyline, or a `curveBumpX`. For the
- * shipped `curveBasis` the run is the wrong instrument, for the reason
- * the file header spells out: it drags a control point past its partner
- * and no repair available here can put it back, because the repair
- * moves lengths and the damage is to a direction. What follows is
- * retained because it is the right answer for the shapes that reach it,
- * and because it is where the corpus's `curveLinear` and `curveStep`
- * coverage is earned.
+ * **The fallback, not the main path.** `reanchorEdgePath` only comes here
+ * for a `d` that `decodeBundleBasis` declines. For the shipped
+ * `curveBasis` the run is the wrong instrument — it drags a control
+ * point past its partner and no repair here can put it back, because
+ * the repair moves lengths and the damage is to a direction.
  *
- * **Why a run and not just a handle.** A bézier segment's tangent at
- * an end point is the vector to that end's control point, so moving an
- * endpoint alone snaps the curve to a new direction where it meets the
- * card, and moving only the control point is not enough either. Drag the
- * neighbouring vertex *too* and the run slides along the line it was
- * already on, which is invisible on a straight stretch.
+ * **Why a run and not just a handle.** A bézier's tangent at an end
+ * point is the vector to that end's control point, so moving an endpoint
+ * alone snaps the curve to a new direction where it meets the card.
+ * Dragging the neighbouring vertex *too* lets the run slide along the
+ * line it was already on, which is invisible on a straight stretch.
  *
- * So the run at each end is measured **positionally**: it reaches from
- * the endpoint back along the path's own direction of travel, as far as
- * the points that lie at or before the endpoint's new position, and no
- * further.
+ * The run at each end is measured **positionally** — from the endpoint
+ * back along the path's own direction of travel, as far as the points at
+ * or before the endpoint's new position, and no further. That one rule
+ * covers both ends and the shapes with no handle to speak of: a
+ * `curveLinear` polyline needs no run (its neighbouring vertex is already
+ * on the ray), while d3's `curveStep` staircase does, because its
+ * terminal `L` duplicates the point before it and leaving that behind
+ * doubles the path back over itself. A path with no direction at all — a
+ * single point, or a zero-length first leg, which d3 emits for a
+ * `curveBumpX` edge leaving straight up — falls back to the
+ * tangent-carrying handle.
  *
- * That single rule covers both ends of the problem, and it covers the
- * shapes where there is no handle to speak of: a `curveLinear` polyline
- * needs no run at all (its neighbouring vertex is already on the ray the
- * endpoint is walked out along), while d3's `curveStep` staircase *does*
- * need one, because its terminal `L` is a duplicate of the point before
- * it and leaving that behind doubles the path back over itself.
- *
- * A path with no direction of its own — a single point, or one whose
- * first leg is zero-length, which d3 emits for a `curveBumpX` edge
- * leaving straight up — falls back to the tangent-carrying handle
- * instead, which is the nearest thing to an answer the path offers.
- *
- * Every join *inside* a run keeps its angle exactly, and so does every
- * join *between* a run and the untouched middle: the first repetition's
- * head anchor is in the head run and its tail handle is not, so its
- * start tangent moves with the run and its end tangent does not — the
- * same as if nothing had happened. On the shapes that reach this
- * function the turn angle at every interior vertex is identical before
- * and after, and the middle of the path is byte-for-byte Mermaid's own
- * output.
+ * Every join *inside* a run keeps its angle, and so does every join
+ * *between* a run and the untouched middle: the first repetition's head
+ * anchor is in the head run and its tail handle is not, so its start
+ * tangent moves with the run and its end tangent does not. On the shapes
+ * that reach this the turn angle at every interior vertex is identical
+ * before and after, and the middle of the path is byte-for-byte
+ * Mermaid's own output.
  *
  * **Why the runs are accumulated before they are applied.** A lone
  * `S`/`Q` repetition has one control point governing both of its ends,
  * and if both runs reach it, it has to receive both deltas.
- *
- * The four steps below are named so each can be read — and measured — on its
- * own: measure the runs, apply them, rescale the handles a run left at the
- * wrong length, then clamp what is left.
  */
 
 /**
@@ -912,21 +833,8 @@ function anchorEnds(
     const deltas: Point[] = points.map(() => ({ x: 0, y: 0 }))
     const first = points[0] as PathPoint
     const last = points[lastIndex] as PathPoint
-    // The run at each end of the path.
+    // The run at each end, then the two repairs a run makes necessary.
     const curves = groups.filter((group) => group.handles > 0)
-
-    /*
-     * How far the endpoint has actually travelled along the path's own
-     * direction of travel, rather than how far the cards moved it. A run
-     * that reached past a point the endpoint never passed would drag that
-     * point *backwards*, which is the fold this exists to prevent.
-     *
-     * Where the path has no direction at all to measure against — a
-     * single point, or a first leg of zero length, which d3 emits for a
-     * `curveBumpX` edge leaving straight up — the tangent-carrying handle
-     * stands in instead, which is the nearest thing to an answer the path
-     * offers.
-     */
     const reach = headReach(points, lastIndex, newStart, departure, curves[0])
     const back = tailReach(points, lastIndex, newEnd, arrival, curves.at(-1))
 
@@ -1179,33 +1087,30 @@ function emitBundleBasisSegments(q: Point[]): Segment[] {
  * Re-anchor one edge path so it starts on `source`'s card border and
  * its arrow **tip** lands on `target`'s card border.
  *
- * Two mechanisms, chosen by what the `d` turns out to be:
+ * Two mechanisms, chosen by what the `d` turns out to be (see the file
+ * header for why the shipped `curveBundle.basis` needs the first):
  *
- *   - **d3 `curveBundle.basis`** — the shipped `flowchart.curve` — goes
- *     through `reanchorBundleBasis`, which decodes d3's routing out of
- *     the `d`, moves its two end points onto the cards and re-runs d3's
- *     own emission. This is the path every real edge takes, and it is
- *     the only one of the two that keeps the curve's *shape*; see the
- *     file header for the measurement that says so.
+ *   - **d3 `curveBundle.basis`** — every real edge — goes through
+ *     `reanchorBundleBasis`, which decodes d3's routing, moves its two
+ *     end points onto the cards and re-runs d3's own emission.
  *   - **everything else** falls back to `anchorEnds`, which translates
- *     the run of geometry at each end. Correct for a polyline, where
- *     there is no curvature to disturb, and the answer for the three
- *     `flowchart.curve` settings the plugin does not ship.
+ *     the run of geometry at each end. Correct for a polyline, and the
+ *     answer for the three `flowchart.curve` settings not shipped here.
  *
- * `endOvershoot` is how far past the path's end the end marker's tip
- * is drawn (see `ARROWHEAD_OVERSHOOT`, which is the default because
- * every edge `mermaidSource.ts` emits is a `--> arrow`). The endpoint
- * is stopped short by exactly that much along the path's own end
- * direction, so the *tip* — not the path end — meets the border. Pass
- * `0` for a path with no end marker; the start point is never
- * compensated, because Mermaid emits no `marker-start` for it.
+ * `endOvershoot` is how far past the path's end the end marker's tip is
+ * drawn (see `ARROWHEAD_OVERSHOOT`, the default because every edge
+ * `mermaidSource.ts` emits is a `--> arrow`). The endpoint is stopped
+ * short by that much along the path's own end direction, so the *tip* —
+ * not the path end — meets the border. Pass `0` for a path with no end
+ * marker; the start point is never compensated, because Mermaid emits
+ * no `marker-start` for it.
  *
  * Returns `null` when the path cannot be parsed, carries no points, or
- * does not begin with an `M` — all of which are the caller's signal to
- * leave the attribute alone, since "the first point is a vertex the ray
- * can start from" is what the rest of this function assumes. A node
- * whose edge endpoint is already on (or outside) the card still gets a
- * sensible result: the ray is simply re-aimed at the border.
+ * does not begin with an `M` — the caller's signal to leave the
+ * attribute alone, since "the first point is a vertex the ray can start
+ * from" is what the rest of this function assumes. An endpoint already
+ * on (or outside) the card still gets a sensible result: the ray is
+ * simply re-aimed at the border.
  */
 export function reanchorEdgePath(
     d: string,

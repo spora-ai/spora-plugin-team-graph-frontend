@@ -119,6 +119,18 @@ export function useTeamGraph(principalId: Ref<number | null>): UseTeamGraph {
 
 /** The node fields the canvas renders — anything else is ignored. */
 const NODE_FIELDS = ['id', 'status', 'active_chats', 'recent_chats_24h'] as const
+/**
+ * Palette fields, split out from `NODE_FIELDS` only because they live
+ * under `node.profile_picture` rather than on the node itself — they
+ * are compared with the same strict `===` as every other field.
+ *
+ * The split is load-bearing for *which* fields take part in the change
+ * check, and therefore in whether a poll re-renders: a field left out
+ * of both lists is invisible to `nodesEqual`, so a poll returning a
+ * changed value for it will not repaint and will leave the canvas
+ * showing stale data. Any new node field that affects rendering
+ * belongs in one of the two lists.
+ */
 const NODE_PALETTE_FIELDS = ['palette_key', 'bg_color', 'fg_color'] as const
 /** The edge fields the canvas renders. */
 const EDGE_FIELDS = ['id', 'count_24h', 'last_invoked_at'] as const

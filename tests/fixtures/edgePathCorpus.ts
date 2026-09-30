@@ -38,8 +38,12 @@
  * wrong side of its partner. On the 33 `curveBasis` paths — the only
  * curve the plugin ships — Mermaid's own output and the current
  * implementation both score **0** reversals, and the run-translating
- * implementation that this one replaces scores **2** on 14 of them and
- * **4** on one more. See `pathMetrics.ts → waviness` for why reversal
+ * implementation that this one replaces scores **2** on 6 of them and
+ * **4** on 15 more, leaving 12 clean. (That split is for the 63 px card;
+ * the 88.2 px capture it replaced read 14 / 1 / 18. The counts move
+ * because the endpoints have less to travel — the mechanism and the
+ * assertion are unchanged. `edgeGeometryCorpus.spec.ts` pins both
+ * numbers.) See `pathMetrics.ts → waviness` for why reversal
  * count and not turn-per-window.
  *
  * Ten graphs × four Mermaid `flowchart.curve` settings. `basis` is what the
