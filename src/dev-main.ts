@@ -7,54 +7,42 @@ import type { GraphNode, GraphPayload, GraphEdge } from './types'
 /**
  * Dev-mode entry. The production mount/unmount contract lives in
  * `main.ts` (which the host's registry consumes via
- * `window.SporaAppTeamGraph`). For `npm run dev` we mount directly
- * under `#app` and stub `hostContext.api` so the page renders the
- * chrome without a backend.
+ * `window.SporaAppTeamGraph`); here we mount directly under
+ * `#spora-plugin-team-graph` and stub `hostContext.api` so the page
+ * renders without a backend.
  *
- * The stub returns realistic-shaped payloads:
- *  - `/principals/me` → a user-principal plus two groups (mirrors the
- *    fixtures used in the E prototype; lets us validate the sidebar
- *    + three-column layout in the browser).
- *  - `/plugins/team-graph/graph?...&principal_id=N` → a small graph
- *    per principal id.
- *
- * To exercise the real wire surface, run the host SPA's plugin
- * dev-proxy (`SPORA_PLUGIN_DEV_PORTS=team-graph:5180 npm run dev` in
+ * To exercise the real wire surface, run the host SPA's plugin dev-proxy
+ * (`SPORA_PLUGIN_DEV_PORTS=team-graph:5180 npm run dev` in
  * `spora-frontend`) and visit `/apps/team-graph`.
  *
- * **The dev page has no host CSS variables.** The plugin resolves
- * every colour through the host's tokens (`--foreground`,
- * `--muted`, `--border`, …), and nothing in this repo declares them
- * — the host does, in `spora-frontend/src/style.css`. So a bare
- * `npm run dev` renders with every `hsl(var(--token))` falling back
- * to inherited black-on-white, and the panel's dark theme cannot be
- * inspected at all. Paste the host's `@layer base :root` / `.dark`
- * blocks into the devtools (or load the host SPA through the
- * dev-proxy, which is the better option) before judging any colour
- * here.
+ * **The dev page has no host CSS variables.** Every colour resolves
+ * through the host's tokens (`--foreground`, `--muted`, `--border`, …)
+ * and nothing in this repo declares them — the host does. A bare
+ * `npm run dev` therefore renders with every `hsl(var(--token))`
+ * falling back to black-on-white, and the dark theme cannot be inspected
+ * at all. Paste the host's `@layer base :root` / `.dark` blocks into the
+ * devtools (or load the host through the dev-proxy, the better option)
+ * before judging any colour here.
  *
- * **Two things the stub has to get right, because the whole point of
- * `npm run dev` is to be representative.**
+ * **Two things the stub must get right**, because the point of
+ * `npm run dev` is to be representative:
  *
  * 1. **`setApi()`.** `api/client.ts` keeps a module-level handle that
  *    only `main.ts`'s `mount()` installs. Without the call below every
- *    `getApi()` throws "Plugin API not initialized", `usePrincipalList`
- *    swallows it into an error state, and the dev server renders a
- *    permanently empty canvas — silently hiding every visual defect
- *    the dev loop is supposed to catch.
+ *    `getApi()` throws, `usePrincipalList` swallows it into an error
+ *    state, and the dev server renders a permanently empty canvas —
+ *    silently hiding every visual defect the dev loop should catch.
  * 2. **The unwrapped envelope.** The host's typed client already
  *    unwraps `{ data: T }` (see `api/teamGraph.ts`), so the stub
- *    returns the payload *directly*. Returning `{ data: … }` here made
- *    every `fetchGraph()` hand the page a payload with no `nodes`.
+ *    returns the payload *directly*. Returning `{ data: … }` handed
+ *    every `fetchGraph()` a payload with no `nodes`.
  *
  * **`profile_picture` carries all eight fields `NodeResolver.php`
- * emits**, not just the three palette keys. The `kind` discriminant is
- * what the shared `Avatar` branches on: an agent with an
- * `archetype` + `variant_key` renders the archetype tile, and an
- * agent without them falls back to initials — and the fallback used to
- * drop the palette entirely, which is invisible unless the stub has a
- * node in *both* branches. `DEV_NODES` below deliberately contains
- * one of each, plus a green-palette archetype-less node.
+ * emits**, not just the three palette keys, because the shared `Avatar`
+ * branches on them: an agent with an `archetype` + `variant_key` renders
+ * the archetype tile, one without falls back to initials, and that
+ * fallback used to drop the palette. `DEV_NODES` below deliberately
+ * contains a node in *both* branches.
  */
 
 /**
@@ -118,18 +106,12 @@ function node(
 /**
  * Four nodes, chosen to cover every branch the card can take:
  *
- *  - `Spora Core Agent` — archetype tile (teal), the branch that
- *    already worked.
- *  - `Research Agent` — archetype tile (indigo), the selected-node
- *    look.
- *  - **`Writer Agent` — NO archetype, green palette.** This is the
- *    case that regressed: the package's `isAvatar` guard needs
- *    `archetype` *and* `variant_key` to be strings, so the node drops
- *    to the initials branch and lost the green. A dev stub that only
- *    ships archetype nodes can never reproduce it.
- *  - `Helper Agent` — NO archetype, amber palette, so a
- *    palette-on-initials node next to a default-slate one is visible
- *    side by side.
+ *  - two archetype tiles (teal, indigo) — the branch that already worked;
+ *  - two with **no** archetype, green and amber — the case that
+ *    regressed. The package's `isAvatar` guard needs `archetype` *and*
+ *    `variant_key` to be strings, so the node drops to the initials
+ *    branch and lost the green. A dev stub that only ships archetype
+ *    nodes can never reproduce it.
  */
 const DEV_NODES: GraphNode[] = [
     node(11, 'Spora Core Agent', 'Lead', 'RUNNING', picture('teal', 'assistant', 'v0'), 1, 4),
@@ -163,21 +145,16 @@ const DEV_PRINCIPALS = [
  * `/tasks` rows for the selected agent, in the raw wire shape
  * `taskToChatSummary()` maps from.
  *
- * **Why the stub bothers.** The panel's chat sections are the part
- * of the sidebar with the most new surface in this change (the
- * navigable rows, the status pill, the overflow note), and an empty
- * `/tasks` response renders them as a single "No recent chats." line —
- * so a dev server with an empty stub cannot show whether any of it
- * works. Six completed rows against a cap of four also exercises the
- * overflow note, and one running row exercises the in-flight section,
- * so both chat sections and the "+N more" line are visible at once.
+ * **Why the stub bothers.** An empty `/tasks` response renders the
+ * panel's chat sections as a single "No recent chats." line, so a dev
+ * server with an empty stub cannot show whether any of it works. Five
+ * completed rows against a cap of four put the overflow note on screen,
+ * and one running row exercises the in-flight section, so both sections
+ * and the "+N more" line are visible at once.
  *
- * Statuses are spread across the wire enum on purpose: two of them
- * (`COMPLETED`, `CANCELLED`) collapse onto the *same* status slug, so
- * only their labels tell them apart in the rendered pill.
- *
- * Five completed rows against a cap of four, so the overflow note is
- * on screen in every dev session rather than only in a test.
+ * Statuses are spread across the wire enum on purpose: `COMPLETED` and
+ * `CANCELLED` collapse onto the *same* status slug, so only their labels
+ * tell them apart in the rendered pill.
  */
 const DEV_TASKS: Array<Record<string, unknown>> = [
     {
@@ -254,12 +231,11 @@ function devGraph(principalId: number): GraphPayload {
         4: 'Research (no agents yet)',
     }
     /*
-     * Principal 4 answers with a real envelope that happens to carry
-     * no nodes — the shape the endpoint returns for a team nobody has
-     * added an agent to. Deliberately *not* a throw or a 404: an
-     * error payload exercises `GraphErrorFallback`, a different
-     * branch of the same slot, and conflating the two in the stub is
-     * what made the empty state untestable by hand.
+     * Principal 4 answers with a real envelope carrying no nodes — the
+     * shape the endpoint returns for a team nobody has added an agent to.
+     * Deliberately *not* a throw or a 404: an error payload exercises
+     * `GraphErrorFallback`, a different branch of the same slot, and
+     * conflating the two is what made the empty state untestable by hand.
      */
     const empty = principalId === 4
     return {
@@ -276,12 +252,10 @@ function devGraph(principalId: number): GraphPayload {
 }
 
 /**
- * Resolve one dev-harness `GET` to its stub payload.
- *
- * Separate from `devApi.get` so this stays a plain synchronous function:
- * the real client is `Promise`-returning, and an `async` wrapper over a
- * body that never awaits would be `await`ing nothing while implying the
- * resolution is deferred. `get` wraps the result once, below.
+ * Resolve one dev-harness `GET` to its stub payload. Kept separate from
+ * `devApi.get` so it stays synchronous: the real client is
+ * `Promise`-returning, and an `async` body that never awaits implies a
+ * deferred resolution it does not have. `get` wraps the result once.
  */
 function devApiGet<T>(path: string): T {
     if (path.startsWith('/principals/me')) {
@@ -324,8 +298,8 @@ function devApiGet<T>(path: string): T {
 /**
  * Generically typed to match `PluginHostContext['api']`: the stub is
  * installed through `setApi()`, which takes the real client type, so a
- * `Promise<unknown>`-returning stub would not be assignable (and would
- * also hide the payload types from every `fetch*()` call site).
+ * `Promise<unknown>`-returning stub would not be assignable and would
+ * hide the payload types from every `fetch*()` call site.
  */
 const devApi = {
     get: <T>(path: string): Promise<T> => Promise.resolve(devApiGet<T>(path)),
@@ -390,13 +364,12 @@ setApi(hostContext.api)
 const app = createApp(App, { hostContext })
 app.use(createPinia())
 /*
- * Mount into the plugin's own scope id rather than a generic `#app`.
- * `App.vue` renders `<div id="spora-plugin-team-graph">` as its root
- * and every stylesheet rule — the generated Tailwind utilities via
- * `tailwind.config.ts → important:`, and the hand-written `.tg-*`
- * chrome — is scoped to that id. Mounting into a differently-named
- * element gave `npm run dev` a different CSS scope from the hosted
- * page, so dev could render correctly while production did not (or
- * the reverse). `index.html` carries the same id.
+ * Mount into the plugin's own scope id, not a generic `#app`. `App.vue`
+ * renders `<div id="spora-plugin-team-graph">` as its root and every
+ * stylesheet rule — the generated Tailwind utilities via
+ * `tailwind.config.ts → important:` and the hand-written `.tg-*` chrome —
+ * is scoped to that id, so a different mount point gives `npm run dev` a
+ * different CSS scope from the hosted page. `index.html` carries the
+ * same id.
  */
 app.mount('#spora-plugin-team-graph')
