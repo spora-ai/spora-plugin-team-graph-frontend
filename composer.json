@@ -1,6 +1,6 @@
 {
     "name": "spora-ai/spora-plugin-team-graph-frontend",
-    "description": "Pre-built Vue SPA for the Spora team-graph admin view. Renders a per-principal Mermaid graph of agent spawning relationships. Delivered as type `spora-plugin-frontend`; the host SPA lazy-loads it via /plugins/spora-plugin-team-graph-frontend/main.js.",
+    "description": "Pre-built Vue SPA for the Spora team-graph admin view. Renders a per-principal Mermaid graph of agent spawning relationships. Delivered as type `spora-plugin-frontend`; the host SPA lazy-loads it via /plugins/team-graph/main.js (the parent plugin's `plugin.json#slug`, not this package's name).",
     "type": "spora-plugin-frontend",
     "license": "MIT",
     "require": {
