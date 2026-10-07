@@ -7,7 +7,7 @@
         "php": "^8.4.1"
     },
     "dist": {
-        "url": "https://github.com/spora-ai/spora-plugin-team-graph-frontend/releases/download/v0.1.0/spora-plugin-team-graph-frontend-v0.1.0.tar.gz",
+        "url": "https://github.com/spora-ai/spora-plugin-team-graph-frontend/releases/download/v0.1.1/spora-plugin-team-graph-frontend-v0.1.1.tar.gz",
         "type": "tar"
     },
     "extra": {

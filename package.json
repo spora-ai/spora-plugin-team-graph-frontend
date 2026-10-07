@@ -1,7 +1,7 @@
 {
   "name": "spora-plugin-team-graph-frontend",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Vue IIFE bundle for the Spora team-graph admin view. Renders a per-principal Mermaid graph of agent spawning relationships, lazy-loaded into the host SPA via /plugins/team-graph/main.js.",
   "type": "module",
   "scripts": {
