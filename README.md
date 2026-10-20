@@ -62,12 +62,14 @@ npm run i18n:check     # the CI gate: en.json drift, a locale's key set, untrans
 
 ### What stays English, and why
 
-Four kinds of string are deliberately not in the catalogue. The extractor knows them and leaves them alone:
+Four kinds of string are deliberately not in the catalogue:
 
-- **Agent names** — "Marketing Lead", "Invoice Bot". Data the operator chose when they created the agent; translating them would rename somebody's agent behind their back.
+- **Agent names** — "Marketing Lead", "Invoice Bot". Data the operator chose when they created the agent; translating them would rename somebody's agent behind their back. They never reach the extractor in the first place: they arrive with the payload, not as a literal in the source.
 - **`Principal` / `Principals`** — the house term. The host's own German catalogue keeps it untranslated ("Ziel-Principal", "einen anderen Principal"), so a German operator reads "Principal" here too, and translating it would put two words for one concept on the same screen.
 - **`sub_agent`** — the wire's edge-operation slug (`op: 'sub_agent' | 'handover'`). It names the tool that produced the edge, and the host's task chat uses the same identifier for it; translating it here would break the link between the graph and the tool it draws.
 - **`MY` / `G`** — two-letter codes in a 20 px pill badge on each principal tab. There is no room for a translated word in the badge, and the label beside it ("My Agents", or the group's own name) already carries the meaning.
+
+The last three are the extractor's `EXCLUDED_TERMS` — it leaves them in the template as raw text instead of reporting them as untranslated copy.
 
 ## Relative time
 
