@@ -107,7 +107,7 @@ export default defineConfig({
             reportsDirectory: './coverage',
             // Mirrors sonar.coverage.exclusions — excludes Vue SFCs / type-only files
             // so the coverage number reflects exercised code, not an inflated denominator.
-            include: ['src/api/**/*.ts', 'src/stores/**/*.ts', 'src/composables/**/*.ts', 'src/lib/**/*.ts'],
+            include: ['src/api/**/*.ts', 'src/stores/**/*.ts', 'src/composables/**/*.ts', 'src/i18n/**/*.ts', 'src/lib/**/*.ts'],
             exclude: ['src/main.ts', 'src/dev-main.ts', 'src/shims.d.ts', 'src/types.ts', 'src/**/*.{vue,css}'],
         },
     },

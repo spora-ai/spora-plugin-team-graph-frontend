@@ -155,6 +155,17 @@ const COPY_PROPERTIES = new Set([
  */
 const DOM_TEXT_FUNCTIONS = new Set(['createTextNode'])
 
+/**
+ * Variables a store assigns its failure message to.
+ *
+ * The object-property rule cannot see these: `error.value = '…'` is an
+ * *assignment*, not a property, so a store's untranslated failure
+ * message used to reach the operator in English without the
+ * extractor noticing. The base identifier is what the rule keys on —
+ * `error.value` and `error.message` both qualify.
+ */
+const COPY_VARS = new Set(['error', 'message'])
+
 const SCAN_EXTENSIONS = new Set(['.vue', '.ts', '.tsx', '.js', '.jsx'])
 
 // ---------------------------------------------------------------------------
@@ -218,8 +229,17 @@ function listSourceFiles(dir) {
             found.push(full)
         }
     }
-    return found.sort()
+    return found.sort(compareStrings)
 }
+
+/**
+ * Codepoint order — `Array.prototype.sort()`'s default, spelled out.
+ *
+ * `localeCompare` would be locale-dependent, and the catalogue's order
+ * has to be the same on every machine: the CI gate compares the
+ * generated file with the committed one byte for byte.
+ */
+const compareStrings = (a, b) => (a < b ? -1 : a > b ? 1 : 0)
 
 const rel = (file) => relative(ROOT, file).split(sep).join('/')
 
@@ -279,7 +299,105 @@ function propertyName(node) {
 function looksLikeCopy(value) {
     if (value.trim() === '') return false
     if (EXCLUDED_TERMS.has(value.trim())) return false
-    return /[\p{L}]/u.test(value)
+    return /\p{L}/u.test(value)
+}
+
+/**
+ * The string literal an assignment hands to a copy variable, if any.
+ *
+ * Two shapes reach the operator: the literal itself
+ * (`error.value = '…'`) and the fallback branch of a conditional
+ * (`error.value = e instanceof ApiError ? e.message : '…'`) — the
+ * second is the shape every store's failure message takes.
+ */
+function assignedLiteral(node) {
+    if (node?.type === 'Literal') {
+        return typeof node.value === 'string' ? node.value : null
+    }
+    if (node?.type === 'ConditionalExpression') {
+        return assignedLiteral(node.alternate) ?? assignedLiteral(node.consequent)
+    }
+    return null
+}
+
+/**
+ * Walk a Vue template for the strings the operator reads.
+ *
+ * The template is not part of the `<script>` AST, so it needs its own
+ * walk: raw text, literal attributes and bound literal attributes are
+ * all copy, and the expression containers hold the `{{ t('…') }}` calls
+ * the script walk cannot see.
+ */
+function walkTemplate(node, ctx) {
+    if (node.type === 'VDocumentFragment') {
+        node.children.forEach((child) => walkTemplate(child, ctx))
+        return
+    }
+    if (node.type !== 'VElement') return
+
+    for (const attribute of node.startTag.attributes) {
+        const literal = attribute.directive === false
+            ? literalAttribute(attribute)
+            : boundAttributeLiteral(attribute)
+        if (literal !== null) {
+            ctx.addCandidate(literal.value, ctx.file, literal.line, literal.kind)
+        }
+    }
+
+    for (const child of node.children) {
+        walkTemplateChild(child, ctx)
+    }
+}
+
+/**
+ * A plain literal attribute — `placeholder="…"`.
+ */
+function literalAttribute(attribute) {
+    const name = attribute.key.name
+    if (name === undefined) return null
+    if (!LITERAL_ATTRIBUTES.has(name)) return null
+    const value = attribute.value
+    if (value?.type !== 'VLiteral') return null
+    if (typeof value.value !== 'string') return null
+    return { value: value.value, line: attribute.loc.start.line, kind: name }
+}
+
+/**
+ * A bound literal attribute — `:placeholder="'…'"`.
+ *
+ * The binding is still a literal, so it is still copy.
+ */
+function boundAttributeLiteral(attribute) {
+    const argName = attribute.key.name?.name === 'bind' ? attribute.key.argument?.name : null
+    if (argName === null) return null
+    if (!LITERAL_ATTRIBUTES.has(argName)) return null
+    const value = attribute.value
+    if (value?.type !== 'VExpressionContainer') return null
+    if (value.expression?.type !== 'Literal') return null
+    if (typeof value.expression.value !== 'string') return null
+    return {
+        value: value.expression.value,
+        line: value.loc.start.line,
+        kind: `:${argName}`,
+    }
+}
+
+/**
+ * One child node of a template element.
+ */
+function walkTemplateChild(child, ctx) {
+    if (child.type === 'VText') {
+        ctx.addCandidate(child.value, ctx.file, child.loc.start.line, 'raw text')
+        return
+    }
+    if (child.type === 'VExpressionContainer' && child.expression) {
+        // Template expressions are ESTree and are not part of the
+        // `<script>` AST, so they need the same walk to find
+        // `{{ $t('…') }}` and `{{ t('…') }}`.
+        ctx.visitAst(child.expression, ctx.file)
+        return
+    }
+    walkTemplate(child, ctx)
 }
 
 function scan() {
@@ -324,6 +442,18 @@ function scan() {
                 typeof child.value.value === 'string'
             ) {
                 addCandidate(child.value.value, file, child.loc.start.line, 'literal')
+                return
+            }
+            if (
+                child.type === 'AssignmentExpression' &&
+                child.left?.type === 'MemberExpression' &&
+                child.left.object?.type === 'Identifier' &&
+                COPY_VARS.has(child.left.object.name)
+            ) {
+                const literal = assignedLiteral(child.right)
+                if (literal !== null) {
+                    addCandidate(literal, file, child.loc.start.line, 'assignment')
+                }
             }
         })
     }
@@ -351,60 +481,9 @@ function scan() {
 
             visitAst(ast, name)
 
-            const walkTemplate = (node) => {
-                if (node.type === 'VDocumentFragment') {
-                    node.children.forEach(walkTemplate)
-                    return
-                }
-                if (node.type !== 'VElement') return
-
-                for (const attribute of node.startTag.attributes) {
-                    if (attribute.directive !== false) {
-                        // `:placeholder="'…'"` — a bound literal is still a literal.
-                        const argName =
-                            attribute.key.name?.name === 'bind' ? attribute.key.argument?.name : null
-                        if (
-                            argName &&
-                            LITERAL_ATTRIBUTES.has(argName) &&
-                            attribute.value?.type === 'VExpressionContainer' &&
-                            attribute.value.expression?.type === 'Literal' &&
-                            typeof attribute.value.expression.value === 'string'
-                        ) {
-                            addCandidate(
-                                attribute.value.expression.value,
-                                name,
-                                attribute.value.loc.start.line,
-                                `:${argName}`,
-                            )
-                        }
-                        continue
-                    }
-                    const attrName = attribute.key.name
-                    if (
-                        attrName &&
-                        LITERAL_ATTRIBUTES.has(attrName) &&
-                        attribute.value?.type === 'VLiteral' &&
-                        typeof attribute.value.value === 'string'
-                    ) {
-                        addCandidate(attribute.value.value, name, attribute.loc.start.line, attrName)
-                    }
-                }
-
-                for (const child of node.children) {
-                    if (child.type === 'VText') {
-                        addCandidate(child.value, name, child.loc.start.line, 'raw text')
-                    } else if (child.type === 'VExpressionContainer' && child.expression) {
-                        // Template expressions are ESTree and are not part of the
-                        // `<script>` AST, so they need the same walk to find
-                        // `{{ $t('…') }}` and `{{ t('…') }}`.
-                        visitAst(child.expression, name)
-                    } else {
-                        walkTemplate(child)
-                    }
-                }
+            if (ast.templateBody != null) {
+                walkTemplate(ast.templateBody, { file: name, addCandidate, visitAst })
             }
-
-            if (ast.templateBody != null) walkTemplate(ast.templateBody)
         } else {
             const ast = tsEstree.parse(code, {
                 filePath: file,
@@ -437,7 +516,7 @@ function readCatalogue(locale) {
 
 /** Deterministic: codepoint order, so a regenerated file diffs cleanly. */
 function renderCatalogue(entries) {
-    const ordered = [...entries].sort()
+    const ordered = [...entries].sort(compareStrings)
     const flat = {}
     for (const key of ordered) flat[key] = key
     return JSON.stringify(flat, null, 2) + '\n'
@@ -445,6 +524,12 @@ function renderCatalogue(entries) {
 
 const firstLocation = (keys, key) => (keys.has(key) ? keys.get(key)[0] : null)
 const show = (key) => JSON.stringify(key)
+
+/** Where a key was found, or a placeholder when the source no longer has it. */
+const location = (at) => (at === null ? '(no location)' : `${at.file}:${at.line}`)
+
+/** The catalogue file's path, relative to the repo root. */
+const cataloguePath = (locale) => rel(join(CATALOGUE_DIR, `${locale}.json`))
 
 // ---------------------------------------------------------------------------
 // Reporting
@@ -509,11 +594,11 @@ function reportGaps(keys, catalogues) {
         console.log(`\n  ${locale} — ${missing.length} missing, ${placeholders.length} untranslated`)
         for (const key of missing) {
             const at = firstLocation(keys, key)
-            console.log(`\n  ${at ? `${at.file}:${at.line}` : '(no location)'}`)
+            console.log(`\n  ${location(at)}`)
             console.log(`    ${show(key)}`)
         }
         for (const [key, value] of placeholders) {
-            console.log(`\n  ${rel(join(CATALOGUE_DIR, `${locale}.json`))}`)
+            console.log(`\n  ${cataloguePath(locale)}`)
             console.log(`    ${show(key)} → ${describePlaceholder(value)}`)
         }
     }
@@ -563,7 +648,7 @@ const catalogues = new Map()
 for (const locale of TARGET_LOCALES) {
     const catalogue = readCatalogue(locale)
     if (catalogue === null) {
-        enforce('missing-catalogue', `${rel(join(CATALOGUE_DIR, `${locale}.json`))} does not exist`)
+        enforce('missing-catalogue', `${cataloguePath(locale)} does not exist`)
     } else {
         catalogues.set(locale, catalogue)
     }
@@ -588,14 +673,14 @@ for (const [locale, catalogue] of catalogues) {
         // name as a present translation.
         if (!Object.hasOwn(catalogue, key)) {
             const at = firstLocation(keys, key)
-            enforce('missing', `${locale} is missing a translation\n\n  ${at ? `${at.file}:${at.line}` : '(no location)'}\n    ${show(key)}`)
+            enforce('missing', `${locale} is missing a translation\n\n  ${location(at)}\n    ${show(key)}`)
         }
     }
     for (const key of Object.keys(catalogue)) {
         if (!keys.has(key)) {
             enforce(
                 'orphan',
-                `${locale} has a key the source no longer contains — the English text was edited\n\n  ${rel(join(CATALOGUE_DIR, `${locale}.json`))}\n    ${show(key)}`,
+                `${locale} has a key the source no longer contains — the English text was edited\n\n  ${cataloguePath(locale)}\n    ${show(key)}`,
             )
         }
     }
@@ -606,15 +691,15 @@ for (const [locale, catalogue] of catalogues) {
 for (const [locale, catalogue] of catalogues) {
     for (const [key, value] of Object.entries(catalogue)) {
         if (typeof value !== 'string' || value.trim() === '') {
-            enforce('placeholder', `${locale} has an empty translation\n\n  ${rel(join(CATALOGUE_DIR, `${locale}.json`))}\n    ${show(key)}`)
+            enforce('placeholder', `${locale} has an empty translation\n\n  ${cataloguePath(locale)}\n    ${show(key)}`)
         } else if (value === key) {
-            enforce('placeholder', `${locale} has an English-identical value — untranslated placeholder\n\n  ${rel(join(CATALOGUE_DIR, `${locale}.json`))}\n    ${show(key)}`)
+            enforce('placeholder', `${locale} has an English-identical value — untranslated placeholder\n\n  ${cataloguePath(locale)}\n    ${show(key)}`)
         }
         const bad = syntaxProblem(String(value))
         if (bad !== null) {
             fail(
                 'syntax',
-                `${locale} value has unescaped ${bad.map(show).join(' ')}\n\n  ${rel(join(CATALOGUE_DIR, `${locale}.json`))}\n    ${show(key)} → ${show(String(value))}`,
+                `${locale} value has unescaped ${bad.map(show).join(' ')}\n\n  ${cataloguePath(locale)}\n    ${show(key)} → ${show(String(value))}`,
             )
         }
     }
@@ -635,6 +720,9 @@ for (const candidate of candidates) {
 // *generated* half of the contract and is never hand-edited, so regenerating
 // it must not be gated on the hand-edited half being finished.
 if (!checkOnly) {
+    // The catalogue directory is part of the repository, but a fresh
+    // checkout of a branch that has none yet would otherwise crash the
+    // write with ENOENT.
     mkdirSync(CATALOGUE_DIR, { recursive: true })
     writeFileSync(enFile, generated)
     console.log(`\n  wrote ${rel(enFile)} (${keys.size} keys)`)

@@ -25,6 +25,21 @@ function relative(locale: string, diff: number, unit: Intl.RelativeTimeFormatUni
 const COMPACT_ENGLISH = /^en\b/i
 
 /**
+ * One relative time, rendered.
+ *
+ * `compact` is the English form the dashboard has always shipped and
+ * `diff` / `unit` are what `Intl` formats; the two never both apply.
+ */
+function render(
+    locale: string,
+    diff: number,
+    unit: Intl.RelativeTimeFormatUnit,
+    compact: string,
+): string {
+    return COMPACT_ENGLISH.test(locale) ? compact : relative(locale, diff, unit)
+}
+
+/**
  * A timestamp as a relative string, in the panel's locale.
  *
  * `now` is a parameter rather than a call to `Date.now()` so a caller that
@@ -45,39 +60,37 @@ export function formatRelativeTime(
 
     const locale = activeLocale()
     const diffSec = Math.round((now - then) / 1000)
-    const abs = Math.abs(diffSec)
 
-    if (abs < 60) {
-        return COMPACT_ENGLISH.test(locale)
-            ? diffSec >= 0 ? 'just now' : 'in a moment'
-            : relative(locale, 0, 'second')
+    if (Math.abs(diffSec) < 60) {
+        const compact = diffSec >= 0 ? 'just now' : 'in a moment'
+        return render(locale, 0, 'second', compact)
     }
 
     const minutes = Math.round(diffSec / 60)
     if (Math.abs(minutes) < 60) {
-        return COMPACT_ENGLISH.test(locale) ? `${minutes}m ago` : relative(locale, minutes, 'minute')
+        return render(locale, minutes, 'minute', `${minutes}m ago`)
     }
 
     const hours = Math.round(minutes / 60)
     if (Math.abs(hours) < 24) {
-        return COMPACT_ENGLISH.test(locale) ? `${hours}h ago` : relative(locale, hours, 'hour')
+        return render(locale, hours, 'hour', `${hours}h ago`)
     }
 
     const days = Math.round(hours / 24)
     if (Math.abs(days) < 7) {
-        return COMPACT_ENGLISH.test(locale) ? `${days}d ago` : relative(locale, days, 'day')
+        return render(locale, days, 'day', `${days}d ago`)
     }
 
     const weeks = Math.round(days / 7)
     if (Math.abs(weeks) < 5) {
-        return COMPACT_ENGLISH.test(locale) ? `${weeks}w ago` : relative(locale, weeks, 'week')
+        return render(locale, weeks, 'week', `${weeks}w ago`)
     }
 
     const months = Math.round(days / 30)
     if (Math.abs(months) < 12) {
-        return COMPACT_ENGLISH.test(locale) ? `${months}mo ago` : relative(locale, months, 'month')
+        return render(locale, months, 'month', `${months}mo ago`)
     }
 
     const years = Math.round(days / 365)
-    return COMPACT_ENGLISH.test(locale) ? `${years}y ago` : relative(locale, years, 'year')
+    return render(locale, years, 'year', `${years}y ago`)
 }

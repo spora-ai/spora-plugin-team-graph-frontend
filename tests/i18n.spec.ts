@@ -1,12 +1,11 @@
 /**
- * The German catalogue, rendered.
+ * The plugin's German catalogue.
  *
- * `en.json` is an identity map, so the English assertions elsewhere in
- * the suite cannot tell a translated component from an untranslated one.
- * This spec mounts the components with a `de` instance and reads what an
- * operator would actually see — the catalogue, the wiring and the
- * component template are three separate things, and only the rendered
- * output proves all three line up.
+ * Three things are pinned here: that the catalogue covers the source
+ * (the extractor's rule 2 does the same, but it is a build-time gate
+ * and this is a test), that no value is left identical to its English
+ * source, and that the panel actually renders German when the host
+ * says the operator's language is German.
  */
 import { mount } from '@vue/test-utils'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
@@ -16,7 +15,9 @@ import AgentStatusChip from '../src/components/AgentStatusChip.vue'
 import GraphErrorFallback from '../src/components/GraphErrorFallback.vue'
 import StatusLegend from '../src/components/StatusLegend.vue'
 import TeamGraphCanvas from '../src/components/TeamGraphCanvas.vue'
-import { createPluginI18n } from '../src/i18n'
+import { createPluginI18n, t } from '../src/i18n'
+import en from '../src/locales/en.json'
+import de from '../src/locales/de.json'
 import type { GraphNode, GraphPayload } from '../src/types'
 
 vi.mock('mermaid', () => ({
@@ -60,7 +61,29 @@ const EMPTY_GRAPH: GraphPayload = {
     generated_at: '2026-09-28T12:00:00Z',
 }
 
-describe('German catalogue', () => {
+describe('the German catalogue', () => {
+    it('covers every key the English catalogue has, and no more', () => {
+        expect(Object.keys(de).sort()).toEqual(Object.keys(en).sort())
+    })
+
+    it('translates every key — no value is left identical to its English source', () => {
+        const untranslated = Object.entries(de)
+            .filter(([key, value]) => value === key)
+            .map(([key]) => key)
+        expect(untranslated).toEqual([])
+    })
+
+    it('keeps the placeholders of the English source', () => {
+        const placeholders = (value: string): string[] =>
+            [...value.matchAll(/\{(\w+)\}/g)].map((m) => m[1]).sort()
+        const drifted = Object.entries(de)
+            .filter(([key, value]) => placeholders(key).join() !== placeholders(value).join())
+            .map(([key]) => key)
+        expect(drifted).toEqual([])
+    })
+})
+
+describe('the panel in German', () => {
     it('renders the status label in German', () => {
         const wrapper = mount(AgentStatusChip, {
             ...german(),
@@ -114,6 +137,22 @@ describe('German catalogue', () => {
         expect(text).toContain('läuft')
         expect(text).toContain('eingehend')
         expect(text).toContain('ausgehend')
+    })
+
+    it('translates through the module-level helper the stores use', () => {
+        const instance = createPluginI18n('de')
+        expect(instance.global.locale.value).toBe('de')
+        expect(t('My Agents')).toBe('Meine Agenten')
+    })
+
+    it('falls back to the English source when no instance has been created yet', async () => {
+        // A fresh module registry, so the instance this file created
+        // in `beforeEach` is not the one being asked. A store action
+        // that runs before `createPluginI18n` must not crash.
+        vi.resetModules()
+        const fresh = await import('../src/i18n')
+
+        expect(fresh.t('A key nobody translated')).toBe('A key nobody translated')
     })
 
     it('falls back to the English source for a locale it has no catalogue for', () => {

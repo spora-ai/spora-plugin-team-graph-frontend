@@ -28,6 +28,14 @@ describe('formatRelativeTime', () => {
         expect(formatRelativeTime(at(3 * 3_600_000), NOW)).toBe('3h ago')
     })
 
+    it('walks the whole ladder', () => {
+        const day = 24 * 3_600_000
+        expect(formatRelativeTime(at(2 * day), NOW)).toBe('2d ago')
+        expect(formatRelativeTime(at(10 * day), NOW)).toBe('1w ago')
+        expect(formatRelativeTime(at(40 * day), NOW)).toBe('1mo ago')
+        expect(formatRelativeTime(at(400 * day), NOW)).toBe('1y ago')
+    })
+
     it('renders "just now" below a minute', () => {
         expect(formatRelativeTime(at(5_000), NOW)).toBe('just now')
     })
