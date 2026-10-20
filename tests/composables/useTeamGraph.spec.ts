@@ -75,7 +75,12 @@ describe('useTeamGraph', () => {
         fetchGraphMock.mockRejectedValueOnce(new Error('boom'))
         const { error } = useTeamGraph(principalId)
         await vi.waitFor(() => {
-            expect(error.value).toBe('failed to load team graph')
+            /*
+             * The fallback is catalogue copy, so it goes through `t()`.
+             * `en.json` is an identity map, so the English rendering is
+             * the source string itself.
+             */
+            expect(error.value).toBe('Failed to load team graph')
         })
     })
 

@@ -47,9 +47,9 @@
  * policy.
  */
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { AgentAvatar } from '@spora-ai/components/avatar'
 import { Icon } from '@spora-ai/components/icons'
-import { formatRelativeTime } from '@spora-ai/components/composables'
 import { useSelectionStore } from '../stores/selection'
 import {
     fetchActiveChats,
@@ -60,9 +60,12 @@ import {
 import { avatarSubject, statusRingColor, type AgentAvatarSubject } from '../lib/agentAvatar'
 import { chatRowAction, type ChatRowAction, type PluginRouter } from '../lib/hostNavigation'
 import { statusPillClass, statusLabel } from '../lib/nodeStatus'
+import { formatRelativeTime } from '../lib/relativeTime'
 import { inDegree, outDegree } from '../lib/stats'
 import type { ChatSummary, GraphEdge, GraphNode, GraphPayload } from '../types'
 import AgentStatusChip from './AgentStatusChip.vue'
+
+const { t } = useI18n()
 
 const props = defineProps<{
     graph: GraphPayload
@@ -286,12 +289,15 @@ onBeforeUnmount(() => {
  */
 function edgeActivity(edge: GraphEdge): string {
     if (edge.count_24h > 0) {
-        return `${edge.count_24h}× / 24 h · ${formatRelativeTime(edge.last_invoked_at)}`
+        return t('{count}× / 24 h · {when}', {
+            count: edge.count_24h,
+            when: formatRelativeTime(edge.last_invoked_at),
+        })
     }
     if (edge.last_invoked_at !== null) {
-        return `last seen ${formatRelativeTime(edge.last_invoked_at)}`
+        return t('last seen {when}', { when: formatRelativeTime(edge.last_invoked_at) })
     }
-    return 'configured, never used'
+    return t('configured, never used')
 }
 
 function jumpTo(id: number): void {
@@ -371,7 +377,7 @@ function openChat(row: ChatRow): void {
                     class="w-5 h-5 text-muted-foreground"
                 />
             </div>
-            <p class="text-sm font-medium text-foreground">No agent selected</p>
+            <p class="text-sm font-medium text-foreground">{{ t('No agent selected') }}</p>
             <p class="text-xs text-muted-foreground mt-1 max-w-[220px]">
                 <!--
                     Two bodies, one card. `selectedNode` is null in
@@ -382,10 +388,10 @@ function openChat(row: ChatRow): void {
                     the one thing the canvas no longer offers.
                 -->
                 <template v-if="hasNodes">
-                    Click any node in the diagram to see its inbound and outbound relations, plus recent chats.
+                    {{ t('Click any node in the diagram to see its inbound and outbound relations, plus recent chats.') }}
                 </template>
                 <template v-else>
-                    This team has no agents to select from.
+                    {{ t('This team has no agents to select from.') }}
                 </template>
             </p>
         </div>
@@ -416,13 +422,13 @@ function openChat(row: ChatRow): void {
                     stacked over a single line.
                 -->
                 <section class="tg-panel-stats">
-                    <span class="tg-panel-stats-label">Activity</span>
+                    <span class="tg-panel-stats-label">{{ t('Activity') }}</span>
                     <span class="tg-panel-stats-value">
                         <strong class="tg-panel-stats-num">{{ selectedNode.active_chats }}</strong>
-                        active
+                        {{ t('active') }}
                         <span aria-hidden="true" class="tg-panel-stats-sep">·</span>
                         <strong class="tg-panel-stats-num">{{ selectedNode.recent_chats_24h }}</strong>
-                        in 24 h
+                        {{ t('in 24 h') }}
                     </span>
                 </section>
 
@@ -434,13 +440,13 @@ function openChat(row: ChatRow): void {
                     class="tg-panel-section"
                 >
                     <h4 class="tg-panel-heading">
-                        Hierarchy
+                        {{ t('Hierarchy') }}
                     </h4>
                     <p
                         v-if="hierarchyChain.isRoot"
                         class="text-xs text-muted-foreground"
                     >
-                        Root — no parent in this team.
+                        {{ t('Root — no parent in this team.') }}
                     </p>
                     <p
                         v-else
@@ -468,7 +474,7 @@ function openChat(row: ChatRow): void {
                     class="tg-panel-section"
                 >
                     <h4 class="tg-panel-heading">
-                        Description
+                        {{ t('Description') }}
                     </h4>
                     <p class="tg-panel-prose line-clamp-3">
                         {{ agentMeta.description }}
@@ -485,9 +491,9 @@ function openChat(row: ChatRow): void {
                     class="tg-panel-section"
                 >
                     <h4 class="tg-panel-heading">
-                        Outbound — spawned <span class="tg-panel-count">({{ outboundEdges.length }})</span>
+                        {{ t('Outbound — spawned') }} <span class="tg-panel-count">({{ outboundEdges.length }})</span>
                     </h4>
-                    <p v-if="outboundEdges.length === 0" class="tg-panel-empty">None.</p>
+                    <p v-if="outboundEdges.length === 0" class="tg-panel-empty">{{ t('None.') }}</p>
                     <div v-else class="tg-panel-list">
                         <button
                             v-for="row in visibleOutboundRows"
@@ -504,10 +510,10 @@ function openChat(row: ChatRow): void {
                             </span>
                             <span class="flex-1 min-w-0">
                                 <span class="tg-row-title">
-                                    {{ row.node?.name ?? 'Unknown' }}
+                                    {{ row.node?.name ?? t('Unknown') }}
                                 </span>
                                 <span class="tg-row-sub">
-                                    <span aria-hidden="true">→</span> sub_agent · {{ edgeActivity(row.edge) }}
+                                    <span aria-hidden="true">→</span> <span>sub_agent</span> · {{ edgeActivity(row.edge) }}
                                 </span>
                             </span>
                             <Icon
@@ -520,8 +526,7 @@ function openChat(row: ChatRow): void {
                             v-if="hiddenOutboundCount > 0"
                             class="tg-panel-more"
                         >
-                            +{{ hiddenOutboundCount }} more — open the dashboard
-            to inspect.
+                            {{ t('+{count} more — open the dashboard to inspect.', { count: hiddenOutboundCount }) }}
                         </p>
                     </div>
                 </section>
@@ -532,9 +537,9 @@ function openChat(row: ChatRow): void {
                     class="tg-panel-section"
                 >
                     <h4 class="tg-panel-heading">
-                        Inbound — spawned by <span class="tg-panel-count">({{ inboundEdges.length }})</span>
+                        {{ t('Inbound — spawned by') }} <span class="tg-panel-count">({{ inboundEdges.length }})</span>
                     </h4>
-                    <p v-if="inboundEdges.length === 0" class="tg-panel-empty">None.</p>
+                    <p v-if="inboundEdges.length === 0" class="tg-panel-empty">{{ t('None.') }}</p>
                     <div v-else class="tg-panel-list">
                         <button
                             v-for="row in visibleInboundRows"
@@ -551,10 +556,10 @@ function openChat(row: ChatRow): void {
                             </span>
                             <span class="flex-1 min-w-0">
                                 <span class="tg-row-title">
-                                    {{ row.node?.name ?? 'Unknown' }}
+                                    {{ row.node?.name ?? t('Unknown') }}
                                 </span>
                                 <span class="tg-row-sub">
-                                    <span aria-hidden="true">←</span> sub_agent · {{ edgeActivity(row.edge) }}
+                                    <span aria-hidden="true">←</span> <span>sub_agent</span> · {{ edgeActivity(row.edge) }}
                                 </span>
                             </span>
                             <Icon
@@ -567,8 +572,7 @@ function openChat(row: ChatRow): void {
                             v-if="hiddenInboundCount > 0"
                             class="tg-panel-more"
                         >
-                            +{{ hiddenInboundCount }} more — open the dashboard
-            to inspect.
+                            {{ t('+{count} more — open the dashboard to inspect.', { count: hiddenInboundCount }) }}
                         </p>
                     </div>
                 </section>
@@ -631,10 +635,10 @@ function openChat(row: ChatRow): void {
                     class="tg-panel-section"
                 >
                     <h4 class="tg-panel-heading">
-                        Active chats <span class="tg-panel-count">({{ activeChats.length }})</span>
+                        {{ t('Active chats') }} <span class="tg-panel-count">({{ activeChats.length }})</span>
                     </h4>
                     <p v-if="activeChats.length === 0" class="tg-panel-empty">
-                        No active chats. The agent hasn't run anything in flight.
+                        {{ t("No active chats. The agent hasn't run anything in flight.") }}
                     </p>
                     <div v-else class="tg-panel-list">
                         <button
@@ -673,7 +677,7 @@ function openChat(row: ChatRow): void {
                             v-if="hiddenActiveCount > 0"
                             class="tg-panel-more"
                         >
-                            +{{ hiddenActiveCount }} more in flight.
+                            {{ t('+{count} more in flight.', { count: hiddenActiveCount }) }}
                         </p>
                     </div>
                 </section>
@@ -683,10 +687,10 @@ function openChat(row: ChatRow): void {
                     class="tg-panel-section"
                 >
                     <h4 class="tg-panel-heading">
-                        Recent chats <span class="tg-panel-count">({{ recentChats.length }})</span>
+                        {{ t('Recent chats') }} <span class="tg-panel-count">({{ recentChats.length }})</span>
                     </h4>
                     <p v-if="recentChats.length === 0" class="tg-panel-empty">
-                        No recent chats.
+                        {{ t('No recent chats.') }}
                     </p>
                     <div v-else class="tg-panel-list">
                         <button
@@ -737,8 +741,7 @@ function openChat(row: ChatRow): void {
                             class="tg-panel-more"
                             data-testid="tg-recent-chats-more"
                         >
-                            +{{ hiddenRecentCount }} more not shown — the panel caps
-                            each list at {{ MAX_CHATS_DISPLAYED }}.
+                            {{ t('+{count} more not shown — the panel caps each list at {cap}.', { count: hiddenRecentCount, cap: MAX_CHATS_DISPLAYED }) }}
                         </p>
                     </div>
                 </section>

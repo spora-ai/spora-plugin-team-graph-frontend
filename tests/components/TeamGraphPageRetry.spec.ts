@@ -96,6 +96,7 @@ const hostContext = {
     },
     pinia: null,
     theme: 'light' as const,
+    locale: 'en',
     route: null,
     router: null,
 }

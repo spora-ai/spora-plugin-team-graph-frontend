@@ -91,6 +91,7 @@
  * went wrong; "this team has no agents" is a neutral fact.
  */
 import { computed, onMounted, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { Icon } from '@spora-ai/components/icons'
 import AgentNodeCard from './AgentNodeCard.vue'
 import { useMermaidRender } from '../composables/useMermaidRender'
@@ -99,6 +100,8 @@ import { edgeDegrees, isAdjacent } from '../lib/stats'
 import type { NodePosition } from '../lib/nodeLayout'
 import { useSelectionStore } from '../stores/selection'
 import type { GraphNode, GraphPayload } from '../types'
+
+const { t } = useI18n()
 
 const props = defineProps<{
     graph: GraphPayload | null
@@ -335,9 +338,9 @@ onMounted(() => {
             class="absolute inset-0 z-10 flex flex-col items-center justify-center p-6 text-center"
             data-testid="tg-graph-empty"
         >
-            <p class="text-sm font-medium text-foreground">No agents yet</p>
+            <p class="text-sm font-medium text-foreground">{{ t('No agents yet') }}</p>
             <p class="text-xs text-muted-foreground mt-1 max-w-[360px]">
-                This team has no agents. The view updates when one is added.
+                {{ t('This team has no agents. The view updates when one is added.') }}
             </p>
         </div>
         <!--
@@ -426,7 +429,7 @@ onMounted(() => {
             <button
                 type="button"
                 class="tg-zoom-btn"
-                aria-label="Zoom in"
+                :aria-label="t('Zoom in')"
                 data-testid="tg-zoom-in"
                 @click="zoomIn"
             >
@@ -438,7 +441,7 @@ onMounted(() => {
             <button
                 type="button"
                 class="tg-zoom-btn"
-                aria-label="Zoom out"
+                :aria-label="t('Zoom out')"
                 data-testid="tg-zoom-out"
                 @click="zoomOut"
             >
@@ -450,7 +453,7 @@ onMounted(() => {
             <button
                 type="button"
                 class="tg-zoom-btn"
-                aria-label="Fit to view"
+                :aria-label="t('Fit to view')"
                 data-testid="tg-zoom-fit"
                 @click="fit"
             >
@@ -464,7 +467,7 @@ onMounted(() => {
             v-if="!graphIsEmpty"
             class="absolute bottom-3 left-4 right-24 text-[11px] text-muted-foreground pointer-events-none"
         >
-            Drag empty canvas to pan · scroll to zoom · click any node to inspect
+            {{ t('Drag empty canvas to pan · scroll to zoom · click any node to inspect') }}
         </p>
     </div>
 </template>

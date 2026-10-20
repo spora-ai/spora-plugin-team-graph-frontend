@@ -30,6 +30,7 @@
 import { onBeforeUnmount, ref, watch, type Ref } from 'vue'
 import { fetchGraph } from '../api/teamGraph'
 import { ApiError } from '../api/client'
+import { t } from '../i18n'
 import type { GraphEdge, GraphNode, GraphPayload } from '../types'
 
 export interface UseTeamGraph {
@@ -78,7 +79,7 @@ export function useTeamGraph(principalId: Ref<number | null>): UseTeamGraph {
             error.value = null
         } catch (e) {
             if (token !== requestToken) return
-            error.value = e instanceof ApiError ? e.message : 'failed to load team graph'
+            error.value = e instanceof ApiError ? e.message : t('Failed to load team graph')
             graph.value = null
         } finally {
             if (token === requestToken) loading.value = false

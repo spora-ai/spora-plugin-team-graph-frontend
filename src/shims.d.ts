@@ -28,6 +28,13 @@ export interface PluginHostContext {
      */
     pinia: unknown
     theme: 'light' | 'dark'
+    /**
+     * The host's active interface language, e.g. `'de'`.
+     *
+     * The plugin builds its own i18n instance from its own catalogue and
+     * initialises it with this.
+     */
+    locale: string
     route: { path: string; params: Record<string, unknown>; query: Record<string, unknown> } | null
     router: {
         push: (to: string) => Promise<unknown>

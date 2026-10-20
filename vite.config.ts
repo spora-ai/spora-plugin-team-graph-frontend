@@ -65,6 +65,9 @@ export default defineConfig({
         globals: true,
         environment: 'happy-dom',
         include: ['tests/**/*.{test,spec}.{js,ts}'],
+        // Installs the i18n instance on every mounted component — the
+        // components translate their copy through `t()`.
+        setupFiles: ['tests/setup.ts'],
         reporters: process.env.CI
             ? [
                 ['default'],

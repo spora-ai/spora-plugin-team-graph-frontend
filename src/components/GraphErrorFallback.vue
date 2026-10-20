@@ -6,7 +6,10 @@
  * canvas slot so the toolbar stays usable — the operator can
  * still pick a different principal or hit Refresh.
  */
+import { useI18n } from 'vue-i18n'
 import { Icon } from '@spora-ai/components/icons'
+
+const { t } = useI18n()
 
 defineProps<{
     message: string
@@ -24,7 +27,7 @@ defineProps<{
                 class="w-5 h-5"
             />
         </div>
-        <p class="text-sm font-medium text-foreground">Failed to load team graph</p>
+        <p class="text-sm font-medium text-foreground">{{ t('Failed to load team graph') }}</p>
         <p class="text-xs text-muted-foreground mt-1 max-w-[360px]">
             {{ message }}
         </p>

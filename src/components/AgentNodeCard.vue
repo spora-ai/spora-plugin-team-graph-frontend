@@ -86,12 +86,15 @@
  * second status→colour table in this component.
  */
 import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { AgentAvatar } from '@spora-ai/components/avatar'
 import { Icon } from '@spora-ai/components/icons'
 import { avatarPaletteStyle, avatarSubject } from '../lib/agentAvatar'
 import { statusLabel, statusPillClass } from '../lib/nodeStatus'
 import { NODE_CARD_AVATAR_SIZE, NODE_CARD_HEIGHT, NODE_CARD_WIDTH } from '../lib/nodeLayout'
 import type { GraphNode } from '../types'
+
+const { t } = useI18n()
 
 /**
  * `Icon`'s documented plugin-author extension point: a single `d`
@@ -243,7 +246,7 @@ function onActivate(): void {
                             class="w-2.5 h-2.5"
                             aria-hidden="true"
                         />
-                        <span class="sr-only">inbound</span>{{ inbound }}
+                        <span class="sr-only">{{ t('inbound') }}</span>{{ inbound }}
                     </span>
                     <span
                         class="tg-edge-badge"
@@ -254,7 +257,7 @@ function onActivate(): void {
                             class="w-2.5 h-2.5"
                             aria-hidden="true"
                         />
-                        <span class="sr-only">outbound</span>{{ outbound }}
+                        <span class="sr-only">{{ t('outbound') }}</span>{{ outbound }}
                     </span>
                 </span>
             </span>

@@ -72,6 +72,7 @@
  * (the 30-second polling is independent).
  */
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { Icon } from '@spora-ai/components/icons'
 import { useSelectionStore } from '../stores/selection'
 import { usePrincipalList } from '../composables/usePrincipalList'
@@ -92,6 +93,8 @@ import AgentDetailPanel from './AgentDetailPanel.vue'
  */
 import StatusKey from './StatusLegend.vue'
 import GraphErrorFallback from './GraphErrorFallback.vue'
+
+const { t } = useI18n()
 
 defineProps<{
     hostContext: import('../shims').PluginHostContext
@@ -125,10 +128,11 @@ onBeforeUnmount(() => {
 const freshnessLabel = computed<string | null>(() => {
     if (lastUpdatedAt.value === null) return null
     const secs = Math.max(0, Math.round((now.value - lastUpdatedAt.value) / 1_000))
-    if (secs < 5) return 'Updated just now'
-    if (secs < 60) return `Updated ${secs}s ago`
+    if (secs < 5) return t('Updated just now')
+    if (secs < 60) return t('Updated {seconds}s ago', { seconds: secs })
     const mins = Math.round(secs / 60)
-    return `Updated ${mins} min${mins === 1 ? '' : 's'} ago`
+    if (mins === 1) return t('Updated {minutes} min ago', { minutes: mins })
+    return t('Updated {minutes} mins ago', { minutes: mins })
 })
 
 const activePrincipal = computed<PrincipalSummary | null>(() => {
@@ -249,7 +253,7 @@ function onTapEmptyCanvas(): void {
         <header class="mb-4 space-y-3 max-w-7xl">
             <div class="flex flex-wrap items-end justify-between gap-3">
                 <div class="min-w-0">
-                    <h1 class="text-2xl font-semibold tracking-tight">Team Graph</h1>
+                    <h1 class="text-2xl font-semibold tracking-tight">{{ t('Team Graph') }}</h1>
                     <p
                         v-if="activePrincipal !== null && graph !== null"
                         class="text-sm text-muted-foreground mt-1"
@@ -257,20 +261,20 @@ function onTapEmptyCanvas(): void {
                     >
                         <span class="text-foreground font-medium">{{ principalLabel(activePrincipal) }}</span>
                         ·
-                        {{ stats.nodes }} agent{{ stats.nodes === 1 ? '' : 's' }} ·
-                        {{ stats.edges }} edge{{ stats.edges === 1 ? '' : 's' }}
+                        {{ stats.nodes }} {{ stats.nodes === 1 ? t('agent') : t('agents') }} ·
+                        {{ stats.edges }} {{ stats.edges === 1 ? t('edge') : t('edges') }}
                         <span v-if="stats.bidirectional > 0">
-                            · {{ stats.bidirectional }} bidirectional
+                            · {{ stats.bidirectional }} {{ t('bidirectional') }}
                         </span>
                     </p>
                     <p
                         v-else-if="principalList.loading.value"
                         class="text-sm text-muted-foreground mt-1"
                     >
-                        Loading teams…
+                        {{ t('Loading teams…') }}
                     </p>
                     <p v-else class="text-sm text-muted-foreground mt-1">
-                        Select a team below to view its agent graph.
+                        {{ t('Select a team below to view its agent graph.') }}
                     </p>
                 </div>
                 <div class="flex items-center gap-3">
@@ -290,7 +294,7 @@ function onTapEmptyCanvas(): void {
                             name="refresh"
                             class="w-4 h-4"
                         />
-                        Refresh
+                        {{ t('Refresh') }}
                     </button>
                 </div>
             </div>
@@ -327,7 +331,7 @@ function onTapEmptyCanvas(): void {
                 v-else-if="!principalList.loading.value"
                 class="text-xs text-muted-foreground"
             >
-                No principals available for this user.
+                {{ t('No principals available for this user.') }}
             </p>
 
             <StatusKey />
@@ -347,7 +351,7 @@ function onTapEmptyCanvas(): void {
                             class="mt-4 text-[11px] font-medium text-primary hover:underline"
                             @click="refresh"
                         >
-                            Retry
+                            {{ t('Retry') }}
                         </button>
                     </GraphErrorFallback>
                 </div>
@@ -370,10 +374,9 @@ function onTapEmptyCanvas(): void {
                     class="surface-card border border-border rounded-xl bg-card text-card-foreground p-6 text-center"
                     data-testid="tg-detail-placeholder"
                 >
-                    <p class="text-sm font-medium">No agent selected</p>
+                    <p class="text-sm font-medium">{{ t('No agent selected') }}</p>
                     <p class="text-xs text-muted-foreground mt-1">
-                        Click any node in the diagram to see its inbound and outbound relations,
-                        plus recent chats.
+                        {{ t('Click any node in the diagram to see its inbound and outbound relations, plus recent chats.') }}
                     </p>
                 </div>
             </aside>
