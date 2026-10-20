@@ -152,14 +152,35 @@ describe('TeamGraphPage.vue (single-sidebar layout)', () => {
         expect(wrapper.text()).toContain('2 edges')
 
         // The freshness indicator anchors off the first commit and
-        // shows "Updated just now" (or "Xs ago" if the test ran long
+        // shows "Updated just now" (or "5m ago" if the test ran long
         // enough for the threshold to flip). We accept either because
         // the timer reads Date.now() at mount time.
         const freshness = wrapper.find('[data-testid="tg-freshness"]')
         expect(freshness.exists()).toBe(true)
-        expect(freshness.text()).toMatch(/Updated (just now|\d+s ago|\d+ min(?:s)? ago)/)
+        expect(freshness.text()).toMatch(/Updated (just now|in a moment|\d+(m|h|d|w|mo|y) ago)/)
 
         wrapper.unmount()
+    })
+
+    it('phrases the freshness label with the shared relative-time renderer', async () => {
+        // The page used to carry a ladder of its own, which phrased the
+        // same duration differently from the detail panel's "last seen" —
+        // two names for one fact on one screen. Both now read
+        // `lib/relativeTime.ts`, so the label is the renderer's compact
+        // English form: "5m ago", not the ladder's "5 min ago".
+        vi.useFakeTimers()
+        vi.setSystemTime(new Date('2026-09-28T12:00:00Z'))
+        try {
+            const wrapper = mount(TeamGraphPage, { props: { hostContext } })
+            await vi.advanceTimersByTimeAsync(0)
+            await vi.advanceTimersByTimeAsync(5 * 60_000)
+
+            expect(wrapper.find('[data-testid="tg-freshness"]').text()).toBe('Updated 5m ago')
+
+            wrapper.unmount()
+        } finally {
+            vi.useRealTimers()
+        }
     })
 
     it('swaps the graph when a pill is clicked', async () => {

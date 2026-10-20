@@ -347,7 +347,7 @@ describe('TeamGraphPage — a principal with no agents', () => {
         // Freshness is still meaningful on an empty payload: the
         // commit sets `lastUpdatedAt` regardless of node count, so
         // the ticker confirms the empty result is current.
-        expect(wrapper.find('[data-testid="tg-freshness"]').text()).toMatch(/Updated (just now|\d+s ago)/)
+        expect(wrapper.find('[data-testid="tg-freshness"]').text()).toMatch(/Updated (just now|in a moment|\d+(m|h|d|w|mo|y) ago)/)
 
         // The legend is a key for the cards; it stays, it just has
         // nothing to key yet.

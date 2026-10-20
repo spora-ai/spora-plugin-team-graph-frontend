@@ -18,6 +18,11 @@ function at(offsetMs: number): string {
     return new Date(NOW - offsetMs).toISOString()
 }
 
+/** An ISO timestamp `offsetMs` after `NOW`. */
+function after(offsetMs: number): string {
+    return new Date(NOW + offsetMs).toISOString()
+}
+
 describe('formatRelativeTime', () => {
     beforeEach(() => {
         createPluginI18n('en')
@@ -38,6 +43,21 @@ describe('formatRelativeTime', () => {
 
     it('renders "just now" below a minute', () => {
         expect(formatRelativeTime(at(5_000), NOW)).toBe('just now')
+    })
+
+    it('keeps the sign in the sub-minute bucket', () => {
+        // The compact English form carries the sign in its own wording.
+        expect(formatRelativeTime(at(30_000), NOW)).toBe('just now')
+        expect(formatRelativeTime(after(10_000), NOW)).toBe('in a moment')
+    })
+
+    it('keeps the sign for the locales that go through Intl', () => {
+        // `Intl` can only say "vor" or "in" if the renderer hands the
+        // signed value over: a sub-minute bucket that dropped the sign
+        // called a timestamp in the future "jetzt".
+        createPluginI18n('de')
+        expect(formatRelativeTime(at(30_000), NOW)).toBe('vor 30 Sekunden')
+        expect(formatRelativeTime(after(10_000), NOW)).toBe('in 10 Sekunden')
     })
 
     it('renders the German plural forms', () => {

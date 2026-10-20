@@ -78,6 +78,7 @@ import { useSelectionStore } from '../stores/selection'
 import { usePrincipalList } from '../composables/usePrincipalList'
 import { useTeamGraph } from '../composables/useTeamGraph'
 import { countBidirectional } from '../lib/stats'
+import { formatRelativeTime } from '../lib/relativeTime'
 import { principalLabel, type PrincipalSummary } from '../api/principals'
 import TeamGraphCanvas from './TeamGraphCanvas.vue'
 import AgentDetailPanel from './AgentDetailPanel.vue'
@@ -108,11 +109,16 @@ const { graph, loading, error, refetch, lastUpdatedAt } = useTeamGraph(principal
 const shouldFit = ref(false)
 
 /*
- * Freshness indicator — "Updated Xs ago". Ticks every 15 s so the
+ * Freshness indicator — "Updated 5m ago". Ticks every 15 s so the
  * text is accurate enough to feel live without forcing a re-render
  * on every second. The interval is independent of the polling
  * interval because the indicator only reads `lastUpdatedAt` and
  * does not trigger any network call.
+ *
+ * The duration comes from `lib/relativeTime.ts`, the same renderer the
+ * detail panel's "last seen" reads. The page used to carry a ladder of
+ * its own, which phrased the same duration differently from the panel's
+ * — two names for one fact on one screen.
  */
 const now = ref<number>(Date.now())
 let nowTimer: ReturnType<typeof setInterval> | null = null
@@ -126,13 +132,10 @@ onBeforeUnmount(() => {
 })
 
 const freshnessLabel = computed<string | null>(() => {
-    if (lastUpdatedAt.value === null) return null
-    const secs = Math.max(0, Math.round((now.value - lastUpdatedAt.value) / 1_000))
-    if (secs < 5) return t('Updated just now')
-    if (secs < 60) return t('Updated {seconds}s ago', { seconds: secs })
-    const mins = Math.round(secs / 60)
-    if (mins === 1) return t('Updated {minutes} min ago', { minutes: mins })
-    return t('Updated {minutes} mins ago', { minutes: mins })
+    const updatedAt = lastUpdatedAt.value
+    if (updatedAt === null) return null
+    const when = formatRelativeTime(new Date(updatedAt).toISOString(), now.value)
+    return t('Updated {when}', { when })
 })
 
 const activePrincipal = computed<PrincipalSummary | null>(() => {

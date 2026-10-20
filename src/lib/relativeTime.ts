@@ -10,6 +10,11 @@
  * The English branch keeps the compact form the dashboard has always
  * shipped; every other locale goes through `Intl.RelativeTimeFormat` for
  * its plural forms.
+ *
+ * This is the panel's *only* relative-time renderer. The toolbar's
+ * freshness indicator and the detail panel's "last seen" both read it, so
+ * a duration is phrased the same way wherever it appears on the screen —
+ * two ladders would give the same fact two names, in the same language.
  */
 import { activeLocale } from '../i18n'
 
@@ -45,9 +50,11 @@ function render(
  * `now` is a parameter rather than a call to `Date.now()` so a caller that
  * ticks on its own schedule can decide when the label is stale.
  *
- * The sub-minute bucket is "essentially now" on purpose: English says
- * `just now` rather than `30 seconds ago` to keep list rows quiet, so the
- * other locales get the same treatment instead of the literal value.
+ * The sub-minute bucket says "essentially now" in the compact English
+ * form, to keep list rows quiet. Every other locale gets `Intl`'s own
+ * wording for the *signed* value — `vor 30 Sekunden` for the past,
+ * `in 10 Sekunden` for the future — because a bucket that dropped the
+ * sign would call a timestamp in the future "now".
  */
 export function formatRelativeTime(
     iso: string | null | undefined,
@@ -63,7 +70,7 @@ export function formatRelativeTime(
 
     if (Math.abs(diffSec) < 60) {
         const compact = diffSec >= 0 ? 'just now' : 'in a moment'
-        return render(locale, 0, 'second', compact)
+        return render(locale, diffSec, 'second', compact)
     }
 
     const minutes = Math.round(diffSec / 60)

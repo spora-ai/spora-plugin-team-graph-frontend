@@ -239,7 +239,11 @@ function listSourceFiles(dir) {
  * has to be the same on every machine: the CI gate compares the
  * generated file with the committed one byte for byte.
  */
-const compareStrings = (a, b) => (a < b ? -1 : a > b ? 1 : 0)
+function compareStrings(a, b) {
+    if (a < b) return -1
+    if (a > b) return 1
+    return 0
+}
 
 const rel = (file) => relative(ROOT, file).split(sep).join('/')
 
@@ -400,61 +404,93 @@ function walkTemplateChild(child, ctx) {
     walkTemplate(child, ctx)
 }
 
+/**
+ * A `t('…')` / `$t('…')` call.
+ *
+ * A literal argument is a catalogue key. A non-literal one is a key
+ * computed at runtime, which the extractor cannot harvest — it is
+ * reported rather than guessed at.
+ */
+function visitTranslationCall(node, file, harvest) {
+    const key = stringArgument(node.arguments)
+    if (key !== null) {
+        harvest.addKey(key, file, node.loc.start.line)
+        return
+    }
+    // A spread is a helper forwarding another call's arguments, not a
+    // key computed at runtime, so it is not worth reporting.
+    if (node.arguments[0]?.type !== 'SpreadElement') {
+        harvest.dynamic.push({ file, line: node.loc.start.line })
+    }
+}
+
+/**
+ * A call that puts a literal string straight into the DOM.
+ */
+function visitDomTextCall(node, file, harvest) {
+    const text = stringArgument(node.arguments)
+    if (text === null) return
+    harvest.addCandidate(text, file, node.loc.start.line, 'DOM text')
+}
+
+/**
+ * A call expression: either a catalogue key or copy the operator reads.
+ */
+function visitCallExpression(node, file, harvest) {
+    if (node.type !== 'CallExpression') return
+    const name = calleeName(node)
+    if (name === 't' || name === '$t') {
+        visitTranslationCall(node, file, harvest)
+        return
+    }
+    if (DOM_TEXT_FUNCTIONS.has(name)) visitDomTextCall(node, file, harvest)
+}
+
+/**
+ * An object property whose literal value is operator-facing copy.
+ */
+function visitCopyProperty(node, file, harvest) {
+    if (node.type !== 'Property' && node.type !== 'PropertyDefinition') return
+    if (!COPY_PROPERTIES.has(propertyName(node) ?? '')) return
+    if (node.value?.type !== 'Literal' || typeof node.value.value !== 'string') return
+    harvest.addCandidate(node.value.value, file, node.loc.start.line, 'literal')
+}
+
+/**
+ * An assignment to a copy variable — `error.value = '…'`.
+ */
+function visitCopyAssignment(node, file, harvest) {
+    if (node.type !== 'AssignmentExpression') return
+    if (node.left?.type !== 'MemberExpression') return
+    if (node.left.object?.type !== 'Identifier') return
+    if (!COPY_VARS.has(node.left.object.name)) return
+    const literal = assignedLiteral(node.right)
+    if (literal === null) return
+    harvest.addCandidate(literal, file, node.loc.start.line, 'assignment')
+}
+
 function scan() {
     const keys = new Map()
     const candidates = []
     const dynamic = []
 
-    const addKey = (key, file, line) => {
-        const existing = keys.get(key)
-        if (existing === undefined) keys.set(key, [{ file, line }])
-        else existing.push({ file, line })
-    }
-
-    const addCandidate = (value, file, line, kind) => {
-        if (looksLikeCopy(value)) candidates.push({ value: value.trim(), file, line, kind })
+    const harvest = {
+        addKey: (key, file, line) => {
+            const existing = keys.get(key)
+            if (existing === undefined) keys.set(key, [{ file, line }])
+            else existing.push({ file, line })
+        },
+        addCandidate: (value, file, line, kind) => {
+            if (looksLikeCopy(value)) candidates.push({ value: value.trim(), file, line, kind })
+        },
+        dynamic,
     }
 
     const visitAst = (node, file) => {
         walk(node, (child) => {
-            if (child.type === 'CallExpression') {
-                const name = calleeName(child)
-                if (name === 't' || name === '$t') {
-                    const key = stringArgument(child.arguments)
-                    if (key !== null) addKey(key, file, child.loc.start.line)
-                    // A spread is a helper forwarding another call's arguments, not a
-                    // key computed at runtime, so it is not worth reporting.
-                    else if (child.arguments[0]?.type !== 'SpreadElement') {
-                        dynamic.push({ file, line: child.loc.start.line })
-                    }
-                    return
-                }
-                if (DOM_TEXT_FUNCTIONS.has(name)) {
-                    const text = stringArgument(child.arguments)
-                    if (text !== null) addCandidate(text, file, child.loc.start.line, 'DOM text')
-                }
-                return
-            }
-            if (
-                (child.type === 'Property' || child.type === 'PropertyDefinition') &&
-                COPY_PROPERTIES.has(propertyName(child) ?? '') &&
-                child.value?.type === 'Literal' &&
-                typeof child.value.value === 'string'
-            ) {
-                addCandidate(child.value.value, file, child.loc.start.line, 'literal')
-                return
-            }
-            if (
-                child.type === 'AssignmentExpression' &&
-                child.left?.type === 'MemberExpression' &&
-                child.left.object?.type === 'Identifier' &&
-                COPY_VARS.has(child.left.object.name)
-            ) {
-                const literal = assignedLiteral(child.right)
-                if (literal !== null) {
-                    addCandidate(literal, file, child.loc.start.line, 'assignment')
-                }
-            }
+            visitCallExpression(child, file, harvest)
+            visitCopyProperty(child, file, harvest)
+            visitCopyAssignment(child, file, harvest)
         })
     }
 
@@ -482,7 +518,7 @@ function scan() {
             visitAst(ast, name)
 
             if (ast.templateBody != null) {
-                walkTemplate(ast.templateBody, { file: name, addCandidate, visitAst })
+                walkTemplate(ast.templateBody, { file: name, addCandidate: harvest.addCandidate, visitAst })
             }
         } else {
             const ast = tsEstree.parse(code, {
