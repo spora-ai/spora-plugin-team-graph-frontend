@@ -7,9 +7,8 @@
  *      lives in its own component (`AgentStatusChip`) so a status
  *      poll re-renders only the chip and not the static name.
  *   2. Activity counts (active + 24 h)
- *   3. Hierarchy chain (root → ... → this agent)
- *   4. Description (line-clamped, from /agents/{id})
- *   5. Outbound + Inbound edges, capped at MAX_EDGES_DISPLAYED = 4
+ *   3. Description (line-clamped, from /agents/{id})
+ *   4. Outbound + Inbound edges, capped at MAX_EDGES_DISPLAYED = 4
  *      each, with a "+N more" overflow line. Each row leads with the
  *      shared `@spora-ai/components` `AgentAvatar` (size `sm`), which
  *      supersedes the hand-written `w-7 h-7 rounded-full` div + inline
@@ -17,8 +16,8 @@
  *      itself is owned by the package, so the status swatch moved to a
  *      `.tg-agent-tile` ring — see `lib/agentAvatar.ts` and the
  *      `style.css` rule.
- *   6. Active chats, capped at MAX_CHATS_DISPLAYED = 4
- *   7. Recent chats, capped at MAX_CHATS_DISPLAYED = 4
+ *   5. Active chats, capped at MAX_CHATS_DISPLAYED = 4
+ *   6. Recent chats, capped at MAX_CHATS_DISPLAYED = 4
  *
  * The Tools section was removed in this compact variant — the
  * dashboard's AgentCard already carries the tool list, and
@@ -26,6 +25,18 @@
  * The Owner section went the same way: the owning principal is
  * chosen by the pill row at the top of the page, so the row was a
  * duplicate of a control one screen above it.
+ *
+ * The Hierarchy section went with them. It walked *inbound* edges
+ * upward to draw a "root → … → this agent" chain, but the graph is
+ * not a spawn tree: an edge means "agent A invoked sub-agent B",
+ * which says nothing about ownership or reporting lines, and an
+ * agent that was never invoked by another has no parent at all. So
+ * the chain was either empty or an accidental ordering of whoever
+ * happened to call whom, and its "Root — no parent in this team"
+ * branch was the common case by a wide margin. The inbound edges
+ * are still listed below the Activity count, under their own
+ * heading — the chain added a rendering of the same data, not
+ * information the section list does not already carry.
  *
  * Edge rows are deep-link buttons — clicking one calls
  * `selection.setSelected(otherId)` so the canvas highlights the
@@ -162,20 +173,6 @@ const hiddenInboundCount = computed<number>(() =>
 )
 
 /**
- * Walk up the spawn tree to find the chain of ancestors, capped at
- * three hops (anything deeper reads as "deeply nested"). Multi-parent
- * chains collapse to the first parent found — clicking an inbound
- * edge in the panel below lets the operator hop between branches.
- */
-interface AncestorLink {
-    id: number
-    name: string
-    role: string | null
-}
-
-const MAX_HIERARCHY_DEPTH = 3
-
-/**
  * The host router, through a computed rather than read off `props`
  * at each call site. A `computed` (not a plain `const` snapshot)
  * because the prop is reactive and a host that re-mounts the plugin
@@ -183,33 +180,6 @@ const MAX_HIERARCHY_DEPTH = 3
  * previous router.
  */
 const hostRouter = computed<PluginRouter | null>(() => props.router)
-
-const hierarchyChain = computed<{ path: AncestorLink[]; isRoot: boolean }>(() => {
-    const node = selectedNode.value
-    if (node === null) return { path: [], isRoot: false }
-    const path: AncestorLink[] = []
-    const visited = new Set<number>([node.id])
-    let currentId: number | null = node.id
-    for (let i = 0; i < MAX_HIERARCHY_DEPTH; i++) {
-        const parents: GraphEdge[] = currentId === null ? [] : inDegree(props.graph.edges, currentId)
-        const parentEdge: GraphEdge | undefined = parents[0]
-        if (parentEdge === undefined) {
-            return { path, isRoot: true }
-        }
-        const parentId: number = parentEdge.source
-        if (visited.has(parentId)) {
-            return { path, isRoot: true }
-        }
-        visited.add(parentId)
-        const parentNode: GraphNode | undefined = props.graph.nodes.find((n) => n.id === parentId)
-        if (parentNode === undefined) {
-            return { path, isRoot: true }
-        }
-        path.unshift({ id: parentNode.id, name: parentNode.name, role: parentNode.role })
-        currentId = parentNode.id
-    }
-    return { path, isRoot: false }
-})
 
 const activeChats = ref<ChatSummary[]>([])
 const recentChats = ref<ChatSummary[]>([])
@@ -430,42 +400,6 @@ function openChat(row: ChatRow): void {
                         <strong class="tg-panel-stats-num">{{ selectedNode.recent_chats_24h }}</strong>
                         {{ t('in 24 h') }}
                     </span>
-                </section>
-
-                <!-- Hierarchy chain: root → ... → this agent. Walks
-                     inbound edges up to MAX_HIERARCHY_DEPTH. -->
-                <section
-                    v-if="hierarchyChain.path.length > 0 || hierarchyChain.isRoot"
-                    data-testid="tg-hierarchy-chain"
-                    class="tg-panel-section"
-                >
-                    <h4 class="tg-panel-heading">
-                        {{ t('Hierarchy') }}
-                    </h4>
-                    <p
-                        v-if="hierarchyChain.isRoot"
-                        class="text-xs text-muted-foreground"
-                    >
-                        {{ t('Root — no parent in this team.') }}
-                    </p>
-                    <p
-                        v-else
-                        class="text-xs text-muted-foreground flex flex-wrap items-center gap-x-1 gap-y-1"
-                    >
-                        <template v-for="(link, idx) in hierarchyChain.path" :key="link.id">
-                            <button
-                                type="button"
-                                class="tg-edge-row tg-hierarchy-link inline-flex items-center gap-1"
-                                @click="jumpTo(link.id)"
-                            >
-                                <span class="truncate">{{ link.name }}</span>
-                            </button>
-                            <span class="text-muted-foreground/60" aria-hidden="true">→</span>
-                            <span v-if="idx === hierarchyChain.path.length - 1" class="text-foreground font-medium">
-                                {{ selectedNode.name }}
-                            </span>
-                        </template>
-                    </p>
                 </section>
 
                 <!-- Description (line-clamped, from /agents/{id}). -->

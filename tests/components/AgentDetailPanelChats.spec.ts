@@ -391,3 +391,78 @@ describe('AgentDetailPanel — Owner section removal', () => {
         wrapper.unmount()
     })
 })
+
+describe('AgentDetailPanel — Hierarchy section removal', () => {
+    /**
+     * The panel with a real spawn chain in the payload: node 12
+     * invokes 11, so the removed section would have had a parent to
+     * render. Edges stay in the fixture deliberately — the inbound
+     * *list* still exists and is still fed by these edges; what went
+     * away is only the upward walk over them.
+     */
+    function makeChainedGraph(): GraphPayload {
+        return {
+            principal: { id: 1, type: 'user', name: 'Ada', is_current_user_owned: true },
+            nodes: [
+                makeNode({ id: 12, name: 'Coordinator' }),
+                makeNode({ id: 11, name: 'Lead' }),
+            ],
+            edges: [
+                {
+                    id: '12->11',
+                    source: 12,
+                    target: 11,
+                    op: 'sub_agent',
+                    configured: true,
+                    count_24h: 2,
+                    last_invoked_at: '2026-09-28T09:00:00Z',
+                },
+            ],
+            generated_at: '2026-09-28T12:00:00Z',
+        }
+    }
+
+    async function mountChainedPanel() {
+        const pinia = createPinia()
+        setActivePinia(pinia)
+        useSelectionStore().setSelected(11)
+        fetchActiveChatsMock.mockResolvedValue([])
+        fetchRecentChatsMock.mockResolvedValue([])
+        fetchAgentMetaMock.mockResolvedValue(null)
+        const wrapper = mount(AgentDetailPanel, {
+            props: { graph: makeChainedGraph(), router: liveRouter() },
+            global: { plugins: [pinia] },
+        })
+        await flushPromises()
+        return wrapper
+    }
+
+    it('renders no Hierarchy section even when the agent has an invoker', async () => {
+        // An edge is "A invoked sub-agent B", not "B reports to A", so
+        // walking inbound edges upward and calling the result a
+        // hierarchy asserted an ownership tree the payload never
+        // carries — and with no agent parented to another it rendered
+        // only its "Root — no parent in this team" line.
+        const wrapper = await mountChainedPanel()
+
+        expect(wrapper.find('[data-testid="tg-hierarchy-chain"]').exists()).toBe(false)
+        const panel = wrapper.find('[data-testid="tg-agent-panel"]')
+        expect(panel.text()).not.toContain('Hierarchy')
+        expect(panel.text()).not.toContain('no parent in this team')
+        // The invoker is still reachable — via the inbound list, which
+        // is the one remaining place the same edge is shown.
+        expect(wrapper.find('[data-testid="tg-inbound-section"]').text()).toContain('Coordinator')
+        wrapper.unmount()
+    })
+
+    it('leaves no orphaned ancestor pill behind', async () => {
+        // The chain rendered its links as `.tg-hierarchy-link`
+        // buttons. With the section gone the class must be absent
+        // from the panel, or the stylesheet rule deleted alongside it
+        // would be dead markup.
+        const wrapper = await mountChainedPanel()
+
+        expect(wrapper.find('.tg-hierarchy-link').exists()).toBe(false)
+        wrapper.unmount()
+    })
+})

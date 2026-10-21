@@ -16,8 +16,8 @@ import type { GraphEdge } from '../../src/types'
  *    cards),
  *  - `useMermaidRender` tags the SVG's `path.flowchart-link` with
  *    `out` / `in` / `dim` from the same two fields,
- *  - `AgentDetailPanel` lists `outgoingEdges` / `incomingEdges` and
- *    walks `neighbours` for the hierarchy chain.
+ *  - `AgentDetailPanel` lists `outgoingEdges` / `incomingEdges` from
+ *    the same `edges`.
  */
 
 function edge(source: number, target: number): GraphEdge {
