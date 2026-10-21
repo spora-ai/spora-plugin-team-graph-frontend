@@ -16,6 +16,7 @@
  */
 import { ref, type Ref } from 'vue'
 import { fetchPrincipals, type PrincipalSummary } from '../api/principals'
+import { t } from '../i18n'
 
 export interface UsePrincipalList {
     principals: Ref<PrincipalSummary[]>
@@ -43,7 +44,7 @@ export function usePrincipalList(): UsePrincipalList {
             }
             error.value = null
         } catch (e) {
-            error.value = e instanceof Error ? e.message : 'failed to load principals'
+            error.value = e instanceof Error ? e.message : t('Failed to load principals.')
             principals.value = []
         } finally {
             loading.value = false

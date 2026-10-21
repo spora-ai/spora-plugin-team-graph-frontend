@@ -7,6 +7,7 @@
  * Output slugs: `running`, `pending`, `awaiting`, `failed`,
  * `aborted`, `completed`.
  */
+import { t } from '../i18n'
 import type { WireStatus } from '../types'
 
 export function statusSlug(status: WireStatus): string {
@@ -49,43 +50,49 @@ export function statusPillClass(status: WireStatus): string {
  * `STATUS_LABEL` map in Prototype E so the prototype and the
  * production plugin show the same text.
  *
+ * The labels are operator-facing copy, so they go through the
+ * catalogue — the panel, the node cards and the legend all read the
+ * label from here, and one table is what keeps the three surfaces
+ * saying the same thing in every language.
+ *
  * The `default` branch catches statuses the wire carries but the
  * TypeScript union doesn't (and unknown values like `null` /
  * `undefined` from a wire bug). Returning the raw value (or a
  * placeholder for nullish) keeps the canvas renderable instead of
- * crashing on every node.
+ * crashing on every node — and the raw value is a wire identifier,
+ * not copy, so it is deliberately *not* translated.
  */
 export function statusLabel(status: WireStatus): string {
-    if (status === null || status === undefined) return 'idle'
+    if (status === null || status === undefined) return t('idle')
     switch (status) {
         case 'RUNNING':
-            return 'running'
+            return t('running')
         case 'PENDING_APPROVAL':
-            return 'awaiting approval'
+            return t('awaiting approval')
         case 'AWAITING_SUB_AGENTS':
-            return 'awaiting sub-agent'
+            return t('awaiting sub-agent')
         case 'AWAITING_INPUT':
-            return 'awaiting input'
+            return t('awaiting input')
         case 'AWAITING_FINAL_APPROVAL':
-            return 'awaiting final approval'
+            return t('awaiting final approval')
         case 'APPROVED':
-            return 'approved'
+            return t('approved')
         case 'FAILED':
-            return 'failed'
+            return t('failed')
         case 'ABORTED':
-            return 'aborted'
+            return t('aborted')
         case 'COMPLETED':
-            return 'idle'
+            return t('idle')
         case 'CANCELLED':
-            return 'cancelled'
+            return t('cancelled')
         case 'QUEUED':
-            return 'queued'
+            return t('queued')
         default:
             /* Unknown status — display the raw value so the operator
              * sees what the wire actually carries. The status slug
              * falls back to 'completed' (the neutral bucket) in
              * `statusSlug`, above. */
-            return typeof status === 'string' && status.length > 0 ? status : 'idle'
+            return typeof status === 'string' && status.length > 0 ? status : t('idle')
     }
 }
 

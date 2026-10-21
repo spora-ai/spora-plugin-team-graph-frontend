@@ -19,6 +19,7 @@
  */
 
 import { getApi } from './client'
+import { t } from '../i18n'
 import type { ChatSummary, AgentStatus } from '../types'
 
 /* Active-chats enum mirrors the agent-detail sidebar's filters. The
@@ -49,21 +50,25 @@ function truncate(s: string, max: number): string {
     return s.substring(0, max - 1).trimEnd() + '…'
 }
 
-function taskToChatSummary(t: RawTaskRow): ChatSummary {
+function taskToChatSummary(row: RawTaskRow): ChatSummary {
     /*
      * `title` is the first line of the user prompt (truncated to
      * 50 chars). Multi-line prompts collapse to their first
      * meaningful line so the panel doesn't show "<no prompt>\n\n\n…".
      * `preview` is the agent's response, clipped to 120 chars.
+     *
+     * The placeholder for an empty prompt is operator-facing copy, so
+     * it goes through the catalogue; the prompt itself is the
+     * operator's own text and is never translated.
      */
-    const firstLine = (t.user_prompt ?? '').split('\n')[0]?.trim() ?? ''
-    const title = firstLine.length > 0 ? truncate(firstLine, 50) : 'Untitled prompt'
-    const preview = t.final_response !== null ? truncate(t.final_response.replace(/\s+/g, ' ').trim(), 120) : null
+    const firstLine = (row.user_prompt ?? '').split('\n')[0]?.trim() ?? ''
+    const title = firstLine.length > 0 ? truncate(firstLine, 50) : t('Untitled prompt')
+    const preview = row.final_response !== null ? truncate(row.final_response.replace(/\s+/g, ' ').trim(), 120) : null
     return {
-        id: t.id,
+        id: row.id,
         title,
-        status: t.status as AgentStatus,
-        started_at: t.created_at,
+        status: row.status as AgentStatus,
+        started_at: row.created_at,
         preview,
     }
 }

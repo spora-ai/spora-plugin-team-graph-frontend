@@ -18,7 +18,7 @@
         "allowImportingTsExtensions": false,
         "verbatimModuleSyntax": true,
         "noEmit": true,
-        "types": ["vitest/globals", "@vue/test-utils"],
+        "types": ["vitest/globals", "@vue/test-utils", "vite/client"],
         "baseUrl": ".",
         "paths": {
             "@/*": ["src/*"]

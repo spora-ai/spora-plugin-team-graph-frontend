@@ -2,6 +2,7 @@ import { createApp } from 'vue'
 import { createPinia } from 'pinia'
 import App from './App.vue'
 import { setApi } from './api/client'
+import { createPluginI18n } from './i18n'
 import type { GraphNode, GraphPayload, GraphEdge } from './types'
 
 /**
@@ -355,6 +356,10 @@ const hostContext = {
     api: devApi,
     pinia: null,
     theme: 'light' as const,
+    // The host tells a plugin which language is active; the sandbox
+    // has no host, so it reads it from the query string
+    // (`?locale=de`) and falls back to English.
+    locale: new URLSearchParams(window.location.search).get('locale') ?? 'en',
     route: null,
     router: routerDisabled ? null : devRouter,
 }
@@ -363,6 +368,7 @@ setApi(hostContext.api)
 
 const app = createApp(App, { hostContext })
 app.use(createPinia())
+app.use(createPluginI18n(hostContext.locale))
 /*
  * Mount into the plugin's own scope id, not a generic `#app`. `App.vue`
  * renders `<div id="spora-plugin-team-graph">` as its root and every

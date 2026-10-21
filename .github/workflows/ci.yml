@@ -38,6 +38,13 @@ jobs:
       - name: Type-check
         run: npm run typecheck
 
+      - name: i18n check
+        # The panel ships one language at a time and every operator-facing
+        # string has to go through `t()`. The check fails on a key the
+        # catalogue does not have, on a catalogue entry the source no
+        # longer produces, and on raw copy outside `t()`.
+        run: npm run i18n:check
+
       - name: Test
         run: npm test
 

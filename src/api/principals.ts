@@ -7,6 +7,7 @@
  * group they belong to), which is what the sidebar needs.
  */
 import { getApi } from './client'
+import { t } from '../i18n'
 
 export interface PrincipalSummary {
     id: number
@@ -29,10 +30,13 @@ export async function fetchPrincipals(): Promise<PrincipalSummary[]> {
  * user-principal always reads as "My Agents" regardless of the wire, because
  * its `name` is usually an email or username — personal identity, in a
  * sidebar full of group names.
+ *
+ * The label is operator-facing copy, so it goes through the catalogue; the
+ * group's own name is data and is returned untouched.
  */
 export function principalLabel(principal: PrincipalSummary): string {
     if (principal.type === 'user' && principal.is_current_user_owned) {
-        return 'My Agents'
+        return t('My Agents')
     }
     return principal.name
 }

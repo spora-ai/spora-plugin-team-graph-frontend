@@ -975,8 +975,7 @@
 }
 .tg-edge-row:hover { background: hsl(var(--muted)); }
 .tg-edge-row:focus-visible,
-.tg-chat-row:focus-visible,
-.tg-hierarchy-link:focus-visible {
+.tg-chat-row:focus-visible {
     outline: 2px solid hsl(var(--ring));
     outline-offset: 1px;
 }
@@ -1160,32 +1159,18 @@
 .tg-agent-tile { display: inline-flex; box-shadow: 0 0 0 2px var(--tg-status-ring, transparent); }
 
 /**
- * Hierarchy chain (root → ... → this agent). The links are inline
- * `tg-edge-row`s — clickable, deep-link to the ancestor's node so
- * the operator can hop back up the spawn tree without leaving the
- * sidebar.
- */
-.tg-hierarchy-link {
-    background: transparent;
-    border: 1px solid hsl(var(--border));
-    color: hsl(var(--foreground));
-    padding: 2px 8px;
-    border-radius: 999px;
-    font-weight: 500;
-    cursor: pointer;
-    transition: background 150ms, border-color 150ms;
-}
-.tg-hierarchy-link:hover {
-    background: hsl(var(--muted));
-    border-color: hsl(var(--primary) / 0.45);
-}
-
-/**
  * (removed in v0.1.x — Tools section was dropped from the compact
  *  detail-panel header. The host's AgentCard already carries the
  *  tool list, so the plugin no longer duplicates it. The CSS
  *  rules for `.tg-tool-tile` were deleted alongside the markup;
- *  if a future variant needs them, restore from git history.) */
+ *  if a future variant needs them, restore from git history.)
+ *
+ * The Hierarchy chain's `.tg-hierarchy-link` pill rules went the
+ * same way, deleted with the section itself: the chain walked
+ * inbound edges upward as though the graph were a spawn tree, but
+ * an edge only records that one agent invoked another, and with no
+ * agent parented to a second it rendered nothing but its "no parent
+ * in this team" line.) */
 
 .tg-agent-panel { position: sticky; top: 16px; max-height: calc(100vh - 32px); display: flex; flex-direction: column; }
 .tg-agent-panel-body { overflow-y: auto; }
