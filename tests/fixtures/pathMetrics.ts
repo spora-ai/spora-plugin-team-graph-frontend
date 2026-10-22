@@ -169,11 +169,11 @@ export const TANGENT_SAMPLE = 1
  *
  * Measured: lowering it to 0.01° raises the count on the re-anchored
  * `curveBasis` paths not at all (still 0) and the count on the
- * run-translating ones from 32 to 44 — i.e. the extra 12 are reversals
- * of under 0.05°, which is noise, not wobble. Raising it to 0.8°
- * changes nothing at all. The measure is insensitive to the value over
- * more than a decade and a half, which is the property worth knowing
- * about a threshold: it is not what the number means.
+ * run-translating ones noticeably — i.e. the extra reversals are of
+ * under 0.05°, which is noise, not wobble. Raising it to 0.8° changes
+ * nothing at all. The measure is insensitive to the value over more than
+ * a decade and a half, which is the property worth knowing about a
+ * threshold: it is not what the number means.
  */
 export const TANGENT_DEADBAND = 0.2
 
@@ -228,10 +228,11 @@ export interface Waviness {
  * form counts every inflection, while the rendered one counts only those
  * whose direction change is large enough to see — Mermaid's own paths
  * have zero of the former and zero of the latter on `curveBasis`, but
- * d3's `curveStep` staircase has 66 of the former (every corner) and 44
- * of the latter. **The assertion is the difference between a path and
- * the version Mermaid emitted**, which is zero on both measures for
- * `curveBasis` and non-zero on the broken implementation on both.
+ * d3's `curveStep` staircase has one of the former per corner and a
+ * matching number of the latter. **The assertion is the difference
+ * between a path and the version Mermaid emitted**, which is zero on
+ * both measures for `curveBasis` and non-zero on the broken
+ * implementation on both.
  */
 export function renderedWaviness(probe: SVGPathElement): Waviness {
     const total = probe.getTotalLength()
@@ -310,17 +311,17 @@ function monomials(p0: Point, p1: Point, p2: Point, p3: Point): { a: Point; b: P
  * is no sampling step, no deadband, and no dependence on the path's
  * length or on how finely anyone discretised it.
  *
- * **That matters here more than usual.** The defect being guarded is
- * 0.5°–3.8° of direction change on an 800-unit path, which is the same
- * order as the difference between two samplings of a *correct* curve —
+ * **That matters here more than usual.** The defect being guarded is a
+ * fraction of a degree of direction change over a long path, which is the
+ * same order as the difference between two samplings of a *correct* curve —
  * an earlier sampled version of this measure could not separate the two
  * implementations on some paths at all. The closed form can, because it
- * does not discretise: on the 33 `curveBasis` paths Mermaid's own output
- * and this repo's both score **0**, and the run-translating
- * implementation that this replaces scores **50** across the same 33.
+ * does not discretise: on the `curveBasis` paths Mermaid's own output and
+ * this repo's both score **0**, and the run-translating implementation that
+ * this replaces scores far more.
  *
  * **A polyline corner counts too.** A staircase changes its mind at every
- * step, and d3's `curveStep` staircase is 66 on the whole corpus — which
+ * step, and d3's `curveStep` staircase is many on the whole corpus — which
  * is why the assertion is always a *difference* against the path Mermaid
  * emitted, never an absolute number. (`M` does not count: it starts the
  * path, so there is no direction to have changed from.)

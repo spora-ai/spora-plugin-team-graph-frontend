@@ -4,7 +4,7 @@ import AgentStatusChip from '../../src/components/AgentStatusChip.vue'
 
 /**
  * `AgentStatusChip` — extracted from the panel header so a status
- * poll re-renders only the chip (not the static name + #ID line).
+ * poll re-renders only the chip (not the static name line).
  *
  * The test below mounts the chip, then changes the `status` prop
  * and confirms the rendered text tracks the new status. We mock
@@ -47,7 +47,7 @@ describe('AgentStatusChip', () => {
          * isolation: when `selectedNode.status` flips during a poll,
          * Vue re-evaluates only the chip's render function (because
          * `:status` is the only reactive dependency). The static
-         * name + #ID in the parent header do NOT need to re-render.
+         * name in the parent header do NOT need to re-render.
          * We don't pin Vue's internal scheduling — we just confirm
          * the chip keeps reflecting the prop, which is the visible
          * contract the operator cares about.

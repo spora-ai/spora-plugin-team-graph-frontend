@@ -2,41 +2,18 @@
 /**
  * Right-sidebar agent detail panel — compact variant.
  *
- * Layout (top → bottom):
- *   1. Compact header: name + status chip on one line. The chip
- *      lives in its own component (`AgentStatusChip`) so a status
- *      poll re-renders only the chip and not the static name.
- *   2. Activity counts (active + 24 h)
- *   3. Description (line-clamped, from /agents/{id})
- *   4. Outbound + Inbound edges, capped at MAX_EDGES_DISPLAYED = 4
- *      each, with a "+N more" overflow line. Each row leads with the
- *      shared `@spora-ai/components` `AgentAvatar` (size `sm`), which
- *      supersedes the hand-written `w-7 h-7 rounded-full` div + inline
- *      `statusColor()` background this panel used to paint. The tile
- *      itself is owned by the package, so the status swatch moved to a
- *      `.tg-agent-tile` ring — see `lib/agentAvatar.ts` and the
- *      `style.css` rule.
- *   5. Active chats, capped at MAX_CHATS_DISPLAYED = 4
- *   6. Recent chats, capped at MAX_CHATS_DISPLAYED = 4
- *
- * The Tools section was removed in this compact variant — the
- * dashboard's AgentCard already carries the tool list, and
- * surfacing it twice on the same screen dilutes the header.
- * The Owner section went the same way: the owning principal is
- * chosen by the pill row at the top of the page, so the row was a
- * duplicate of a control one screen above it.
- *
- * The Hierarchy section went with them. It walked *inbound* edges
- * upward to draw a "root → … → this agent" chain, but the graph is
- * not a spawn tree: an edge means "agent A invoked sub-agent B",
- * which says nothing about ownership or reporting lines, and an
- * agent that was never invoked by another has no parent at all. So
- * the chain was either empty or an accidental ordering of whoever
- * happened to call whom, and its "Root — no parent in this team"
- * branch was the common case by a wide margin. The inbound edges
- * are still listed below the Activity count, under their own
- * heading — the chain added a rendering of the same data, not
- * information the section list does not already carry.
+ * The Tools, Owner and Hierarchy sections were all removed. The host's
+ * dashboard AgentCard already carries the tool list, and the owning
+ * principal is chosen by the pill row at the top of the page, so both
+ * would have duplicated a control one screen above. The Hierarchy chain
+ * walked *inbound* edges upward to draw a "root → … → this agent"
+ * chain, but the graph is not a spawn tree: an edge means "agent A
+ * invoked sub-agent B", which says nothing about ownership or reporting
+ * lines, and an agent that was never invoked by another has no parent at
+ * all — so the chain was either empty or an accidental ordering of
+ * whoever happened to call whom. The inbound edges are still listed
+ * under their own heading; the chain added a rendering of the same data,
+ * not information the section list does not already carry.
  *
  * Edge rows are deep-link buttons — clicking one calls
  * `selection.setSelected(otherId)` so the canvas highlights the
@@ -367,12 +344,10 @@ function openChat(row: ChatRow): void {
         </div>
         <template v-else>
             <!--
-                Compact header — one row with the name on the left
-                and the status chip on the right. The #ID was
-                dropped in the compact variant (the agent name is
-                the primary identifier). The chip lives in its own
+                Compact header — one row with the name on the left and
+                the status chip on the right. The chip lives in its own
                 component (`AgentStatusChip`) so a status poll
-                re-renders only the chip, not the static text.
+                re-renders only the chip, not the static name.
             -->
             <header class="flex items-center gap-2 px-4 py-2.5 border-b border-border">
                 <div class="flex-1 min-w-0">
@@ -536,26 +511,16 @@ function openChat(row: ChatRow): void {
                     panel body is a plain scrollable `<div>` inside
                     `<aside>`, and the panel lives in its own grid
                     column — outside `.tg-canvas-wrap`, which is the only
-                    element with the drag-to-pan pointer capture. So
-                    there is no pan gesture to conflict with (and no need
-                    for the `data-tg-no-pan` opt-out the node cards use
-                    on the canvas).
+                    element with the drag-to-pan pointer capture.
 
-                    **The old bullet dot is gone, and status is not.**
-                    The dot was a bare `background: statusColor(...)`
-                    swatch carrying the only status signal on the row.
-                    It is replaced by the same `.tg-status-pill` the
-                    panel header and the node cards use, driven by the
-                    same `statusPillClass()` / `statusLabel()` pair —
-                    one status→colour table in the plugin, unchanged. The
-                    pill is strictly more informative than the dot: it
-                    pairs the colour with a text label, so the status
-                    survives for a screen reader and for the ~8 % of
-                    operators with a colour-vision deficiency, neither
-                    of whom could read a 6 px hue swatch. The dashboard's
-                    chat row keeps its dot, but it pairs that dot with a
-                    `chatLabel()` text line; we get the same
-                    text-plus-colour result from the shared pill.
+                    **Status is a pill, not a dot.** The row uses the
+                    same `.tg-status-pill` the panel header and the node
+                    cards use, driven by the same `statusPillClass()` /
+                    `statusLabel()` pair — one status→colour table in the
+                    plugin. The pill pairs the colour with a text label,
+                    so the status survives for a screen reader and for
+                    operators with a colour-vision deficiency, neither of
+                    whom could read a 6 px hue swatch.
 
                     When the host hands us no router the row renders as a
                     **disabled** button: same element, same layout, same
@@ -660,15 +625,10 @@ function openChat(row: ChatRow): void {
                             </span>
                         </button>
                         <!--
-                            The old note here read "+N more — open the
-                            dashboard for the full history", which was a
-                            workaround for the very thing this change
-                            fixes: there was no way to open a chat from
-                            the panel, so the only route to one was the
-                            dashboard. Now every visible row is a
-                            deep-link, so the note only has to be true
-                            about what it *is* — the display cap, not a
-                            missing feature.
+                            The overflow line states only what it is —
+                            the display cap — because every visible row
+                            is a deep-link, so there is no missing
+                            feature to work around.
                         -->
                         <p
                             v-if="hiddenRecentCount > 0"

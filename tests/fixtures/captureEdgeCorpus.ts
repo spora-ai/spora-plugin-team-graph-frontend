@@ -453,6 +453,11 @@ function unit(x: number, y: number): RunsPoint {
  * `newEnd` by rigidly translating the **run** of geometry that each
  * endpoint is attached to.
  *
+ * This is the harness's own re-implementation of the *run-translating*
+ * strategy, kept so the corpus can record what it did to each path (the
+ * `measured.reversalsRuns` family). `src/lib/edgeGeometry.ts` no longer
+ * uses it, and `edgeGeometryCorpus.spec.ts` asserts the difference.
+ *
  * **Why a run and not just a handle.** A bézier segment's tangent at
  * an end point is the vector to that end's control point, so moving an
  * endpoint alone snaps the curve to a new direction where it meets the
@@ -470,33 +475,10 @@ function unit(x: number, y: number): RunsPoint {
  * So the run at each end is measured **positionally**: it reaches from
  * the endpoint back along the path's own direction of travel, as far as
  * the points that lie at or before the endpoint's new position, and no
- * further.
- *
- * That single rule covers both ends of the problem. d3's `curveBasis`
- * puts the first control point 1/6 of the way along the first leg and
- * the last 1/6 of the way back from the last, so on a real path the
- * runs come out as `[exit, lead-in, first control]` and
- * `[last control, its vertex, entry]` — a rigid translation of a
- * straight stretch, which preserves every join angle exactly. It also
- * covers the shapes where there is no handle to speak of: a `curveLinear`
- * polyline needs no run at all (its neighbouring vertex is already on
- * the ray the endpoint is walked out along), while d3's `curveStep`
- * staircase *does* need one, because its terminal `L` is a duplicate of
- * the point before it and leaving that behind doubles the path back over
- * itself.
- *
- * A path with no direction of its own — a single point, or one whose
- * first leg is zero-length, which d3 emits for a `curveBumpX` edge
- * leaving straight up — falls back to the tangent-carrying handle
- * instead, which is the nearest thing to an answer the path offers.
- *
- * Every join *inside* a run keeps its angle exactly, and so does every
- * join *between* a run and the untouched middle: the first repetition's
- * head anchor is in the head run and its tail handle is not, so its
- * start tangent moves with the run and its end tangent does not — the
- * same as if nothing had happened. On the captured corpus the turn
- * angle at every interior vertex is identical before and after, and the
- * middle of the path is byte-for-byte Mermaid's own output.
+ * further. Every join *inside* a run keeps its angle exactly, and so
+ * does every join *between* a run and the untouched middle — which is
+ * why this strategy preserves the curve's shape but not its direction,
+ * and why the corpus records the reversals it produces.
  *
  * **Why the runs are accumulated before they are applied.** A lone
  * `S`/`Q` repetition has one control point governing both of its ends,

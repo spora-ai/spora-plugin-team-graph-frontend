@@ -92,13 +92,12 @@ let renderCounter = 0
  * Minimum `nodeSpacing` / `rankSpacing` that makes the overlay cards
  * collision-free.
  *
- * dagre guarantees `gap >= nodesep` between boxes side by side in a
- * rank (`order/bk.js → sep()`) and `gap >= ranksep` between ranks
- * (`position/index.js → positionY()`). Those are minimums, not
- * averages: a *larger* measured box only ever pushes neighbours
- * further apart. So setting each spacing to the card's own footprint
- * plus a gutter makes overlap impossible regardless of how wide the
- * agent names are.
+ * dagre guarantees a gap of at least `nodesep` between boxes side by side
+ * in a rank and at least `ranksep` between ranks, and those are minimums,
+ * not averages: a *larger* measured box only ever pushes neighbours
+ * further apart. So setting each spacing to the card's own footprint plus
+ * a gutter makes overlap impossible regardless of how wide the agent names
+ * are.
  */
 const CARD_GUTTER = 20
 const MIN_NODE_SPACING = NODE_CARD_WIDTH + CARD_GUTTER
@@ -165,9 +164,7 @@ export function useMermaidRender({ hostRef, graph, onRender }: UseMermaidRenderO
     function applyEdgeStyling(svgEl: SVGSVGElement): void {
         /*
          * Tag each edge path with `out`/`in`/`dim` (per the current
-         * selection). Every edge is a solid arrow now — the
-         * configured-but-never-fired distinction is conveyed in the
-         * detail panel's secondary label, not on the canvas.
+         * selection).
          *
          * Mermaid 10 changed the edge DOM: edges are
          * `<path class="flowchart-link LS-N LE-M">` (not the older
@@ -213,11 +210,8 @@ export function useMermaidRender({ hostRef, graph, onRender }: UseMermaidRenderO
          * the path end. Without the inset the tip lands *inside* the
          * opaque card and the arrowhead reads as cut off.
          *
-         * Runs before the `getBBox()` below on purpose: a re-anchored
-         * endpoint lands on — or just short of — a node rect, which is
-         * already within the widest geometry in the diagram, so the
-         * bounding box cannot grow; but taking it afterwards keeps that
-         * true by construction rather than by argument.
+         * Runs before the `getBBox()` below so the bounding box encloses
+         * the re-anchored endpoints.
          */
         svgEl.querySelectorAll('path.flowchart-link').forEach((edgeEl) => {
             const ends = edgeEndsFromMermaidId(edgeEl.id)
@@ -332,16 +326,14 @@ export function useMermaidRender({ hostRef, graph, onRender }: UseMermaidRenderO
         } catch (e) {
             /*
              * The supersession check the success path runs, and for the
-             * same reason: a render a newer one has already committed
-             * over has no standing to touch the shared state, and here
-             * that state is the *live* diagram. The failure this guard
-             * exists to stop is the loud one — a stale rejection
-             * replaced the good SVG the newer render had just put on
-             * screen with a red error div and emptied `positions`, so
-             * one slow-then-failing poll could blank a working graph
-             * while the poll that superseded it sat there healthy. A
-             * superseded render now writes nothing at all, on either
-             * path.
+             * same reason: a render a newer one has already committed over
+             * has no standing to touch the shared state, and here that
+             * state is the *live* diagram. The failure this guard exists
+             * to stop is the loud one — a stale rejection replaced the good
+             * SVG the newer render had just put on screen with a red error
+             * div and emptied `positions`, so one slow-then-failing poll
+             * could blank a working graph. A superseded render now writes
+             * nothing at all, on either path.
              */
             if (myRenderId !== renderCounter) return null
             error.value = e instanceof Error ? e.message : String(e)
@@ -358,17 +350,14 @@ export function useMermaidRender({ hostRef, graph, onRender }: UseMermaidRenderO
         if (host === null || payload === null) return
         /*
          * A payload with no nodes is not a diagram. `buildMermaidSource`
-         * would emit a bare `flowchart TB`, and what Mermaid does with
-         * that is not something to leave to chance: an empty `<svg>` is
-         * merely wasted work, and a thrown one lands in the `catch`
-         * below, which writes a red "Mermaid render error: …" div into
-         * the host. `TeamGraphCanvas` shows its own empty-state note in
-         * that card, so the error text would render *underneath* it.
+         * would emit a bare `flowchart TB`: an empty `<svg>` is merely
+         * wasted work, and a thrown one lands in the `catch` below, which
+         * writes a red "Mermaid render error: …" div into the host —
+         * underneath `TeamGraphCanvas`'s own empty-state note.
          *
-         * Clearing the host and the positions is the same thing
-         * `renderInto` does on its first line, and it is what keeps a
-         * previous principal's cards from being measured out of a
-         * stale SVG.
+         * Clearing the host and the positions is what `renderInto` does on
+         * its first line, and it keeps a previous principal's cards from
+         * being measured out of a stale SVG.
          */
         if (payload.nodes.length === 0) {
             host.innerHTML = ''
@@ -388,16 +377,13 @@ export function useMermaidRender({ hostRef, graph, onRender }: UseMermaidRenderO
     )
 
     /*
-     * The payload is not the only thing a render needs — it needs
-     * somewhere to put the result — and the watcher above only hears
-     * about the first. A canvas that mounts with its `graph` prop
-     * already populated gets an `immediate` pass during `setup()`,
-     * when `hostRef` is still null, so `reRender()` returns early and
+     * A render needs somewhere to put the result, and the watcher above
+     * only hears about the payload. A canvas that mounts with its `graph`
+     * prop already populated gets an `immediate` pass during `setup()`,
+     * when `hostRef` is still null — so `reRender()` returns early and
      * the pass is a permanent no-op: nothing else fires it, because the
-     * prop never changes again. `useTeamGraph`'s dedup closes the
-     * escape hatch too — the polls that follow return the identical
-     * payload, so the graph watcher stays quiet and the canvas sits
-     * there blank, holding a graph it will not draw.
+     * prop never changes again (`useTeamGraph`'s dedup keeps the polls
+     * quiet too).
      *
      * The host binding is the event that actually makes a render
      * possible, so it is the thing to watch. `TeamGraphPage` unmounts

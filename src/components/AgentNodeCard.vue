@@ -11,79 +11,66 @@
  *     │ └────┘  ( idle )        ↑ 2  ↓ 3   │   row2 — pill left, badges right
  *     └────────────────────────────────────┘
  *
- *   - avatar tile **left**, name **top-right**,
- *   - status pill **bottom-left**, edge-count badges **bottom-right**,
- *   - fixed **240 px** box whose height is derived from its own parts
- *     in `lib/nodeLayout.ts`, ellipsised name,
- *   - `↑ N` inbound green / `↓ N` outbound violet, and a distinct
- *     slate `.zero` style **per badge** when that badge's own count
- *     is 0 — a 0-inbound node is an entry-point agent, and that
- *     distinction is signal, not noise.
+ * `↑ N` inbound green / `↓ N` outbound violet, and a distinct slate
+ * `.zero` style **per badge** when that badge's own count is 0 — a
+ * 0-inbound node is an entry-point agent, and that distinction is signal,
+ * not noise.
  *
  * **The tile is `size="md"` (44 px) and the headline is top-aligned
- * against it.** The 240 px width is the Variant M prototype's; the
- * height is *derived* from the box's own parts in `lib/nodeLayout.ts`
- * (`border + block padding + max(tile, body column)`), so the tile is
- * the content box and the card is exactly as short as a 44 px tile can
- * be — 63 px.
+ * against it.** The 240 px width is the Variant M prototype's; the height
+ * is *derived* from the box's own parts in `lib/nodeLayout.ts`
+ * (`border + block padding + max(tile, body column)`), so the tile is the
+ * content box and the card is exactly as short as a 44 px tile can be.
  *
- * The headline used to be **centred** on the tile: row 1 was forced to
- * the tile's whole 44 px, which put the name's line-box centre and the
- * tile's centre on the same line at Δ = 0.000 px. That alignment is
- * deliberately reversed here. A 15.6 px line box centred in a 44 px
- * band hangs 14.2 px below the tile's top edge, and that is what the
- * operator read as "the headline sits low". Row 1 is now the headline's
- * natural height (13 px × 1.2 = 15.6 px) and the card's own
- * `align-items: flex-start` puts the name's top edge on the tile's top
- * edge. The measured delta between the two centres is −14.203 px — the
- * name now sits *above* the tile's centre rather than on it, which is
- * the point. See `NODE_CARD_HEADLINE_HEIGHT` in `lib/nodeLayout.ts`.
+ * The headline is top-aligned on the tile, not centred on it. A 15.6 px
+ * line box centred in a 44 px band hangs 14.2 px below the tile's top
+ * edge, and that is what the operator read as "the headline sits low".
+ * Row 1 is the headline's natural height (13 px × 1.2 = 15.6 px) and
+ * the card's own `align-items: flex-start` puts the name's top edge on
+ * the tile's top edge. See `NODE_CARD_HEADLINE_HEIGHT` in
+ * `lib/nodeLayout.ts`.
  *
  * **The status row is sized to its content, so the label does not
- * wrap.** It used to reserve the pill's three-line height, which made
- * every card 115 px tall and left 26.8 px of empty row under the pill
- * on all of them — the "the paddings are off" report. The pill now
- * takes its label on one line and ellipsises (`.tg-node-card-pill` in
- * `style.css`), which puts the card at its natural height for every
- * status. The full label is not lost: it stays in the DOM as the
- * pill's text, so a screen reader reads it whole; it is the pill's
- * `title` on hover; and the detail panel shows it in full. The
- * ellipsis is visible on the three longest labels — the `awaiting *`
- * family, which share one colour slug — so the canvas text is
- * genuinely less specific than it was. That is the trade this card
- * makes for being a fixed box, and it is the same one
- * `.tg-chat-row-status` already makes in the sidebar.
+ * wrap.** The pill takes its label on one line and ellipsises
+ * (`.tg-node-card-pill` in `style.css`), which puts the card at its
+ * natural height for every status. The full label is not lost: it stays
+ * in the DOM as the pill's text, so a screen reader reads it whole; it is
+ * the pill's `title` on hover; and the detail panel shows it in full.
+ * The ellipsis is visible on the longest labels — the `awaiting *`
+ * family, which share one colour slug — so the canvas text is genuinely
+ * less specific than it was. That is the trade this card makes for being
+ * a fixed box, and it is the same one `.tg-chat-row-status` already
+ * makes in the sidebar.
  *
  * **Everything visual lives in `style.css`** (`.tg-node-card` and
- * friends) so the card markup stays a pure structure and the CSS
- * file remains the single place the prototype's geometry is
- * expressed — with one deliberate exception: the box's own
- * `width` / `height` and the tile's edge are **inline**, built from
- * `NODE_CARD_WIDTH` / `NODE_CARD_HEIGHT` / `NODE_CARD_AVATAR_SIZE`,
- * because the footprint is load-bearing in four places and only the
- * constants can keep all four in step.
+ * friends) so the card markup stays a pure structure and the CSS file
+ * remains the single place the prototype's geometry is expressed — with
+ * one deliberate exception: the box's own `width` / `height` and the
+ * tile's edge are **inline**, built from `NODE_CARD_WIDTH` /
+ * `NODE_CARD_HEIGHT` / `NODE_CARD_AVATAR_SIZE`, because the footprint is
+ * load-bearing in four places and only the constants can keep all four in
+ * step.
  *
  * **The card is a real `<button>`.** Selecting an agent is an
- * activation, so the card is a native toggle button
- * (`type="button"` + `aria-pressed`) rather than a `<div
- * role="button">` with hand-written `tabindex` and Enter/Space
- * handlers. The browser then owns the button role, the focus ring and
- * the keyboard activation on every device, and the manual handlers
- * cannot drift out of sync (a native button already synthesises a
- * `click` from Enter and Space, so a `keydown` handler on top of it
- * would fire the toggle twice). Nothing interactive encloses the
+ * activation, so the card is a native toggle button (`type="button"` +
+ * `aria-pressed`) rather than a `<div role="button">` with hand-written
+ * `tabindex` and Enter/Space handlers. The browser then owns the button
+ * role, the focus ring and the keyboard activation on every device, and
+ * the manual handlers cannot drift out of sync (a native button already
+ * synthesises a `click` from Enter and Space, so a `keydown` handler on
+ * top of it would fire the toggle twice). Nothing interactive encloses the
  * card — `.tg-canvas-wrap` → `.tg-canvas-content` → `.tg-node-overlay`
  * are all plain divs — so no control is nested inside a control. The
  * subtree is all `<span>` so the button keeps its phrasing-content
- * content model. See the comment above the template for the detail.
+ * content model.
  *
  * **The pieces are the shared ones.** The tile is the package's
  * `AgentAvatar` (fed through `lib/agentAvatar.ts → avatarSubject()`,
  * the same snake_case→camelCase coercion the detail panel uses), the
- * badge arrows are the package's `Icon`, and the status pill reuses
- * the plugin's existing `statusPillClass()` slugs so the colour map
- * stays the one already shared with `AgentStatusChip` — there is no
- * second status→colour table in this component.
+ * badge arrows are the package's `Icon`, and the status pill reuses the
+ * plugin's existing `statusPillClass()` slugs so the colour map stays
+ * the one already shared with `AgentStatusChip` — there is no second
+ * status→colour table in this component.
  */
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'

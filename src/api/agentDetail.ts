@@ -3,9 +3,8 @@
  *
  * Active / recent chats come from the live `/tasks` endpoint.
  * The full agent record (`/agents/{id}`) supplies the one thing the
- * detail panel wants beyond the graph payload: the description (and
- * the tools / LLM FK the type still mirrors). The agent resource
- * shape is locked in
+ * detail panel wants beyond the graph payload: the description. The
+ * agent resource shape is locked in
  * `Spora\Services\AgentResource::toArray()`; we mirror only the
  * fields the plugin's right sidebar actually consumes.
  *
@@ -126,8 +125,8 @@ export interface AgentToolEntry {
 
 /**
  * AgentResource-shaped payload. We carry the full set of fields
- * the host serializes so the panel can read description / tools /
- * principal_id / llm FK without a second round-trip; we just
+ * the host serializes so the panel can read the description without a
+ * second round-trip; the rest is carried for shape fidelity — we just
  * accept `null` on optional fields for fixtures and migrations.
  *
  * **No `principal` block.** The panel's Owner section was removed

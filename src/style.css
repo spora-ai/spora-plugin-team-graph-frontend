@@ -42,11 +42,12 @@
 /**
  * The two halves of Tailwind this plugin needs, imported separately.
  * This is deliberately NOT `@import "tailwindcss"`, which is
- * `theme + preflight + utilities` — see note 1 at the top of this file
- * for why preflight must stay out.
+ * `theme + preflight + utilities` — preflight must stay out, because
+ * its reset would cascade into the host document (see the header).
  *
  * The theme half carries the `layer(theme)` wrapper; the utility half
- * is imported bare, for the layer-ordering reason in note 2 above.
+ * is imported bare, so the plugin's utilities stay unlayered and beat
+ * the package's `@layer components` rules.
  *
  * They sit above every other at-rule on purpose. CSS requires all
  * `@import` to precede any rule that isn't a `@charset` or a `@layer`
@@ -120,7 +121,7 @@
  * paints its error fallback with `text-red-500`.
  *
  * **`--color-card` is the host's own mapping, copied verbatim.** There
- * is no `--card` token: `spora-frontend/src/style.css` line 117 maps
+ * is no `--card` token: `spora-frontend/src/style.css` maps
  * `--color-card: hsl(var(--background))`, i.e. in this design system a
  * card *is* the page background, separated by `border-border` and a
  * radius — which is why every card in the SPA (`AccountPage`,
@@ -173,23 +174,7 @@
  * `important: '#spora-plugin-team-graph'`. The plugin itself sits
  * inside the `<div id="spora-plugin-team-graph">` wrapper mounted by
  * `App.vue`.
- *
- * The CSS below paints:
- *  - the Mermaid canvas (viewport + transformable content + zoom
- *    button stack) — the same composition Prototype E uses;
- *  - the per-node content template (`.m-node`, `.m-node-name`, etc.);
- *  - the selection-driven SVG styling (`g.node.selected`, `path.flowchart-link.out`,
- *    `path.flowchart-link.in`, `g.node.dimmed`, etc.);
- *  - the modal + sidebar containers shared with the other plugin
- *    prototypes.
- *
- * The `!important` overrides on `g.node.selected rect` (and friends)
- * are intentional — Mermaid emits inline `style="…"` on every node
- * shape, and `class` selectors lose specificity without `!important`.
  */
-/* The `:root` block is gone. It used to carry `color-scheme: light`
- * together with the `html, body, #app` block below, and both were
- * unscoped — see the note there. */
 #spora-plugin-team-graph {
     color-scheme: light;
     font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
@@ -202,44 +187,31 @@
      * its own surface instead — `surface-card` below, which is the same
      * `hsl(var(--background))` the host paints `body` with, so a card
      * is the page plus a hairline `border-border` and a radius. That
-     * is the host's own card idiom (`PluginAppPage.vue:165`), and it
+     * is the host's own card idiom (`PluginAppPage.vue`), and it
      * is what makes the detail panel's text legible in both themes
      * without this root pinning a light-theme colour of its own.
      */
 }
 
 /**
- * **Scoped to the plugin slot — the `html, body, #app` rule that was
- * here is not, and that was a real bug.**
+ * Scoped to the plugin slot, and that scoping is load-bearing.
  *
- * The host loads this stylesheet with a plain
- * `<link rel="stylesheet" href="/plugins/team-graph/style.css">`
- * injected into `document.head` (`spora-frontend/src/apps/registry.ts
- * → injectPluginStylesheet`), so it is a normal document-level sheet
- * with no scoping of its own. The old
+ * The host injects this stylesheet into `document.head` with a plain
+ * `<link rel="stylesheet">` (`spora-frontend/src/apps/registry.ts →
+ * injectPluginStylesheet`), so it is a normal document-level sheet with no
+ * scoping of its own. An unscoped rule here — the `html, body, #app` block
+ * this file used to carry — therefore applied to the **host SPA's own
+ * `body`**, not to the plugin. The host declares `body { background-color:
+ * hsl(var(--background)) }` inside `@layer base`, and an *unlayered* rule
+ * beats a layered one regardless of order, so for as long as that rule
+ * existed the whole host application was forced to a light background with
+ * dark text and the host's `.dark` toggle had no effect on it at all.
  *
- *     html, body, #app { color: #1f2937; background: #f9fafb; … }
- *
- * therefore applied to the **host SPA's own `body`**, not to the
- * plugin. The host declares `body { background-color:
- * hsl(var(--background)) }` inside `@layer base`, and an *unlayered*
- * rule beats a layered one regardless of order — so for as long as
- * the plugin was mounted, the whole host application was forced to a
- * light background with dark text, and the host's `.dark` toggle had
- * no effect on it at all.
- *
- * Verified in the built asset rather than inferred: `frontend/style.css`
- * contained `html,body,#app{color:#1f2937;background:#f9fafb;…}` and
- * nothing else unscoped targets a host element.
- *
- * This file's own header already claimed "the host SPA's styles are
- * not affected"; that claim was false for exactly this one rule, and
- * is now true. Scoping to `#spora-plugin-team-graph` — the wrapper
- * `App.vue` renders as its own root — is the same selector
- * `tailwind.config.ts → important:` uses, so the hand-written chrome
- * and the generated utilities now share one boundary. The dev entry
- * mounts into that same id (see `index.html`), so `npm run dev` and
- * production are structurally identical.
+ * Scoping to `#spora-plugin-team-graph` — the wrapper `App.vue` renders as
+ * its own root — is the same selector `tailwind.config.ts → important:`
+ * uses, so the hand-written chrome and the generated utilities share one
+ * boundary. The dev entry mounts into that same id (see `index.html`), so
+ * `npm run dev` and production are structurally identical.
  */
 
 /**
@@ -340,72 +312,53 @@
 }
 
 /**
- * Variant M card — `prototype-m-edge-counts.html`.
+ * Variant M card — `spora-workspace/prototypes/compact-node-designs/
+ * prototype-m-edge-counts.html`.
  *
- * Avatar tile left, name top-right, status pill bottom-left,
- * edge-count badges bottom-right; fixed 240 px width, name
- * ellipsised. The accent bar of the previous compact variant is
- * gone: the shared `AgentAvatar` tile is the agent's identity, and
- * it reads `profile_picture` straight off the wire payload.
+ * Avatar tile left, name top-right, status pill bottom-left, edge-count
+ * badges bottom-right; fixed 240 px width, name ellipsised. The accent bar
+ * of the previous compact variant is gone: the shared `AgentAvatar` tile is
+ * the agent's identity, and it reads `profile_picture` straight off the
+ * wire payload.
  *
- * The height is 63 px and is derived from the parts below rather than
- * authored here: 1.5 × 2 border + 8 × 2 block padding + a 44 px
- * content box, which is the 44 px tile. See `NODE_CARD_HEIGHT` in
- * `lib/nodeLayout.ts`.
+ * The height is derived from the parts below rather than authored here:
+ * 1.5 × 2 border + 8 × 2 block padding + a 44 px content box, which is the
+ * 44 px tile. See `NODE_CARD_HEIGHT` in `lib/nodeLayout.ts`.
  *
- * **No `width` / `height` here, on purpose.** The card's box is
- * load-bearing in four places — the painted card, the overlay's
- * `translate3d`, the `g.node` rect `useMermaidRender` grows, and the
- * border `edgeGeometry` walks each arrow tip onto — and three of them
- * read `NODE_CARD_WIDTH` / `NODE_CARD_HEIGHT`. So the fourth states it
- * inline from the same constants (`AgentNodeCard.vue → cardStyle`) and
- * this file carries no footprint literal. Every earlier regression on
- * this card came through exactly that seam: a resize that reached the
- * CSS but not the constants left the arrowheads describing a box that
- * no longer existed. `tests/style.spec.ts` fails the build if a literal
- * creeps back in.
+ * **No `width` / `height` here, on purpose.** The card's box is load-bearing
+ * in four places — the painted card, the overlay's `translate3d`, the
+ * `g.node` rect `useMermaidRender` grows, and the border `edgeGeometry`
+ * walks each arrow tip onto — and three of them read `NODE_CARD_WIDTH` /
+ * `NODE_CARD_HEIGHT`. So the fourth states it inline from the same constants
+ * (`AgentNodeCard.vue → cardStyle`) and this file carries no footprint
+ * literal. `tests/style.spec.ts` fails the build if a literal creeps back in.
  *
  * **`align-items: flex-start`, not `center`.** The card is a 44 px tile
- * beside a 37.8 px body column, and the body is the *shorter* of the
- * two — so they are not interchangeable and the tile has nothing to be
- * centred against. Pinning both to the top padding edge is what puts the
- * name's line box on the tile's top edge, which is where the operator
- * asked for it: row 1 used to be forced to the tile's whole 44 px with
- * the name centred inside it, and a 15.6 px line box centred in a 44 px
- * band sits 14.2 px lower than it does now. The centre-alignment is
- * deliberately gone — see `NODE_CARD_HEADLINE_HEIGHT` in
- * `lib/nodeLayout.ts` for the reversal, in full.
+ * beside a 37.8 px body column, and the body is the *shorter* of the two —
+ * so there is nothing to centre against. Pinning both to the top padding
+ * edge is what puts the name's line box on the tile's top edge. See
+ * `NODE_CARD_HEADLINE_HEIGHT` in `lib/nodeLayout.ts`.
  *
  * The card element is a real `<button type="button">` (see
  * `AgentNodeCard.vue`), so this rule also has to undo what the UA
  * stylesheet does to every button: drop the native chrome with
  * `appearance: none` (otherwise Safari/WebKit keeps `buttonface` and
- * Firefox its inner focus ring), and opt back in to the inherited
- * font, because `font` is one of the properties a `<button>` does
- * *not* inherit. The `font:` shorthand comes before `font-family` so
- * the prototype's own stack still wins.
+ * Firefox its inner focus ring), and opt back in to the inherited font,
+ * because `font` is one of the properties a `<button>` does *not* inherit.
+ * The `font:` shorthand comes before `font-family` so the prototype's own
+ * stack still wins.
+ *
+ * **`padding: 8px 13px` is the prototype's inline padding and one pixel
+ * less than its block padding.** The prototype sized `9px 13px` for a 32 px
+ * tile; this card carries the 44 px one, and at 9 px of block padding the
+ * card still measured 65 px — 2 px of it still padding nobody asked for. The
+ * inline padding stays at 13 px because the status row's arithmetic is
+ * measured against it (the row is 158 px wide and the two badges take 67.5
+ * of it).
  *
  * `translate3d(x, y, 0)` is written inline by `AgentNodeCard.vue`
  * from the measured node centre; `position: absolute` keeps every
  * card out of flow.
- *
- * **`padding: 8px 13px` is the prototype's inline padding and one
- * pixel less than its block padding, and the reason is the tile.** The
- * prototype sized `9px 13px` for a **32 px** tile; this card carries the
- * 44 px one the operator asked for, and at 9 px of block padding the
- * card still measured 65 px — 23.2 px of the old height gone, but 2 px
- * of it still padding nobody asked for. The inline padding is untouched
- * at 13 px: the status row's arithmetic is measured against it (the row
- * is 158 px wide and the two badges take 67.5 of it), and that did not
- * change. Measured in a headless browser in both themes, the four insets
- * render at 9 / 10 / 14 / 14 px, top / bottom / left / right — the extra
- * pixel at the bottom is the 1.5 px border rounded to a whole one, and
- * it was there before this change too. Those are the *tile's* insets,
- * which is the one thing whose meaning moved: the tile used to float in
- * the top 44 px of a 67.2 px content column and now fills the whole of
- * a 44 px one, so the body column's own bottom inset reads 16.2 px.
- * That asymmetry is what top-aligning the headline costs, and it is the
- * only one this change introduces.
  */
 .tg-node-card {
     position: absolute;
@@ -475,10 +428,9 @@
  * `NODE_CARD_AVATAR_SIZE`) and this rule states it in px. The remaining
  * `flex-shrink` and the shadow are the prototype's own.
  *
- * It used to be read by `.tg-node-card-row1` as well, which is how the
- * headline was centred on it. It is now read only here, because the
- * headline is top-aligned against the tile rather than centred on it —
- * the same reversal `NODE_CARD_HEADLINE_HEIGHT` documents.
+ * It is read only by this rule: the headline is top-aligned against the
+ * tile rather than centred on it — the same reversal
+ * `NODE_CARD_HEADLINE_HEIGHT` documents.
  */
 .tg-node-card-avatar {
     inline-size: var(--tg-avatar-size);
@@ -488,19 +440,17 @@
 }
 
 /**
- * The tile's shape, in one place — and now, for *every* branch.
+ * The tile's shape, in one place — and for *every* branch.
  *
  * `AgentNodeCard` and `AgentDetailPanel` must both paint the same
  * silhouette, and the package does not give them one: the archetype
  * branch rounds to `.5rem` at `size="sm"` but to **`.75rem` at
  * `size="md"`**, while the **initials** branch is forced to `9999px`
- * on `.avatar--initials[data-v-0a52efe6]` regardless of size. So the
- * moment the card moved up a size step the same agent would have drawn
- * a 12 px-rounded square with an archetype and a circle without one —
- * exactly the branch-dependent silhouette this rule exists to prevent,
- * and it would have done it in *both* directions at once. Forcing the
- * radius on the tile element itself (rather than only on
- * `.avatar--initials`) covers archetype, image and initials alike.
+ * regardless of size. So the moment the card moved up a size step the
+ * same agent would have drawn a 12 px-rounded square with an archetype
+ * and a circle without one. Forcing the radius on the tile element itself
+ * (rather than only on `.avatar--initials`) covers archetype, image and
+ * initials alike.
  *
  * These rules are **unlayered**, which is the whole mechanism: the
  * package ships `.avatar--md` / `.avatar--initials` inside
@@ -524,21 +474,14 @@
  *
  * **The `block-size` this rule used to carry is the change.** Row 1 was
  * forced to `var(--tg-avatar-size)` with the name centred inside it, so
- * the name's line-box centre and the tile's centre coincided at
- * Δ = 0.000 px. That is a real alignment, and it is what the operator
- * asked to give up: a 15.6 px line box centred in a 44 px band hangs
- * 14.2 px below the tile's top edge, and the report was "the headline
- * sits low". With the `block-size` gone the row is 13 px × 1.2 = 15.6 px
- * — the same number as `NODE_CARD_HEADLINE_HEIGHT` in
- * `lib/nodeLayout.ts`, which is what keeps the height equation honest
- * — and `align-items: flex-start` (matching the card) puts the name's
- * top edge on the tile's top edge. Measured after the change, in a
- * headless browser in both themes: the name's line-box centre is
- * 14.203 px *above* the tile's centre, which is exactly half of
- * (44 − 15.6).
- *
- * Nothing else depended on the old alignment: the row gap below is the
- * only thing that moved with it, and the card is shorter by 25.2 px.
+ * the name's line-box centre and the tile's centre coincided. That is a
+ * real alignment, and it is what the operator asked to give up: a 15.6 px
+ * line box centred in a 44 px band hangs 14.2 px below the tile's top
+ * edge, and the report was "the headline sits low". With the `block-size`
+ * gone the row is 13 px × 1.2 = 15.6 px — the same number as
+ * `NODE_CARD_HEADLINE_HEIGHT` in `lib/nodeLayout.ts`, which is what keeps
+ * the height equation honest — and `align-items: flex-start` (matching the
+ * card) puts the name's top edge on the tile's top edge.
  */
 .tg-node-card-row1 { display: flex; align-items: flex-start; gap: 6px; }
 /**
@@ -553,11 +496,9 @@
  * the label no longer wraps.
  *
  * `margin-top: 3px` is `NODE_CARD_ROW_GAP`, down from the prototype's
- * 4 px. It is the headline↔badges gap the operator asked to be smaller,
- * and it is now *the* gap: measured, the name's line-box bottom sits
- * 3.0 px above the pill's top edge, where it used to sit 18.2 px above
- * it. Reducing it does **not** make the card shorter — the 44 px tile is
- * the height floor, not the body column — so the height came from the
+ * 4 px. It is the headline↔badges gap the operator asked to be smaller.
+ * Reducing it does **not** make the card shorter — the 44 px tile is the
+ * height floor, not the body column — so the height came from the
  * `block-size` on row 1 and from the block padding, and the gap is a
  * pure spacing change.
  */
@@ -649,11 +590,10 @@
  * badges off the right edge of the card. With it, `text-overflow` can
  * engage and the row's `justify-content: space-between` still holds.
  *
- * `max-width: 92px` is inherited from the shared rule above and the
- * arithmetic in the row is tighter than it anyway: the row is 158 px
- * wide and the two badges take 67.5 of it, so the pill can never get
- * more than 84.5 px (measured 84.469 for every one of the eleven
- * labels). The declared cap is kept because it is the number that keeps
+ * `max-width: 92px` is inherited from the shared rule above, and the
+ * arithmetic in the row is tighter than it anyway: the row is 158 px wide
+ * and the two badges take 67.5 of it, so the pill can never get more than
+ * 84.5 px. The declared cap is kept because it is the number that keeps
  * the label column recognisable if the card is ever widened.
  */
 .tg-node-card-pill {
@@ -719,11 +659,7 @@
 .tg-canvas-content svg .edgeLabel { transition: opacity 150ms; }
 
 /**
- * Modal chrome was dropped in v0.1.1 (per user feedback: "details
- * open in an overlay instead of the sidebar"). The detail panel
- * now renders as a right sidebar at every breakpoint — see
- * `<AgentDetailPanel />`'s sticky positioning below. What remains
- * here are the section + row primitives the sidebar is built from.
+ * Section + row primitives the detail sidebar is built from.
  *
  * Edge rows are deep-link buttons — clicking one jumps selection to
  * the other agent on the edge. Chat rows are deep-link buttons that
@@ -763,16 +699,7 @@
  * this change and used the bare form were fixed along with it; see
  * `.tg-edge-row:hover`.
  *
- * Re-measured for this pass, because the earlier note in this comment
- * described the failure imprecisely enough to mislead a debugger. It
- * read: "computes to `rgb(31, 41, 55)` (inherited from the page)".
- * The colour is real, but the inference from it was not: `rgb(31, 41,
- * 55)` is the *initial* `border-top-color` inside a
- * `color: #1f2937` container (the plugin's own old `html, body, #app`
- * rule, now gone), not a sign that the declaration degraded to a
- * colour fallback. `border-top` is a **shorthand**, so
- * `1px solid var(--border)` invalidates all of it at once. Measured
- * with the host's real tokens loaded:
+ * Measured with the host's real tokens loaded:
  *
  *     light, bare            →  0px none rgb(9, 9, 11)
  *     light, hsl()           →  1px solid rgb(228, 228, 231)
@@ -795,10 +722,9 @@
 /**
  * Section heading.
  *
- * Was `text-[10px] … text-muted-foreground` repeated inline on every
- * `<h4>`. Two changes, both measured:
+ * Two choices, both measured:
  *
- *  - **10 px → 11 px.** At 10 px the glyphs are below the size at
+ *  - **11 px, not 10 px.** At 10 px the glyphs are below the size at
  *    which a semibold uppercase label is comfortably legible, and the
  *    `tracking-wider` (0.05 em) that helps at larger sizes visibly
  *    breaks the word shapes apart at 10 px. 11 px keeps the
@@ -951,12 +877,10 @@
 
 /**
  * Edge row — a deep-link button to the agent at the far end of the
- * edge. Unchanged behaviour; the hover/focus treatment is now the
- * shared one below rather than the violet `rgba(79, 70, 229, .06)`
- * this rule used to carry, which was a hard-coded accent tint that
- * ignored both themes (it was a violet wash on a near-black surface
- * in dark mode, where the host's own `--muted` is what the rest of
- * the SPA uses for row hover).
+ * edge. The hover/focus treatment is the shared one below rather than a
+ * violet accent tint, which ignored both themes (a violet wash on a
+ * near-black surface in dark mode, where the host's own `--muted` is what
+ * the rest of the SPA uses for row hover).
  */
 .tg-edge-row {
     display: flex;
@@ -1004,31 +928,28 @@
  * Chat row — a deep-link button to the host's task chat
  * (`router.push('/tasks/{id}')`, see `lib/hostNavigation.ts`).
  *
- * **Layout — two lines, and why not a right-hand meta column.** The
- * obvious arrangement is a right-hand column holding the status pill
- * beside the title. It does not survive a 340 px sidebar: the longest
- * label `statusLabel()` can emit is "awaiting final approval" (22
- * characters), which at 10 px semibold plus the capsule's own padding
- * is ~137 px — 44 % of a 310 px row. Measured in a headless browser,
- * the title collapsed to "Compare the three co…" on a merely
- * *17*-character label. Status is the signal that has to survive
- * truncation, so the row is stacked instead:
+ * **Layout — two lines, and why not a right-hand meta column.** A
+ * right-hand column holding the status pill beside the title does not
+ * survive a 340 px sidebar: the longest label `statusLabel()` can emit is
+ * "awaiting final approval", which at 10 px semibold plus the capsule's
+ * own padding is ~137 px — 44 % of a 310 px row, and the title collapsed
+ * to "Compare the three co…" on a merely *17*-character label. Status is
+ * the signal that has to survive truncation, so the row is stacked:
  *
  *     line 1   title ..............................  22h ago
  *     line 2   [awaiting sub-agent]  preview …………
  *
- * The title gets the full row width (~38 characters) and the pill is
- * never truncated at any label the enum produces. The time moved up
- * beside the title because line 2 is now fully committed to the two
- * pieces that carry meaning.
+ * The title gets the full row width and the pill is never truncated at
+ * any label the enum produces. The time moved up beside the title because
+ * line 2 is now fully committed to the two pieces that carry meaning.
  *
- * **Hover / focus.** The same `hsl(var(--muted))` the edge rows use,
- * so the two row types feel like one list. The left edge picks up a
- * 2 px `hsl(var(--primary))` bar via `box-shadow` (not `border`, so
- * the row's width does not change on hover and no text reflows).
- * Measured: the bar is `rgb(24, 24, 27)` in light and
- * `rgb(250, 250, 250)` in dark — the host's own `--primary` token
- * under its own theme, not a new palette entry.
+ * **Hover / focus.** The same `hsl(var(--muted))` the edge rows use, so
+ * the two row types feel like one list. The left edge picks up a 2 px
+ * `hsl(var(--primary))` bar via `box-shadow` (not `border`, so the row's
+ * width does not change on hover and no text reflows). Measured: the bar
+ * is `rgb(24, 24, 27)` in light and `rgb(250, 250, 250)` in dark — the
+ * host's own `--primary` token under its own theme, not a new palette
+ * entry.
  */
 .tg-chat-row {
     display: flex;
@@ -1140,10 +1061,9 @@
  * The package's `AgentAvatar` has no `status` prop: it forwards
  * `agent.name` / `agent.profile_picture` to `Avatar` and stops
  * there, so the tile itself cannot carry a status swatch. The ring
- * restores that signal without re-implementing the avatar — same
- * inline-custom-property shape as `--palette-bg` on
- * `.tg-node-accent` above, so the resolved colour stays in the
- * markup and this rule owns only the geometry.
+ * restores that signal without re-implementing the avatar — the
+ * resolved colour stays in the markup as an inline custom property
+ * and this rule owns only the geometry.
  *
  * `--tg-status-ring` is written by `statusRingColor()`
  * (`lib/agentAvatar.ts`): the package's `ringColor` for a status it
@@ -1157,20 +1077,6 @@
  * drawn a circular ring around a square avatar.
  */
 .tg-agent-tile { display: inline-flex; box-shadow: 0 0 0 2px var(--tg-status-ring, transparent); }
-
-/**
- * (removed in v0.1.x — Tools section was dropped from the compact
- *  detail-panel header. The host's AgentCard already carries the
- *  tool list, so the plugin no longer duplicates it. The CSS
- *  rules for `.tg-tool-tile` were deleted alongside the markup;
- *  if a future variant needs them, restore from git history.)
- *
- * The Hierarchy chain's `.tg-hierarchy-link` pill rules went the
- * same way, deleted with the section itself: the chain walked
- * inbound edges upward as though the graph were a spawn tree, but
- * an edge only records that one agent invoked another, and with no
- * agent parented to a second it rendered nothing but its "no parent
- * in this team" line.) */
 
 .tg-agent-panel { position: sticky; top: 16px; max-height: calc(100vh - 32px); display: flex; flex-direction: column; }
 .tg-agent-panel-body { overflow-y: auto; }
@@ -1191,14 +1097,10 @@
  * panel. Pills wrap when there are many principals so the toolbar
  * never overflows horizontally.
  *
- * These three rules are the toolbar, not the sidebar, and are outside
- * the sidebar pass's stated scope — but they had the same
- * `var(--token)`-without-`hsl()` bug as the sidebar rows, so a
- * pill's hover background and label colour were both silently
- * dropped. They were fixed for consistency rather than left visibly
- * broken next to a sidebar that now works; `.tg-zoom-btn` at the
- * bottom of this file carried the identical defect and is now fixed
- * too. `scripts/smoke.js` fails the build if either form comes back.
+ * These rules wrap the host tokens in `hsl()` for the same reason the
+ * sidebar rows do: a bare `var(--token)` is not a colour and the
+ * declaration is dropped at computed-value time.
+ * `scripts/smoke.js` fails the build if either form comes back.
  */
 .tg-pill {
     display: inline-flex; align-items: center; gap: 6px;
@@ -1239,33 +1141,22 @@
  * All four declarations were the bare form and all four were
  * invalid at computed-value time, which is silent: no build error, no
  * failing test, and a control that still *looks* like a control.
- * Measured in a headless browser with the host's real tokens loaded
- * (`--muted-foreground: 240 4% 38%`, `--muted: 240 4.8% 95.9%`,
- * `--border: 240 5.9% 90%`), light theme, before → after:
+ * Measured in a headless browser with the host's real tokens loaded,
+ * light theme, before → after:
  *
  *   icon `color`      rgb(9, 9, 11)     → rgb(93, 93, 101)
  *   icon `stroke`     rgb(9, 9, 11)     → rgb(93, 93, 101)
  *   `:hover` fill     rgba(0, 0, 0, 0)  → rgb(244, 244, 245)
  *   divider `border`  0px none          → 1px solid rgb(228, 228, 231)
  *
- * Dark, same four readings: `rgb(9, 9, 11)` → `rgb(161, 161, 170)`
- * (`--muted-foreground` is `240 5% 64.9%`), `rgba(0, 0, 0, 0)` →
- * `rgb(39, 39, 42)` (`--muted` is `240 3.7% 15.9%`), and `0px none` →
- * `1px solid rgb(39, 39, 42)` (`--border`). Nothing about either set
- * looks like an error on its own, which is the whole problem: a colour
- * that resolves is indistinguishable from a colour that fell back to
- * `inherit`.
- *
  * The icon colour was the one that did not look broken: `color` fell
  * back to the *inherited* value, so the button rendered in the page's
- * text colour — a valid colour, just not the quiet muted one, so the
- * three glyphs shouted at the same weight as the panel's headings.
- * The hover fill went to `transparent`, i.e. there was no hover
- * affordance at all. The divider is the interesting one: because
+ * text colour — a valid colour, just not the quiet muted one. The
+ * hover fill went to `transparent`, i.e. there was no hover affordance
+ * at all. The divider is the interesting one: because
  * `border-top: 1px solid var(--border)` is a *shorthand*, the whole
  * declaration was dropped rather than just its colour, so the stack
- * read as three floating buttons with no separation and the muted
- * fill on hover bleeding straight through the seam.
+ * read as three floating buttons with no separation.
  *
  * `hsl(var(--token))`, matching every other rule in this file — and
  * enforced now: `scripts/smoke.js` walks the built stylesheet and
@@ -1280,19 +1171,18 @@
 
 /**
  * The card surface — the plugin's marker for "this element is a
- * surface", and the reason `surface-card` was on five elements in the
- * SFCs while being defined nowhere.
+ * surface", and the reason `surface-card` was on elements in the SFCs
+ * while being defined nowhere.
  *
  * **Why a class and not just `@theme`.** The `@theme` block already
  * carries `--color-card`, so the `bg-card` utility in the templates
- * is live and does the job on four of the five elements. This rule
- * exists for the fifth: the zoom stack in `TeamGraphCanvas.vue:306`
- * is the one `surface-card` with no `bg-card` beside it, and with
- * both classes inert it was a border and a `shadow-sm` around
- * nothing — the three buttons sat directly on the canvas card. Rather
- * than patch that one template and leave a class named
- * `surface-card` undefined (i.e. permanently free to be inert again),
- * the name is given the meaning it always implied.
+ * is live and does the job on most of those elements. This rule exists
+ * for the one that has no `bg-card` beside it — the zoom stack in
+ * `TeamGraphCanvas.vue` — where both classes inert left a border and a
+ * `shadow-sm` around nothing, so the three buttons sat directly on the
+ * canvas card. Rather than patch that one template and leave a class
+ * named `surface-card` undefined (i.e. permanently free to be inert
+ * again), the name is given the meaning it always implied.
  *
  * **`hsl(var(--background))`, not `var(--color-card)`.** Same colour,
  * one fewer indirection — and the indirection is load-bearing risk,
@@ -1300,15 +1190,12 @@
  * consumes, so `--color-card` is emitted only while some template
  * still says `bg-card`. A hand-written rule leaning on it would go
  * transparent the moment the last one did, which is the same silent
- * failure one step further away. (Verified in the built sheet: of the
- * 15 `--color-*` declarations in this `@theme`, only the 6 whose
- * utilities appear in a template are emitted.) `smoke.js` separately
- * asserts that `--color-card` *is* emitted, so the utility path is
- * covered too.
+ * failure one step further away. `smoke.js` separately asserts that
+ * `--color-card` *is* emitted, so the utility path is covered too.
  *
  * No shadow and no border here: every call site already carries
  * `border border-border` plus a radius, which is the host's own card
- * recipe (`PluginAppPage.vue:165`). Adding elevation would be a
- * design change the host does not make.
+ * recipe (`PluginAppPage.vue`). Adding elevation would be a design
+ * change the host does not make.
  */
 .surface-card { background-color: hsl(var(--background)); }

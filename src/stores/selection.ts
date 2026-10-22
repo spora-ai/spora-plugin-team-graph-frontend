@@ -5,9 +5,10 @@
  * a node sets it, clicking the same node again clears it, clicking
  * the empty canvas clears it. The Pinia store is the canonical
  * source of truth — `TeamGraphCanvas.vue` reads `selectedId` to
- * toggle CSS classes on the rendered Mermaid SVG and
- * `AgentDetailPanel.vue` reads the same `selectedId` to decide
- * whether to render.
+ * decide which node cards get `is-selected` / `is-adjacent` /
+ * `is-dimmed`, `useMermaidRender.ts` reads it to tag the SVG's edge
+ * paths `out` / `in` / `dim`, and `AgentDetailPanel.vue` reads the
+ * same `selectedId` to decide whether to render.
  *
  * Composition store (not options store) because the rest of the
  * plugin uses composition-style refs; mixing the two styles in one

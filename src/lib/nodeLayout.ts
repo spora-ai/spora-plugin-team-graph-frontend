@@ -23,11 +23,9 @@
  * because the card is a sibling of the SVG inside the element `usePanZoom`
  * transforms, so both layers move together.
  *
- * **Why the cards cannot overlap.** dagre's `sep()` guarantees
- * `gap >= nodesep` between adjacent boxes in a rank and `positionY()`
- * guarantees `gap >= ranksep` between ranks, so sizing `nodeSpacing` /
- * `rankSpacing` at or above the card's footprint is a proof, not a hope —
- * see `MIN_NODE_SPACING` / `MIN_RANK_SPACING` in
+ * **Why the cards cannot overlap.** dagre's spacing guarantees are minimums,
+ * so sizing `nodeSpacing` / `rankSpacing` at or above the card's footprint is
+ * a proof, not a hope — see `MIN_NODE_SPACING` / `MIN_RANK_SPACING` in
  * `composables/useMermaidRender.ts`.
  */
 

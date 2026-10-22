@@ -1,11 +1,10 @@
 /**
- * Map `AgentStatus` (wire enum, 11 values) to the Mermaid `classDef`
- * name used in `buildMermaidSource()`. Mermaid has 6 slots; we
- * collapse the wire enum onto those slots, mirroring the other
- * prototypes so the colour palette stays consistent across plugins.
+ * Map a wire status onto one of six status slugs: `running`, `pending`,
+ * `awaiting`, `failed`, `aborted`, `completed`.
  *
- * Output slugs: `running`, `pending`, `awaiting`, `failed`,
- * `aborted`, `completed`.
+ * The slugs are the plugin's own — `style.css` defines one
+ * `tg-status-<slug>` rule per slug, and the prefix keeps them from
+ * colliding with the host's `.status-*` utilities.
  */
 import { t } from '../i18n'
 import type { WireStatus } from '../types'
@@ -36,19 +35,16 @@ export function statusSlug(status: WireStatus): string {
 }
 
 /**
- * CSS class name for the status pill rendered inside each Mermaid
- * node's HTML label. The class definitions live in `style.css`;
- * they share the prefix `tg-status-` so they don't collide with
- * the host's `.status-*` Tailwind utilities.
+ * CSS class name for the status pill. The class definitions live in
+ * `style.css`.
  */
 export function statusPillClass(status: WireStatus): string {
     return `tg-status-${statusSlug(status)}`
 }
 
 /**
- * Human-readable label for the panel sub-header. Mirrors the
- * `STATUS_LABEL` map in Prototype E so the prototype and the
- * production plugin show the same text.
+ * Human-readable label for the panel sub-header. Mirrors the `STATUS_LABEL`
+ * map in `spora-workspace/prototypes/prototype-e-mermaid.html`.
  *
  * The labels are operator-facing copy, so they go through the
  * catalogue — the panel, the node cards and the legend all read the
@@ -98,7 +94,8 @@ export function statusLabel(status: WireStatus): string {
 
 /**
  * Background colour for the panel's avatar / pill dots. Mirrors the
- * `STATUS_PILL_BG` map in Prototype E.
+ * `STATUS_PILL_BG` map in
+ * `spora-workspace/prototypes/prototype-e-mermaid.html`.
  *
  * `ABORTED` uses fuchsia-500 instead of the original purple (#a855f7):
  * the host's app accent is violet, so two near-blue swatches on the

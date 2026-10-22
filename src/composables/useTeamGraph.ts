@@ -1,12 +1,11 @@
 /**
  * Fetch + polling for a principal's team graph.
  *
- * **Polling cadence is 30 s** — Mercure live updates are deferred
- * to v2 (see plan "Realtime updates?"). The composable exposes
- * `refetch()` so the toolbar's "Refresh" button can fire an
- * out-of-band fetch without waiting for the next tick, and
- * `lastUpdatedAt` so the UI can surface a "X seconds ago"
- * freshness indicator.
+ * **Polling cadence is 30 s** — Mercure live updates are deferred to v2
+ * (see `spora-workspace/plans/spora-plugin-team-graph.md`). The composable
+ * exposes `refetch()` so the toolbar's "Refresh" button can fire an
+ * out-of-band fetch without waiting for the next tick, and `lastUpdatedAt`
+ * so the UI can surface a "X seconds ago" freshness indicator.
  *
  * **Payload dedup.** Every poll that returns the same nodes +
  * edges + principal as the current state commits nothing — the
@@ -16,16 +15,11 @@
  * the canvas flashes and resets my zoom" complaint without
  * sacrificing freshness: when something *does* change (a new
  * agent's status, a freshly-spawned edge), the new payload
- * commits, the SVG re-renders, and the canvas's pan/zoom is
- * preserved by the composable's transform snapshot.
+ * commits, the SVG re-renders, and the canvas's pan/zoom survives
+ * because the transform on the content layer is never touched.
  *
- * Returns:
- *   - `graph`         : the most recent `GraphPayload` (null until first load)
- *   - `loading`       : true while a fetch is in flight
- *   - `error`         : last fetch error message (null when clean)
- *   - `refetch()`     : force a re-fetch now (skips the dedup)
- *   - `lastUpdatedAt` : ms timestamp of the last commit (drives the
- *                       freshness indicator in the toolbar)
+ * The dedup applies to `refetch()` too — it forces an immediate fetch,
+ * not an unconditional commit.
  */
 import { onBeforeUnmount, ref, watch, type Ref } from 'vue'
 import { fetchGraph } from '../api/teamGraph'
@@ -67,11 +61,10 @@ export function useTeamGraph(principalId: Ref<number | null>): UseTeamGraph {
         try {
             const payload = await fetchGraph(id)
             if (token !== requestToken) return
-            /* Dedup against the current payload. Polling at 30 s
-             * means ~95% of responses will be byte-identical to
-             * the previous one; committing the same data would
-             * cascade into a no-op Mermaid re-render + a
-             * pan/zoom reset. */
+            /* Dedup against the current payload. Polling at 30 s means
+             * most responses are identical to the previous one;
+             * committing the same data would cascade into a no-op
+             * Mermaid re-render + a pan/zoom reset. */
             if (!payloadEquals(graph.value, payload)) {
                 graph.value = payload
                 lastUpdatedAt.value = Date.now()

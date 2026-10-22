@@ -40,9 +40,7 @@
  * drawn with the path's end vertex at the marker's `refX`, so the visible tip
  * is `ARROWHEAD_OVERSHOOT` units further along the path — *inside* the opaque
  * `button.tg-node-card`, which then clips it and reads as a cut-off
- * arrowhead. The endpoint is therefore stopped short by exactly that
- * overshoot, along the direction the marker is drawn, so the **tip** lands on
- * the border.
+ * arrowhead. See `ARROWHEAD_OVERSHOOT` below for the inset.
  */
 
 export interface Point {
@@ -381,11 +379,6 @@ function reflect(a: Point, b: Point): Point {
     return { x: 2 * a.x - b.x, y: 2 * a.y - b.y }
 }
 
-// Everything below is the d3 `curveBundle.basis` codec — the shape
-// `useMermaidRender` ships, and the whole point of this module. See the file
-// header for why re-running d3's emission is the only way to relocate an
-// endpoint without changing the curve's shape.
-
 /**
  * How far a decoded `q` and a re-emitted path may disagree before the decode is
  * rejected as "this is not a bundle basis after all".
@@ -522,28 +515,6 @@ function emitBundleBasis(q: Point[]): Point[] {
 }
 
 /**
- * Move the path's start point onto `newStart` and its end point onto
- * `newEnd` by rigidly translating the **run** of geometry each endpoint is
- * attached to.
- *
- * **The fallback, not the main path** — `reanchorEdgePath` only comes here for
- * a `d` `decodeBundleBasis` declines. On the shipped `curveBasis` the run is
- * the wrong instrument (see the file header).
- *
- * **Why a run and not just a handle.** A bézier's tangent at an end point is
- * the vector to that end's control point, so moving an endpoint alone snaps
- * the curve to a new direction where it meets the card. Dragging the
- * neighbouring vertex *too* lets the run slide along the line it was already
- * on, invisible on a straight stretch. Every join inside a run keeps its
- * angle, and so does every join between a run and the untouched middle, so the
- * middle of the path is byte-for-byte Mermaid's own output.
- *
- * **Runs are accumulated before they are applied** because a lone `S`/`Q`
- * repetition has one control point governing both of its ends, and if both
- * runs reach it, it must receive both deltas.
- */
-
-/**
  * How far the run at the **head** of the path reaches.
  *
  * Measured **positionally** along the path's own direction of travel: the run
@@ -677,6 +648,27 @@ function clampMovedHandles(points: PathPoint[], moved: PathPoint[], deltas: Poin
     }
 }
 
+/**
+ * Move the path's start point onto `newStart` and its end point onto
+ * `newEnd` by rigidly translating the **run** of geometry each endpoint is
+ * attached to.
+ *
+ * **The fallback, not the main path** — `reanchorEdgePath` only comes here for
+ * a `d` `decodeBundleBasis` declines. On the shipped `curveBasis` the run is
+ * the wrong instrument (see the file header).
+ *
+ * **Why a run and not just a handle.** A bézier's tangent at an end point is
+ * the vector to that end's control point, so moving an endpoint alone snaps
+ * the curve to a new direction where it meets the card. Dragging the
+ * neighbouring vertex *too* lets the run slide along the line it was already
+ * on, invisible on a straight stretch. Every join inside a run keeps its
+ * angle, and so does every join between a run and the untouched middle, so the
+ * middle of the path is byte-for-byte Mermaid's own output.
+ *
+ * **Runs are accumulated before they are applied** because a lone `S`/`Q`
+ * repetition has one control point governing both of its ends, and if both
+ * runs reach it, it must receive both deltas.
+ */
 function anchorEnds(
     segments: Segment[],
     newStart: Point,
