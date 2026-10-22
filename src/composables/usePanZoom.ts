@@ -1,9 +1,9 @@
 /**
  * Pan + zoom driver for the canvas content layer.
  *
- * The SVG Mermaid emits sits inside `<div ref="canvas-content">`
+ * The SVG Mermaid emits sits inside `<div ref="canvasContent">`
  * which we transform with `translate(x, y) scale(k)`. The viewport
- * `<div ref="canvas-wrap">` catches wheel (zoom around cursor) and
+ * `<div ref="canvasWrap">` catches wheel (zoom around cursor) and
  * pointer events (drag = pan, click = deselect).
  *
  * Selection is *not* handled here: the Mermaid `g.node` boxes are grown
@@ -18,9 +18,8 @@
  * **`fit()` scales up as well as down.** The SVG is sized from its own
  * content (`viewBox` + matching `width`/`height`, see
  * `composables/useMermaidRender.ts`), so a small graph is a small
- * element and used to sit unscaled in the middle of the canvas. The
- * scale is now whatever makes the diagram fill the viewport on its
- * tighter axis, capped at `FIT_MAX_SCALE` so a two-node graph is not
+ * element. The scale is whatever makes the diagram fill the viewport on
+ * its tighter axis, capped at `FIT_MAX_SCALE` so a two-node graph is not
  * blown up to fill a 700 px canvas.
  *
  * **A viewport change re-fits unless the operator has taken over.**
@@ -86,16 +85,14 @@ const FIT_MARGIN = 16
 /**
  * How far `fit()` may **enlarge** a diagram.
  *
- * `fit()` has no upper cap of its own any more: a graph whose natural
- * size is smaller than the viewport used to be pinned at `scale(1)`,
- * which left a small diagram marooned in the middle of a large empty
- * canvas (measured on the 4-node dev fixture: a 666 × 362 diagram in
- * a 764 × 620 viewport stayed at 100 % and wasted 219 px of height).
- * Letting `fit()` scale up fills the space, but a two-node graph is
- * only 280 × 116 px and would balloon to ~2.7×, so the enlargement is
- * capped here instead. `MIN_SCALE` / `MAX_SCALE` are deliberately not
- * applied to the lower end: fitting a 100-node principal *has* to go
- * below 0.2, and clamping it there would stop `fit()` from fitting.
+ * `fit()` has no upper cap of its own: a graph whose natural size is
+ * smaller than the viewport used to be pinned at `scale(1)`, which left a
+ * small diagram marooned in the middle of a large empty canvas. Letting
+ * `fit()` scale up fills the space, but a two-node graph is only
+ * 280 × 116 px and would balloon to ~2.7×, so the enlargement is capped
+ * here instead. `MIN_SCALE` / `MAX_SCALE` are deliberately not applied to
+ * the lower end: fitting a 100-node principal *has* to go below 0.2, and
+ * clamping it there would stop `fit()` from fitting.
  */
 const FIT_MAX_SCALE = 1.5
 

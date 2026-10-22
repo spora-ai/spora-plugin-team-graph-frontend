@@ -378,19 +378,16 @@ describe('the wobble, as recorded browser data', () => {
          * and change only its *length*, and what went wrong is a
          * direction.
          *
-         * 14 of the 15 scored 2 visible reversals and one scored 4, with
-         * 0.49°–3.81° of accumulated direction change. Those are small
-         * numbers, and that is the point: the defect was only ever "a
-         * small wobble", which is why a turn-angle assertion with a
-         * half-degree allowance could not see it.
+         * Those reversals are small — a fraction of a degree each — and
+         * that is the point: the defect was only ever "a small wobble",
+         * which is why a turn-angle assertion with a half-degree
+         * allowance could not see it.
          *
-         * **Re-measured on the 63 px card** (the 88.2 px figures were 18
-         * unwobbled, 14 scoring 2 and one scoring 4, over the same five
-         * graphs): 12 unwobbled, 6 scoring 2 and 15 scoring 4, over six
-         * graphs — `wide-fan` joins the list. The counts move because the
-         * endpoints have less to travel, so the re-aimed run is shorter
-         * and the control polygon it drags with it folds more often; the
-         * mechanism is unchanged and the assertion is unchanged with it.
+         * **The counts move with the card size.** These are the 63 px
+         * card's numbers: the endpoints have less to travel, so the
+         * re-aimed run is shorter and the control polygon it drags with
+         * it folds more often. The mechanism is unchanged and the
+         * assertion is unchanged with it.
          */
         const basis = CORPUS_EDGES.filter((e) => e.curve === 'basis')
         expect(basis.filter((e) => e.measured.reversalsRuns === 0), 'unwobbled at 5f24fcd').toHaveLength(12)

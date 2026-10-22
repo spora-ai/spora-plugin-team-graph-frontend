@@ -18,10 +18,12 @@
  * `statusLabel()` returns for these six statuses — so the legend reads
  * the same in every language as the pills it explains.
  *
- * The component is deliberately NOT named `Legend`: Sonar's web
- * analyser matches Vue tag names case-insensitively against the HTML
- * `<legend>` element and files an accessibility finding (Web:S8732)
- * for a `<legend />` that sits outside any `<fieldset>`.
+ * **The tag must not contain "legend".** Sonar's web analyser
+ * matches Vue tag names case-insensitively against the HTML `<legend>`
+ * element and files an accessibility finding (Web:S8732) for a
+ * `<legend />` that sits outside any `<fieldset>`. The file is
+ * `StatusLegend.vue`, but `TeamGraphPage.vue` imports it as `StatusKey`
+ * so the tag in the template is `<StatusKey />`.
  */
 import { useI18n } from 'vue-i18n'
 import { STATUS_PALETTE } from '@spora-ai/components/avatar'

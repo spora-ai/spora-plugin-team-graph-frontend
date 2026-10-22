@@ -15,29 +15,22 @@
  * carry `max-w-7xl mx-auto`, which capped *everything* — the graph
  * canvas included — at 80 rem and centred it, so a 1920 px monitor
  * wasted both sides of the diagram. The cap now sits on the `header`
- * only, which is the one region that genuinely wants one:
- *
- *   - the toolbar's own text is short and left-aligned (an `h1`, a
- *     one-line summary, a wrapping row of principal pills, a wrapping
- *     legend of status chips), so without a cap `justify-between`
- *     would fling the Refresh button 900 px away from the title it
- *     belongs with;
- *   - the legend and pill rows are `flex-wrap` chip rows that gain
- *     nothing from extra width;
- *   - the only prose on the page is the agent description, and it lives
- *     in the detail panel — a *fixed* 340 px column, which is why it
- *     was never affected by the page cap and still isn't.
+ * only, which is the one region that genuinely wants one: the toolbar's
+ * own text is short and left-aligned, so without a cap `justify-between`
+ * would fling the Refresh button 900 px away from the title it belongs
+ * with, and the legend and pill rows are `flex-wrap` chip rows that gain
+ * nothing from extra width. The only prose on the page is the agent
+ * description, and it lives in the detail panel — a *fixed* 340 px
+ * column, which is why it was never affected by the page cap and still
+ * isn't.
  *
  * Below the header, the `1fr` column takes every pixel the host slot
- * offers, so the graph gets the width back. Measured in a headless
- * browser at a 1920 px viewport: page 1162 px → 1920 px, canvas
- * 766 px → 1516 px, and the diagram's fitted scale 1.12 → 1.5 (the
- * `FIT_MAX_SCALE` cap) — see `composables/usePanZoom.ts → reflow()`,
- * which re-fits when the canvas box changes.
+ * offers, so the graph gets the width back — and the canvas growing is
+ * exactly what `composables/usePanZoom.ts → reflow()` re-fits against.
  *
  * **`box-border` is load-bearing, not decoration.** This plugin
- * imports Tailwind without `preflight` (see `style.css` note 1 — the
- * host owns the reset), so nothing in the subtree sets
+ * imports Tailwind without `preflight` (see the `style.css` header —
+ * the host owns the reset), so nothing in the subtree sets
  * `box-sizing: border-box` and the default is `content-box`. `w-full`
  * is then `width: 100%` of the parent *plus* the horizontal padding,
  * which is 42 px at `lg:p-6` (1.5 rem × the 14 px root this
@@ -45,11 +38,7 @@
  * capped the *content* box, so the padding fitted inside the cap and
  * nothing overflowed; with the cap gone the page grew 42 px wider
  * than the viewport and produced a horizontal scrollbar at every
- * width. Measured: `documentElement.scrollWidth` 1962 vs
- * `clientWidth` 1920 at a 1920 px viewport, 928 vs 900 at 900 px (the
- * latter pre-existing — it was only the wide widths the cap had been
- * hiding). `box-border` folds the padding inside the 100 % and both
- * are 0 now.
+ * width. `box-border` folds the padding inside the 100 %.
  *
  * One graph per principal. The principal pill row in the toolbar
  * lists the user's own user-principal (always rendered as "My
@@ -59,9 +48,9 @@
  * graph.
  *
  * The right column is `AgentDetailPanel` — always rendered as a
- * sidebar at every breakpoint (per user feedback: "details open in
- * an overlay instead of the sidebar" → never an overlay). It
- * shows the empty-state placeholder when no agent is selected.
+ * sidebar at every breakpoint (the modal variant was dropped: details
+ * belong in the sidebar, not in an overlay). It shows the empty-state
+ * placeholder when no agent is selected.
  *
  * Switching principals clears the agent selection because agent
  * ids are principal-local — an id from the previous principal is
@@ -87,7 +76,7 @@ import AgentDetailPanel from './AgentDetailPanel.vue'
  * matches a Vue component's tag name case-insensitively against the
  * HTML `<legend>` element and files Web:S8732 ("move this <legend>
  * to be a direct child of <fieldset>") for the self-closing
- * `<StatusLegend />` at the bottom of this template — even though the
+ * `<StatusKey />` at the bottom of this template — even though the
  * component renders a <span> row and is not a legend at all. The
  * local binding name is the only part of the identifier the analyser
  * sees, so it has to avoid the substring.
@@ -116,9 +105,8 @@ const shouldFit = ref(false)
  * does not trigger any network call.
  *
  * The duration comes from `lib/relativeTime.ts`, the same renderer the
- * detail panel's "last seen" reads. The page used to carry a ladder of
- * its own, which phrased the same duration differently from the panel's
- * — two names for one fact on one screen.
+ * detail panel's "last seen" reads — one renderer, so the two places
+ * that show a duration phrase it the same way.
  */
 const now = ref<number>(Date.now())
 let nowTimer: ReturnType<typeof setInterval> | null = null
@@ -164,22 +152,10 @@ const stats = computed<GraphStats>(() => {
  * on every load; requiring a non-null payload with no nodes is what
  * keeps "still loading" and "nothing to show" apart.
  *
- * The note itself is rendered by `TeamGraphCanvas` (see
+ * The empty-state *note* is rendered by `TeamGraphCanvas` (see
  * `graphIsEmpty` there), not here — the canvas owns the pan/zoom
- * surface, the zoom stack and the footer hint that the empty state
- * has to suppress, and unmounting the canvas to swap in a card was
- * measured to strand the *next* graph: a canvas that mounts with a
- * non-null `graph` prop never runs Mermaid, because
- * `useMermaidRender`'s immediate watcher fires during `setup()` when
- * `hostRef` is still null.
- *
- * That trap is closed at the source now — the composable re-renders
- * when its host binds, so *any* remount paints, which is what the
- * error card below relies on when a retry brings the canvas back. The
- * canvas still stays mounted for the empty state, though: the pan/zoom
- * view, the zoom stack and the host ref the renderer measures are
- * worth keeping alive across the transition, and the note can gate
- * them itself. This flag is only here to drive the selection clear
+ * surface, the zoom stack and the footer hint the empty state has to
+ * suppress. This flag is only here to drive the selection clear
  * below.
  */
 const graphIsEmpty = computed<boolean>(() => graph.value !== null && graph.value.nodes.length === 0)

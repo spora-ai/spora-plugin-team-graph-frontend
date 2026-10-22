@@ -248,7 +248,7 @@ describe('style.css — host tokens are always wrapped in a colour function', ()
 
 describe('style.css — the cards have a real surface', () => {
     it('maps the card colour to the host\'s own card mapping', () => {
-        // `spora-frontend/src/style.css:117` reads
+        // `spora-frontend/src/style.css` reads
         // `--color-card: hsl(var(--background))`: in this design system a
         // card *is* the page background, separated by `border-border` and
         // a radius. Copied rather than invented, so the plugin can never

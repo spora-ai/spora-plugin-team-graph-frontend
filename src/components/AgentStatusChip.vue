@@ -2,16 +2,12 @@
 /**
  * Status pill for the agent-detail header.
  *
- * **Why a separate component?** The detail panel's header currently
- * re-renders as a unit when `selectedNode` changes — which happens
- * on every 30-second poll even when only the agent's status
- * flipped (e.g. RUNNING → COMPLETED). That cascades into a layout
- * shift on the name + ID line, which is unrelated to the status.
- *
- * Extracting the chip into its own component means Vue tracks the
- * `:status` prop reactively: when the parent re-evaluates, only
- * this child re-renders. The header's static text (name + #ID)
- * stays untouched.
+ * **Why a separate component?** The detail panel's header re-renders as a
+ * unit when `selectedNode` changes — which happens on every 30-second poll
+ * even when only the agent's status flipped (e.g. RUNNING → COMPLETED).
+ * Keeping the pill in its own component means Vue can patch just the pill
+ * when only `:status` changed, and leave the header's static name line
+ * alone.
  */
 import { statusPillClass, statusLabel } from '../lib/nodeStatus'
 import type { WireStatus } from '../types'

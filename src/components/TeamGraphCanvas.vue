@@ -21,70 +21,47 @@
  * reason the card layer is HTML and not a `<foreignObject>`.
  *
  * Card positions come from `useMermaidRender`'s `positions` map,
- * which is recomputed from scratch on every successful Mermaid
- * render. Cards whose id has no measured position are not rendered
- * at all, so a re-render (poll, principal switch, dedup) can never
- * leave a card behind at a stale coordinate.
+ * recomputed from scratch on every successful Mermaid render. Cards
+ * whose id has no measured position are not rendered at all, so a
+ * re-render can never leave a card behind at a stale coordinate.
  *
- * **View reset semantics.**
+ * **View reset semantics.** The canvas fits to viewport when the
+ * principal changes (the new graph has different dimensions, so the
+ * operator's old zoom + pan would frame the wrong content), on the
+ * first render, and when the Refresh button or `shouldFit` prop fires.
+ * Data refreshes (the 30 s polling in `useTeamGraph`) do **not** fit:
+ * the operator's zoom + pan survive, and the dedup means identical
+ * payloads don't re-render anyway. Because the cards live in the
+ * transformed content layer, "preserve the view" also preserves the
+ * card positions for free.
  *
- * The canvas fits to viewport when ANY of these change:
+ * Implementation: a single `pendingFit` ref is the contract. Both the
+ * principal-change watcher and the shouldFit watcher set it, and the
+ * fit itself runs from two paths — `useMermaidRender`'s `onRender`
+ * callback, which fires after the new SVG has been committed with
+ * final dimensions, and a double rAF fallback in `scheduleFit()`, which
+ * covers the dedup case (Refresh with identical data → no re-render →
+ * `onRender` never fires). Whichever fires first clears the flag and
+ * calls `fit()`; the other sees the flag cleared and no-ops.
  *
- *   1. The principal changes (`props.graph.principal.id` differs
- *      from the previously-rendered one) — the new graph has
- *      different dimensions, so the operator's old zoom + pan
- *      would frame the wrong content.
- *   2. The first render (initial mount) — nothing to preserve.
- *   3. The Refresh button or `shouldFit` prop fires — explicit
- *      "reset view to fit" request.
- *
- * Data refreshes (the 30 s polling in `useTeamGraph`) DO NOT fit:
- * the operator's zoom + pan survive, and `useTeamGraph`'s dedup
- * means identical payloads don't re-render anyway. Because the cards
- * live in the transformed content layer, "preserve the view" also
- * preserves the card positions for free.
- *
- * Implementation: a single `pendingFit` ref is the contract. Both
- * the principal-change watcher and the shouldFit watcher set it to
- * true. The fit itself runs from two paths:
- *
- *   - `useMermaidRender`'s `onRender` callback fires AFTER the new
- *     SVG has been committed to the DOM with final dimensions.
- *     This is the path the principal-change case takes.
- *   - A double rAF fallback in `scheduleFit()` handles the dedup
- *     case (Refresh with identical data → no re-render → onRender
- *     doesn't fire → rAF fallback runs `fit()` directly).
- *
- * Whichever path fires first clears the flag + calls `fit()`; the
- * other sees the flag cleared and no-ops.
- *
- * **The empty state lives here, not in the page.**
- *
- * A principal with no agents returns a well-formed payload whose
- * `nodes` array is empty. Rendering that meant a 620 px blank card
- * with the footer still saying "Drag empty canvas to pan · scroll to
- * zoom · click any node to inspect" — instructions for a diagram
- * with nothing in it.
+ * **The empty state lives here, not in the page.** A principal with no
+ * agents returns a well-formed payload whose `nodes` array is empty,
+ * and rendering that meant a 620 px blank card with the footer still
+ * telling the operator to "Drag empty canvas to pan · scroll to zoom ·
+ * click any node to inspect".
  *
  * The obvious fix is for the page to swap the canvas for a card
  * (`v-if` in `TeamGraphPage.vue`), and that was the first thing
  * tried. It is wrong, and the browser is what said so: the canvas
  * then *unmounts* for the empty team, and when the operator switches
- * back it **remounts with a non-null `graph` prop**. Nothing renders
- * it. `useMermaidRender`'s watcher is `immediate: true`, but it runs
- * during `setup()` — before `hostRef` has bound — and `reRender()`
- * returns early on a null host, so the immediate pass is a permanent
- * no-op and nothing else fires because the prop never changes again.
- * Measured after switching empty → populated and waiting 4 s: 0
- * `<svg>`, 0 edge paths, 0 node cards, no transform on the content
- * layer. A blank canvas with the misleading footer, reached by the
- * ordinary act of clicking back to your own team.
+ * back it **remounts with a non-null `graph` prop** — and nothing
+ * renders it (see the `watch(hostRef)` note in `useMermaidRender.ts`).
  *
  * So the canvas stays mounted across the transition and decides for
  * itself: `graphIsEmpty` below gates the zoom stack and the footer
- * out, and the note takes their place. That also makes the footer
- * suppression total by construction — there is no path where the
- * hint is on screen and the note is not.
+ * out, and the note takes their place. That makes the footer
+ * suppression total by construction — there is no path where the hint
+ * is on screen and the note is not.
  *
  * **No icon, mirroring the `tg-detail-placeholder` aside card.**
  * `GraphErrorFallback` leads with a warning glyph because something
@@ -355,9 +332,7 @@ onMounted(() => {
               - `useMermaidRender` measures the committed SVG with
                 `getBBox()`, and an ancestor with `display: none`
                 makes that return zero — the `bb.width > 0` guard
-                would silently skip the viewBox reset. Keeping the
-                layer visible keeps the geometry path byte-for-byte
-                the one it is today.
+                would silently skip the viewBox reset.
 
             In the empty state it is simply *empty*: the render guard
             in `useMermaidRender` skips a zero-node payload and
@@ -383,8 +358,7 @@ onMounted(() => {
                 layer (see style.css) keeps the gaps between cards
                 clickable for panning; the cards themselves opt back
                 in and are marked `data-tg-no-pan` so a click selects
-                instead of starting a drag — the same trade-off the
-                Mermaid node boxes made before Option C.
+                instead of starting a drag.
             -->
             <div
                 data-testid="tg-node-overlay"

@@ -3,12 +3,11 @@ import { statusSlug, statusPillClass, statusLabel, statusColor } from '../../src
 import type { AgentStatus } from '../../src/types'
 
 /**
- * Status enum → display slug mapping.
+ * Wire status → display slug mapping.
  *
- * The full `AgentStatus` enum (11 values) is collapsed onto the
- * 6-slot Mermaid classDef palette. Every status must produce a
- * slug; a missing branch would surface as the Mermaid fallback
- * (no colour), silently demoting the node.
+ * The full wire enum (11 values) is collapsed onto six slugs. Every
+ * status must produce a slug; a missing branch would fall through to the
+ * neutral `completed` slug, silently demoting the node to a finished one.
  */
 describe('statusSlug', () => {
     const cases: Array<[AgentStatus, string]> = [

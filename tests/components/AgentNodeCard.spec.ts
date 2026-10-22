@@ -10,7 +10,7 @@ import type { GraphNode } from '../../src/types'
  * The card is the visible half of Option C: Mermaid positions the
  * node, Vue paints it. These tests pin the three things that make it
  * a faithful reproduction of
- * `prototype-m-edge-counts.html`:
+ * `spora-workspace/prototypes/compact-node-designs/prototype-m-edge-counts.html`:
  *
  *   1. the shared `@spora-ai/components` primitives are really used
  *      (`AgentAvatar` tile, `Icon` arrows) rather than a hand-rolled

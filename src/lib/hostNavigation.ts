@@ -13,7 +13,8 @@
 
 /**
  * The host's task-chat route as a path prefix; the id is appended with no
- * separator because the host route is `/tasks/:id` (see the module header).
+ * separator because the host route is `/tasks/:id`
+ * (`spora-frontend/src/router/index.ts`).
  *
  * No `/spora/` prefix: the host's SPA base is prepended by vue-router.
  */

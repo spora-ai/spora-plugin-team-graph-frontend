@@ -1,11 +1,10 @@
 /**
  * Wire shape for the team-graph plugin.
  *
- * Mirrors `GET /api/v1/plugins/team-graph/graph`. The status union mirrors
- * the host's `app/Enums/AgentStatus.php`; the frontend is the only surface
- * that collapses five of those cases into fewer class names (see
- * `lib/nodeStatus.ts → statusSlug`), so the wire layer still carries the
- * full enum and the panel can show the precise label.
+ * Mirrors `GET /api/v1/plugins/team-graph/graph`. The wire carries the full
+ * status enum; only the status→class mapping collapses cases (see
+ * `lib/nodeStatus.ts → statusSlug`), so the panel can still show the
+ * precise label.
  */
 
 export type AgentStatus =
@@ -81,9 +80,9 @@ export interface GraphEdge {
     /**
      * Set when the edge comes from the source agent's
      * `agent_tool_overrides.allowed_target_agents` allowlist rather than
-     * from historical tool calls. Every wire edge is `true` today; the flag
-     * is kept so the canvas can tell "configured but never used" from
-     * "configured and firing".
+     * from historical tool calls. Every wire edge is `true` today;
+     * "configured but never used" is carried by `count_24h === 0`, not by
+     * this flag.
      */
     configured: true
     /** 24h invocation count; 0 lets the canvas spot dead configurations. */
@@ -107,10 +106,10 @@ export interface GraphPayload {
 }
 
 /**
- * Agent detail panel — the data the right sidebar / centred modal renders
- * for the selected agent. The active-chats list is fetched lazily from
+ * Agent detail panel — the data the right sidebar renders for the selected
+ * agent. The active-chats list is fetched lazily from
  * `/tasks?agent_id=N&status=…` so the panel stays responsive on a 100-node
- * principal and can be re-opened with the detail already cached.
+ * principal.
  */
 export interface AgentDetailPanel {
     node: GraphNode
