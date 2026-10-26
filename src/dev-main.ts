@@ -83,24 +83,31 @@ function picture(
     }
 }
 
-function node(
-    id: number,
-    name: string,
-    role: string,
-    status: GraphNode['status'],
-    pictureValue: GraphNode['profile_picture'],
-    activeChats: number,
-    recentChats: number,
-): GraphNode {
+/**
+ * An object rather than a parameter list: the call sites read as one row
+ * of the fixture, and bare numbers cannot be checked against the shape they
+ * produce.
+ */
+interface DevNode {
+    id: number
+    name: string
+    role: string
+    status: GraphNode['status']
+    picture: GraphNode['profile_picture']
+    activeChats: number
+    recentChats: number
+}
+
+function node(spec: DevNode): GraphNode {
     return {
-        id,
-        name,
-        role,
+        id: spec.id,
+        name: spec.name,
+        role: spec.role,
         picture_url: null,
-        status,
-        active_chats: activeChats,
-        recent_chats_24h: recentChats,
-        profile_picture: pictureValue,
+        status: spec.status,
+        active_chats: spec.activeChats,
+        recent_chats_24h: spec.recentChats,
+        profile_picture: spec.picture,
     }
 }
 
@@ -115,10 +122,42 @@ function node(
  *    nodes can never reproduce it.
  */
 const DEV_NODES: GraphNode[] = [
-    node(11, 'Spora Core Agent', 'Lead', 'RUNNING', picture('teal', 'assistant', 'v0'), 1, 4),
-    node(12, 'Research Agent', 'Researcher', 'PENDING_APPROVAL', picture('indigo', 'researcher', 'v1'), 0, 2),
-    node(13, 'Writer Agent', 'Writer', 'COMPLETED', picture('green', null, null), 0, 1),
-    node(14, 'Helper Agent', 'Helper', 'AWAITING_SUB_AGENTS', picture('amber', null, null), 1, 3),
+    node({
+        id: 11,
+        name: 'Spora Core Agent',
+        role: 'Lead',
+        status: 'RUNNING',
+        picture: picture('teal', 'assistant', 'v0'),
+        activeChats: 1,
+        recentChats: 4,
+    }),
+    node({
+        id: 12,
+        name: 'Research Agent',
+        role: 'Researcher',
+        status: 'PENDING_APPROVAL',
+        picture: picture('indigo', 'researcher', 'v1'),
+        activeChats: 0,
+        recentChats: 2,
+    }),
+    node({
+        id: 13,
+        name: 'Writer Agent',
+        role: 'Writer',
+        status: 'COMPLETED',
+        picture: picture('green', null, null),
+        activeChats: 0,
+        recentChats: 1,
+    }),
+    node({
+        id: 14,
+        name: 'Helper Agent',
+        role: 'Helper',
+        status: 'AWAITING_SUB_AGENTS',
+        picture: picture('amber', null, null),
+        activeChats: 1,
+        recentChats: 3,
+    }),
 ]
 
 const DEV_EDGES: GraphEdge[] = [
