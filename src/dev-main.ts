@@ -84,11 +84,9 @@ function picture(
 }
 
 /**
- * One dev node, as the fields the stub builds it from.
- *
  * An object rather than a parameter list: the call sites read as one row
- * of the fixture, and a seventh positional argument is a row of bare
- * numbers nobody can check against the shape they produce.
+ * of the fixture, and bare numbers cannot be checked against the shape they
+ * produce.
  */
 interface DevNode {
     id: number
