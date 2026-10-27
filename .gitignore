@@ -27,3 +27,6 @@
 /npm-debug.log*
 
 /tmp/
+
+# Local worktree checkouts
+.wt/
