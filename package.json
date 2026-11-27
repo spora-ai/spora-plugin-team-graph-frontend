@@ -19,7 +19,7 @@
   },
   "dependencies": {
     "@spora-ai/components": "^0.1.1",
-    "mermaid": "^10.9.1",
+    "mermaid": "^12.3.0",
     "pinia": "^2.3.0",
     "vue": "^3.5.0",
     "vue-i18n": "^11.4.16"
